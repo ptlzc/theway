@@ -49,21 +49,8 @@ impl App {
                         continue;
                     }
                     "/new" => {
-                        match crate::ui::daemon_call(
-                            "create_session",
-                            self.client
-                                .create_session_with_metadata(None, None, Default::default()),
-                        )
-                        .await
-                        {
-                            Ok(summary) => {
-                                let id = summary.session_id;
-                                if let Err(e) = self.select_session(id.clone()).await {
-                                    println!("error: select new session failed: {e}");
-                                } else {
-                                    println!("new session {id}");
-                                }
-                            }
+                        match self.create_session_with_configured_defaults().await {
+                            Ok(id) => println!("new session {id}"),
                             Err(e) => println!("error: create session failed: {e}"),
                         }
                         continue;

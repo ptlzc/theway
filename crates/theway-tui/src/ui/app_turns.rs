@@ -218,24 +218,11 @@ impl App {
             // startup `--resume` terminal picker (`resume_picker.rs`) is a
             // different mechanism and stays untouched.
             "/resume" => self.open_resume_picker().await,
-            "/new" => match crate::ui::daemon_call(
-                "create_session",
-                self.client
-                    .create_session_with_metadata(None, None, Default::default()),
-            )
-            .await
-            {
-                Ok(summary) => {
-                    let id = summary.session_id;
-                    // `select_session` updates the client-side session id and
-                    // never returns Err; /new adds the success line on top.
-                    if let Err(e) = self.select_session(id.clone()).await {
-                        self.error_line(format!("select session failed: {e}"));
-                    } else {
-                        self.system_line(format!("new session {id}"));
-                    }
+            "/new" => {
+                match self.create_session_with_configured_defaults().await {
+                    Ok(_) => {}
+                    Err(e) => self.error_line(format!("create session failed: {e}")),
                 }
-                Err(e) => self.error_line(format!("create session failed: {e}")),
             },
             _ => {
                 // Forward to the daemon: it dispatches the full slash registry

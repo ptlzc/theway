@@ -72,13 +72,18 @@ async fn test_app() -> (App, mpsc::UnboundedReceiver<WireCommand>) {
 /// mutate the session table (issue #56). `fresh_attach` mirrors
 /// `AppConfig::fresh_attach` (issue #79): when true, `App::new` leaves the
 /// initial feed empty instead of seeding the previous session's messages.
-async fn test_app_with_sessions(
+/// [`test_app_with_sessions`] with an explicit daemon-config seed. The
+/// returned handle lets tests flip `GetConfig` responses without touching the
+/// gRPC plumbing.
+async fn test_app_with_sessions_and_config(
     seeds: &[&str],
     fresh_attach: bool,
+    seed_config: WireDaemonConfig,
 ) -> (
     App,
     mpsc::UnboundedReceiver<WireCommand>,
     Arc<FakeSessionOps>,
+    Arc<std::sync::RwLock<WireDaemonConfig>>,
 ) {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<WireCommand>();
     let (snapshot_tx, _) = broadcast::channel::<theway_transport::wire::WireStatusUpdate>(16);
@@ -102,7 +107,7 @@ async fn test_app_with_sessions(
             .collect::<HashMap<_, _>>(),
     ));
     let path_context = Arc::new(std::sync::RwLock::new(WirePathContext::default()));
-    let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig::default()));
+    let daemon_config = Arc::new(std::sync::RwLock::new(seed_config));
     let external_ops: Arc<dyn theway_transport::ExternalProtocolOps> =
         Arc::new(theway_transport::CompositeExternalProtocolOps::new(
             Arc::new(ChannelCommandOps::new(command_tx.clone())),
@@ -135,7 +140,7 @@ async fn test_app_with_sessions(
         session_id: Arc::new(std::sync::RwLock::new(current)),
         agent_fwd,
         path_context,
-        daemon_config,
+        daemon_config: daemon_config.clone(),
         tool_ops: Arc::new(theway_transport::UnavailableToolOps),
         storage_ops: Arc::new(theway_transport::UnavailableStorageOps),
         external_ops,
@@ -169,7 +174,20 @@ async fn test_app_with_sessions(
     // tests never depend on the machine's theme file (theme-specific tests
     // set `app.theme` explicitly).
     app.theme = super::theme::Theme::default();
-    (app, command_rx, session_ops)
+    (app, command_rx, session_ops, daemon_config)
+}
+
+async fn test_app_with_sessions(
+    seeds: &[&str],
+    fresh_attach: bool,
+) -> (
+    App,
+    mpsc::UnboundedReceiver<WireCommand>,
+    Arc<FakeSessionOps>,
+) {
+    let (app, rx, ops, _config) =
+        test_app_with_sessions_and_config(seeds, fresh_attach, WireDaemonConfig::default()).await;
+    (app, rx, ops)
 }
 
 /// Drains the fixture's command channel on a background task and answers
@@ -581,6 +599,38 @@ async fn fresh_attach_starts_with_empty_feed() {
         "fresh attach must not show the previous session's feed, got {}",
         app.feed.blocks().len()
     );
+}
+
+#[tokio::test]
+async fn fresh_session_inherits_configured_model_and_thinking_defaults() {
+    use theway_transport::transport::SessionOps;
+
+    let seed = WireDaemonConfig {
+        provider: Some("anthropic".into()),
+        model: Some("claude-x".into()),
+        thinking_level: Some("high".into()),
+        ..Default::default()
+    };
+    let (mut app, rx, ops, _config) =
+        test_app_with_sessions_and_config(&["sess-1"], false, seed).await;
+    app.pending_fresh_attach = true;
+    let (drainer, seen) = drain_commands(rx);
+
+    let id = app.ensure_fresh_session().await.unwrap();
+
+    assert_eq!(app.session_id, id);
+    assert!(ops.list().await.unwrap().iter().any(|s| s.session_id == id));
+    let seen = seen.lock().unwrap().clone();
+    assert!(
+        seen.iter()
+            .any(|label| label == "SetModel(anthropic:claude-x)"),
+        "a new session must inherit the configured default model: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|label| label == "SetThinking(high)"),
+        "a new session must inherit the configured thinking default: {seen:?}"
+    );
+    drainer.abort();
 }
 
 /// Issue #46: an explicit session selection (e.g. `/new`, `/resume`,

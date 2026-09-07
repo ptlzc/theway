@@ -79,28 +79,88 @@ impl App {
         if !self.pending_fresh_attach {
             return Ok(self.session_id.clone());
         }
-        let summary = match crate::ui::daemon_call(
+        let id = self.create_session_with_configured_defaults().await?;
+        Ok(id)
+    }
+
+    /// Create, select, and default-configure a new session in one step.
+    ///
+    /// The daemon's settings view holds the configured default model (from
+    /// `config.toml` or the controller payload). Session creation is storage
+    /// only, so a newly created session would otherwise start model-less even
+    /// when a default is configured. Non-fatal when the default cannot be
+    /// applied: the session still exists and the error is visible in the feed.
+    pub(crate) async fn create_session_with_configured_defaults(&mut self) -> Result<String> {
+        let summary = crate::ui::daemon_call(
             "create_session",
             self.client
                 .create_session_with_metadata(None, None, Default::default()),
         )
-        .await
-        {
-            Ok(summary) => summary,
-            Err(error) => {
-                // Keep the flag armed so the next submit retries the creation
-                // instead of silently writing into the daemon's current
-                // session (issue #97).
-                return Err(error);
-            }
-        };
+        .await?;
         // Clear before select_session (which also clears it); the message
         // right after this call must not re-trigger creation.
         self.pending_fresh_attach = false;
         let id = summary.session_id;
         self.select_session(id.clone()).await?;
+        self.apply_configured_session_defaults(&id).await;
         self.system_line(format!("new session {id}"));
         Ok(id)
+    }
+
+    /// Apply the daemon-configured default model and thinking level to a
+    /// session that has just been created. Failures are feed lines, not
+    /// errors: a session without a default still opens, and the user can pick
+    /// a model interactively.
+    async fn apply_configured_session_defaults(&mut self, session_id: &str) {
+        let config = match crate::ui::daemon_call("get_config", self.client.get_config()).await {
+            Ok(config) => config,
+            Err(error) => {
+                self.error_line(format!("read default model config: {error}"));
+                return;
+            }
+        };
+        if let (Some(provider), Some(model)) = (config.provider.as_deref(), config.model.as_deref())
+        {
+            let spec = format!("{provider}:{model}");
+            match crate::ui::daemon_call(
+                "set_model",
+                self.client.set_model_for_session(session_id, &spec),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.error_line(format!(
+                        "daemon rejected default model {spec} for session {session_id}"
+                    ));
+                }
+                Err(error) => {
+                    self.error_line(format!("set default model on {session_id}: {error}"));
+                }
+            }
+        }
+        if let Some(level) = config
+            .thinking_level
+            .as_deref()
+            .filter(|level| !level.trim().is_empty() && *level != "off")
+        {
+            match crate::ui::daemon_call(
+                "set_thinking",
+                self.client.set_thinking_for_session(session_id, level),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.error_line(format!(
+                        "daemon rejected default thinking {level} for session {session_id}"
+                    ));
+                }
+                Err(error) => {
+                    self.error_line(format!("set default thinking on {session_id}: {error}"));
+                }
+            }
+        }
     }
 
     /// Issue #97: mark the eagerly-created fresh-attach session as the
