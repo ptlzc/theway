@@ -55,7 +55,7 @@ Each node is a fresh subagent `AgentHarness` (in-memory session, `MemorySessionS
 
 | Spec | Tools |
 | --- | --- |
-| `explorer` | read/ls/grep/find/web_fetch/git (read-only + web) |
+| `explorer` | read/ls/grep/find/web_fetch/web_search/git (read-only + web) |
 | `planner` | read/ls/grep/find |
 | `executor-coder` | full coding set (incl. write/edit/bash/shell) |
 | `checker` | read/ls/grep/find/bash/git |
