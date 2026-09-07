@@ -35,6 +35,8 @@ impl App {
         let side_panel_mode = ui_state.panel_mode.unwrap_or(SidePanelMode::Auto);
         let side_panel_position = ui_state.panel_position.unwrap_or_default();
         let graph_position = ui_state.graph_position.unwrap_or_default();
+        let show_hooks = ui_state.show_hooks;
+        let show_runtime = ui_state.show_runtime;
         Self {
             client: config.client,
             connector: config.connector,
@@ -55,6 +57,7 @@ impl App {
             pending_pasted_images: Vec::new(),
             feed,
             connection_log: Vec::new(),
+            restored_notices: Vec::new(),
             panel_status: PanelStatus::from_sidebar(&initial.sidebar),
             model_catalog: initial.model_catalog.clone(),
             model_picker: None,
@@ -97,6 +100,8 @@ impl App {
             dag_tick: 0,
             side_panel_mode,
             side_panel_position,
+            show_hooks,
+            show_runtime,
             panel_menu: None,
             panel_menu_saved: None,
             graph_position,
@@ -182,6 +187,15 @@ impl App {
         }
         self.connection_log.push(text.clone());
         self.system_line(text);
+    }
+
+    /// Connection evidence for a daemon restart that restored our session:
+    /// tracked as a pending notice so the line disappears once the session
+    /// responds normally again (see [`App::maybe_clear_restored_notices`]).
+    pub(super) fn restored_notice_line(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        self.restored_notices.push(text.clone());
+        self.connection_line(text);
     }
 
     pub fn error_line(&mut self, text: impl AsRef<str>) {

@@ -76,7 +76,7 @@ pub(crate) fn set_config_path_for_tests(path: Option<PathBuf>) {
 }
 
 /// Pure base-dir resolution (testable without env access).
-fn resolve_config_base_dir(
+pub(crate) fn resolve_config_base_dir(
     home: Option<&Path>,
     theway_dir: Option<&str>,
     env_home: Option<&str>,
@@ -275,7 +275,7 @@ pub(crate) fn assemble_config_from(
 /// - trigger poll interval and TUI scrollback apply directly;
 /// - base URL, thinking and builtin skills are runtime-applied;
 /// - storage service ownership remains startup-only.
-fn clear_field(patch: &mut WireDaemonConfig, field: &str) {
+pub(crate) fn clear_field(patch: &mut WireDaemonConfig, field: &str) {
     if !patch.clear_fields.iter().any(|existing| existing == field) {
         patch.clear_fields.push(field.to_string());
     }

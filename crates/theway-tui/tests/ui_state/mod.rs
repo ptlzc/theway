@@ -12,11 +12,29 @@ thinking_mode = "peek"
 [panel]
 mode = "shown"
 position = "left"
+show_hooks = true
+show_runtime = true
 "#,
     );
     assert_eq!(state.thinking_mode, Some(crate::feed_render::ThinkingMode::Peek));
     assert_eq!(state.panel_mode, Some(crate::ui::SidePanelMode::Shown(crate::ui::TRIGGER_PANEL_WIDTH)));
     assert_eq!(state.panel_position, Some(crate::ui::SidePanelPosition::Left));
+    assert!(state.show_hooks);
+    assert!(state.show_runtime);
+}
+
+#[test]
+fn parse_show_flags_default_to_hidden() {
+    // Absent or malformed flags fall back to hidden.
+    let state = parse("[panel]\nmode = \"shown\"\nshow_hooks = \"yes\"\n");
+    assert!(!state.show_hooks);
+    assert!(!state.show_runtime);
+    let state = parse("[panel]\nshow_hooks = true\n");
+    assert!(state.show_hooks);
+    assert!(!state.show_runtime);
+    let namespaced = parse_namespaced("[ui.panel]\nshow_runtime = true\n");
+    assert!(!namespaced.show_hooks);
+    assert!(namespaced.show_runtime);
 }
 
 #[test]
@@ -165,10 +183,14 @@ fn render_emits_only_set_fields() {
         panel_mode: Some(crate::ui::SidePanelMode::Hidden),
         panel_position: None,
         graph_position: None,
+        show_hooks: true,
+        show_runtime: false,
     };
     let text = render(&state);
     assert!(text.contains("[feed]\nthinking_mode = \"hidden\""));
     assert!(text.contains("[panel]\nmode = \"hidden\""));
+    assert!(text.contains("show_hooks = true"));
+    assert!(!text.contains("show_runtime"));
     assert!(!text.contains("position"));
     assert!(!text.contains("[graph]"));
     // Rendered output parses back to the same state.
@@ -187,6 +209,8 @@ fn save_and_load_roundtrip() {
         panel_mode: Some(crate::ui::SidePanelMode::Shown(36)),
         panel_position: Some(crate::ui::SidePanelPosition::Top),
         graph_position: Some(crate::ui::GraphPosition::SidePanel),
+        show_hooks: true,
+        show_runtime: true,
     };
     save_to(&path, &state).unwrap();
     assert_eq!(load_from(&path), state);

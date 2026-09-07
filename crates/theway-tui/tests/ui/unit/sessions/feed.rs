@@ -216,3 +216,97 @@ async fn snapshot_truncation_rebuilds_feed() {
     assert!(!text.contains("one"), "{text}");
     assert!(!text.contains("two"), "{text}");
 }
+
+/// The "daemon restarted; restored session …" notice disappears once the
+/// restored session responds normally: a reply (assistant or error block)
+/// landing after the notice proves the session is alive again.
+#[tokio::test]
+async fn restored_notice_clears_after_response_patch() {
+    let (mut app, _rx) = test_app().await;
+    app.restored_notice_line("daemon restarted; restored session sess-1");
+    // Full authoritative snapshot re-applies the notice from the log.
+    app.apply_snapshot(fixture_status(app.latest.feed_blocks.clone()));
+    let text = feed_text(&app);
+    assert!(text.contains("daemon restarted"), "{text}");
+
+    // The restored session replies: user block then assistant block.
+    let base = app.latest.feed_blocks.len() as u64;
+    let mut patch = fixture_status(Vec::new());
+    patch.feed_blocks_base = base;
+    patch.feed_block_patches = vec![
+        WireFeedBlockPatch {
+            index: base,
+            block: WireFeedBlock::User {
+                text: "ping".into(),
+                timestamp: None,
+            },
+        },
+        WireFeedBlockPatch {
+            index: base + 1,
+            block: WireFeedBlock::Assistant {
+                text: "pong".into(),
+                timestamp: None,
+            },
+        },
+    ];
+    app.apply_snapshot(patch);
+
+    let text = feed_text(&app);
+    assert!(!text.contains("daemon restarted"), "notice must clear: {text}");
+    assert!(text.contains("pong"), "{text}");
+    assert!(
+        !app.connection_log
+            .iter()
+            .any(|line| line.contains("daemon restarted")),
+        "connection log must forget the notice"
+    );
+    assert!(app.restored_notices.is_empty());
+}
+
+#[tokio::test]
+async fn restored_notice_stays_until_response() {
+    let (mut app, _rx) = test_app().await;
+    app.restored_notice_line("daemon restarted; restored session sess-1");
+    app.apply_snapshot(fixture_status(app.latest.feed_blocks.clone()));
+
+    // A user message alone is not a response — the notice stays.
+    let base = app.latest.feed_blocks.len() as u64;
+    let mut patch = fixture_status(Vec::new());
+    patch.feed_blocks_base = base;
+    patch.feed_block_patches = vec![WireFeedBlockPatch {
+        index: base,
+        block: WireFeedBlock::User {
+            text: "ping".into(),
+            timestamp: None,
+        },
+    }];
+    app.apply_snapshot(patch);
+
+    let text = feed_text(&app);
+    assert!(
+        text.contains("daemon restarted"),
+        "notice stays until a reply: {text}"
+    );
+    assert_eq!(app.restored_notices.len(), 1);
+}
+
+#[tokio::test]
+async fn restored_notice_ignores_history_before_restore() {
+    let (mut app, _rx) = test_app().await;
+    // Replayed history contains an old assistant reply…
+    let history = fixture_status(vec![WireFeedBlock::Assistant {
+        text: "old reply".into(),
+        timestamp: None,
+    }]);
+    app.apply_snapshot(history);
+    // …then the daemon restarts and the notice lands after it.
+    app.restored_notice_line("daemon restarted; restored session sess-1");
+    app.apply_snapshot(fixture_status(app.latest.feed_blocks.clone()));
+
+    let text = feed_text(&app);
+    assert!(
+        text.contains("daemon restarted"),
+        "pre-restore history must not clear the notice: {text}"
+    );
+    assert_eq!(app.restored_notices.len(), 1);
+}

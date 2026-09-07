@@ -82,7 +82,7 @@ use theway_ratatui_textarea::{TextArea, TextAreaState};
 use theway_transport::client::GrpcClient;
 use theway_transport::commands;
 use theway_transport::commands::Registry;
-use theway_transport::feed::{Feed, Level, TriggerPollStatus};
+use theway_transport::feed::{Block as FeedBlock, Feed, Level, TriggerPollStatus};
 use theway_transport::history::HistoryStore;
 use theway_transport::images::EncodedImage;
 use theway_transport::mentions;
@@ -506,6 +506,12 @@ pub struct App {
     /// Bounded client-lifecycle messages re-applied after authoritative daemon
     /// snapshots so reconnect evidence remains visible in the feed.
     connection_log: Vec<String>,
+    /// Pending "daemon restarted; restored session …" notice texts, pushed via
+    /// [`App::restored_notice_line`]. Once the restored session responds
+    /// normally — assistant output or an error reply lands AFTER the newest
+    /// notice — the notices are removed from both the feed and the
+    /// connection-log replay list.
+    restored_notices: Vec<String>,
     panel_status: PanelStatus,
     model_catalog: Vec<theway_transport::wire::ProviderGroup>,
     /// UI-only mirrors of snapshot fields (kept as fields so the render paths
@@ -593,6 +599,12 @@ pub struct App {
     side_panel_mode: SidePanelMode,
     /// Side-panel placement (issue #54 `/side-panel › Position`).
     side_panel_position: SidePanelPosition,
+    /// Render the side-panel `Hooks` diagnostic section (off by default;
+    /// enabled via `[ui.panel] show_hooks = true` in config.toml).
+    show_hooks: bool,
+    /// Render the side-panel `Runtime` diagnostic section (off by default;
+    /// enabled via `[ui.panel] show_runtime = true` in config.toml).
+    show_runtime: bool,
     /// `/side-panel` hierarchical menu: `Some` = open, with the current
     /// level and highlighted row. Leaf-level cursor moves live-preview the
     /// panel mode/position; Enter commits, Esc steps back (reverting), Esc

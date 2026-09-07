@@ -32,13 +32,13 @@ const SESSION_RESTORE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Which daemon spawn variant the connector should use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DaemonSpawnKind {
+pub(crate) enum DaemonSpawnKind {
     Inherit,
     Quiet,
     Detached,
 }
 
-fn daemon_spawn_kind(daemon_mode: bool, inherit_stdio: bool) -> DaemonSpawnKind {
+pub(crate) fn daemon_spawn_kind(daemon_mode: bool, inherit_stdio: bool) -> DaemonSpawnKind {
     if daemon_mode {
         DaemonSpawnKind::Detached
     } else if inherit_stdio {
@@ -48,7 +48,7 @@ fn daemon_spawn_kind(daemon_mode: bool, inherit_stdio: bool) -> DaemonSpawnKind 
     }
 }
 
-fn apply_controller_endpoints(
+pub(crate) fn apply_controller_endpoints(
     desired: &mut WireDaemonConfig,
     daemon_mode: bool,
     tool_addr: String,
@@ -284,7 +284,7 @@ impl Drop for DaemonConnector {
     }
 }
 
-fn connection_feed_limit(config: &WireDaemonConfig) -> u32 {
+pub(crate) fn connection_feed_limit(config: &WireDaemonConfig) -> u32 {
     config
         .tui_max_feed_lines
         .and_then(|limit| u32::try_from(limit).ok())
@@ -292,7 +292,7 @@ fn connection_feed_limit(config: &WireDaemonConfig) -> u32 {
         .unwrap_or(crate::ui::DEFAULT_MAX_FEED_LINES as u32)
 }
 
-fn config_for_existing_controller(
+pub(crate) fn config_for_existing_controller(
     desired: &WireDaemonConfig,
     current: &WireDaemonConfig,
     own_storage_addr: &str,
@@ -306,7 +306,7 @@ fn config_for_existing_controller(
     attached
 }
 
-async fn restore_session(
+pub(crate) async fn restore_session(
     client: &mut GrpcClient,
     current: WireStatus,
     session_id: &str,

@@ -200,7 +200,7 @@ impl ControllerStorageOps {
 }
 
 #[derive(Clone, Copy)]
-enum SidecarKind {
+pub(crate) enum SidecarKind {
     Trigger,
     Cron,
 }
@@ -300,7 +300,7 @@ impl StorageOps for ControllerStorageOps {
     }
 }
 
-fn sanitize(session_id: &str) -> String {
+pub(crate) fn sanitize(session_id: &str) -> String {
     let clean: String = session_id
         .chars()
         .map(|c| {
@@ -319,11 +319,11 @@ fn sanitize(session_id: &str) -> String {
     }
 }
 
-fn repo_err(e: SessionError) -> anyhow::Error {
+pub(crate) fn repo_err(e: SessionError) -> anyhow::Error {
     anyhow::Error::msg(e.to_string())
 }
 
-fn trigger_to_wire(rule: &DynamicTriggerRule) -> WireStoredTriggerRule {
+pub(crate) fn trigger_to_wire(rule: &DynamicTriggerRule) -> WireStoredTriggerRule {
     WireStoredTriggerRule {
         id: rule.id.clone(),
         condition: rule.condition.clone(),
@@ -336,7 +336,7 @@ fn trigger_to_wire(rule: &DynamicTriggerRule) -> WireStoredTriggerRule {
     }
 }
 
-fn trigger_from_wire(rule: &WireStoredTriggerRule) -> Result<DynamicTriggerRule> {
+pub(crate) fn trigger_from_wire(rule: &WireStoredTriggerRule) -> Result<DynamicTriggerRule> {
     Ok(DynamicTriggerRule {
         id: rule.id.clone(),
         condition: rule.condition.clone(),
@@ -349,7 +349,7 @@ fn trigger_from_wire(rule: &WireStoredTriggerRule) -> Result<DynamicTriggerRule>
     })
 }
 
-fn cron_to_wire(job: &CronJob) -> WireStoredCronJob {
+pub(crate) fn cron_to_wire(job: &CronJob) -> WireStoredCronJob {
     WireStoredCronJob {
         id: job.id.clone(),
         schedule: job.schedule.clone(),
@@ -366,7 +366,7 @@ fn cron_to_wire(job: &CronJob) -> WireStoredCronJob {
     }
 }
 
-fn cron_from_wire(job: &WireStoredCronJob) -> Result<CronJob> {
+pub(crate) fn cron_from_wire(job: &WireStoredCronJob) -> Result<CronJob> {
     Ok(CronJob {
         id: job.id.clone(),
         schedule: job.schedule.clone(),
@@ -391,7 +391,7 @@ fn cron_from_wire(job: &WireStoredCronJob) -> Result<CronJob> {
     })
 }
 
-fn parse_rfc3339(value: &str) -> Result<DateTime<Utc>> {
+pub(crate) fn parse_rfc3339(value: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
         .with_context(|| format!("invalid RFC3339 timestamp: {value}"))
@@ -405,7 +405,7 @@ struct DynamicTriggerFile {
 
 const DYNAMIC_TRIGGER_FILE_VERSION: u32 = 1;
 
-async fn read_trigger_rules(path: &Path) -> Result<Vec<DynamicTriggerRule>> {
+pub(crate) async fn read_trigger_rules(path: &Path) -> Result<Vec<DynamicTriggerRule>> {
     match tokio::fs::read_to_string(path).await {
         Ok(text) if text.trim().is_empty() => Ok(Vec::new()),
         Ok(text) => {
@@ -418,7 +418,7 @@ async fn read_trigger_rules(path: &Path) -> Result<Vec<DynamicTriggerRule>> {
     }
 }
 
-async fn write_trigger_rules(path: &Path, rules: &[DynamicTriggerRule]) -> Result<()> {
+pub(crate) async fn write_trigger_rules(path: &Path, rules: &[DynamicTriggerRule]) -> Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -438,7 +438,7 @@ struct CronJobsFile {
     jobs: Vec<CronJob>,
 }
 
-async fn read_cron_jobs(path: &Path) -> Result<Vec<CronJob>> {
+pub(crate) async fn read_cron_jobs(path: &Path) -> Result<Vec<CronJob>> {
     match tokio::fs::read_to_string(path).await {
         Ok(text) => {
             let file: CronJobsFile =
@@ -450,7 +450,7 @@ async fn read_cron_jobs(path: &Path) -> Result<Vec<CronJob>> {
     }
 }
 
-async fn write_cron_jobs(path: &Path, jobs: &[CronJob]) -> Result<()> {
+pub(crate) async fn write_cron_jobs(path: &Path, jobs: &[CronJob]) -> Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }

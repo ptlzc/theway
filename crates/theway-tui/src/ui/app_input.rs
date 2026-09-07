@@ -284,7 +284,7 @@ impl App {
 
     /// Enter on a leaf choice: keep the live preview, close the menu, drop
     /// the revert snapshot, and persist the new state.
-    fn commit_panel_menu(&mut self) {
+    pub(crate) fn commit_panel_menu(&mut self) {
         self.panel_menu = None;
         self.panel_menu_saved = None;
         self.system_line(format!(
@@ -301,7 +301,7 @@ impl App {
 
     /// Close the menu without committing: restore the mode/position captured
     /// when the menu opened and drop the snapshot.
-    fn cancel_panel_menu(&mut self) {
+    pub(crate) fn cancel_panel_menu(&mut self) {
         self.panel_menu = None;
         self.restore_panel_snapshot();
         self.panel_menu_saved = None;
@@ -310,7 +310,7 @@ impl App {
     /// Revert the live preview to the snapshot captured when the menu
     /// opened. The snapshot is retained (not consumed) so stepping back out
     /// of a level and previewing again can still be reverted.
-    fn restore_panel_snapshot(&mut self) {
+    pub(crate) fn restore_panel_snapshot(&mut self) {
         if let Some((mode, position)) = self.panel_menu_saved {
             self.side_panel_mode = mode;
             self.side_panel_position = position;
@@ -399,7 +399,7 @@ impl App {
 
     /// Live preview: mirror the highlighted placement into the real band
     /// position so the layout updates on the next frame.
-    fn apply_graph_preview(&mut self) {
+    pub(crate) fn apply_graph_preview(&mut self) {
         let Some(state) = self.graph_menu else {
             return;
         };
@@ -414,7 +414,7 @@ impl App {
 
     /// Enter on a placement: keep the preview, close the menu, drop the
     /// snapshot, and persist the new position.
-    fn commit_graph_menu(&mut self) {
+    pub(crate) fn commit_graph_menu(&mut self) {
         self.graph_menu = None;
         self.graph_menu_saved = None;
         self.system_line(format!("graph band: {}", self.graph_position.label()));
@@ -423,7 +423,7 @@ impl App {
 
     /// Close the menu without committing: restore the placement captured
     /// when the menu opened and drop the snapshot.
-    fn cancel_graph_menu(&mut self) {
+    pub(crate) fn cancel_graph_menu(&mut self) {
         self.graph_menu = None;
         self.restore_graph_snapshot();
         self.graph_menu_saved = None;
@@ -432,7 +432,7 @@ impl App {
     /// Revert the live preview to the snapshot captured when the menu
     /// opened; the snapshot is retained so stepping back out of the level
     /// and previewing again can still be reverted.
-    fn restore_graph_snapshot(&mut self) {
+    pub(crate) fn restore_graph_snapshot(&mut self) {
         if let Some(position) = self.graph_menu_saved {
             self.graph_position = position;
         }
@@ -468,6 +468,8 @@ impl App {
             panel_mode: Some(self.side_panel_mode),
             panel_position: Some(self.side_panel_position),
             graph_position: Some(self.graph_position),
+            show_hooks: self.show_hooks,
+            show_runtime: self.show_runtime,
         });
     }
 
@@ -518,7 +520,7 @@ impl App {
     /// Slide the fork-picker window so the highlight stays inside
     /// `[scroll, scroll + FORK_POPUP_MAX)` (issue #55) — the same windowing
     /// the completion popup uses (issue #46).
-    fn sync_fork_picker_window(&mut self) {
+    pub(crate) fn sync_fork_picker_window(&mut self) {
         let Some(picker) = self.fork_picker.as_mut() else {
             return;
         };

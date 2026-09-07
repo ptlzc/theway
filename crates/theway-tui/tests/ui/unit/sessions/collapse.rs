@@ -115,8 +115,10 @@ async fn side_panel_renders_session_lineage_and_collapsed_nodes() {
         text.contains("node-collapsed"),
         "collapsed node id missing:\n{text}"
     );
+    // Node rows are id-only (no kind/title/msg decoration), so the node
+    // title is deliberately not rendered anymore.
     assert!(
-        text.contains("Archive"),
-        "collapsed node title missing:\n{text}"
+        !text.contains("Archive"),
+        "collapsed node title should not be rendered:\n{text}"
     );
 }

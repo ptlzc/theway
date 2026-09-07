@@ -15,7 +15,7 @@ use theway_transport::wire::WireDaemonConfig;
 use crate::cli::Cli;
 use crate::ui;
 
-mod connection;
+pub(crate) mod connection;
 pub(crate) use connection::DaemonConnector;
 
 /// Map the client CLI to daemon launch arguments (design decision 3: session
@@ -28,7 +28,7 @@ pub(crate) use connection::DaemonConnector;
 /// `--base-url` stays CLI-driven; `--thinking` comes from the CLI flag when
 /// given, otherwise from the persisted `[model] thinking` level in the
 /// assembled config payload (the user's last pick).
-fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
+pub(crate) fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
     let mut args = Vec::new();
     if cli.continue_ {
         args.push("--continue".to_string());
@@ -44,7 +44,7 @@ fn daemon_launch_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
 /// Daemon arguments that are stable across initial spawn and recovery. Session
 /// selection is deliberately excluded so reconnect can prepend the App's
 /// authoritative current session id.
-fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
+pub(crate) fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
     let mut args = Vec::new();
     // Model is session-level, injected by the client per-session via `SetModel`
     // (through the settings/Configure path). The daemon no longer accepts or
@@ -113,7 +113,7 @@ fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<String> {
 /// Issue #46: the actual `create_session` is deferred until the first
 /// submitted message (`App::ensure_fresh_session`) — the flag only arms the
 /// client.
-fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
+pub(crate) fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
     reused && cli.resume.is_none() && cli.resume_id.is_none() && !cli.continue_
 }
 
@@ -121,7 +121,7 @@ fn fresh_attach_wanted(reused: bool, cli: &Cli) -> bool {
 /// longer exists in the repo (a previous idle run reaped its empty startup
 /// session and no session remained) must attach fresh instead of landing on
 /// the deleted id — messages there would be silently lost.
-fn continue_needs_fresh_attach(
+pub(crate) fn continue_needs_fresh_attach(
     reused: bool,
     cli: &Cli,
     initial_session_id: &str,
@@ -136,7 +136,11 @@ fn continue_needs_fresh_attach(
 /// selections never make the daemon create a session (`--continue` and
 /// resume launch args); the reused-daemon path defers creation to the first
 /// message (issue #46) and yields `None` here.
-fn spawn_auto_session(reused: bool, cli: &Cli, initial_session_id: &str) -> Option<String> {
+pub(crate) fn spawn_auto_session(
+    reused: bool,
+    cli: &Cli,
+    initial_session_id: &str,
+) -> Option<String> {
     if !reused
         && !cli.continue_
         && cli.effective_resume_id().is_none()
@@ -285,7 +289,7 @@ pub(crate) async fn run_repl(
     app.run().await
 }
 
-async fn session_id_of(session: &(impl SessionReader + ?Sized)) -> String {
+pub(crate) async fn session_id_of(session: &(impl SessionReader + ?Sized)) -> String {
     session
         .get_metadata_json()
         .await
@@ -364,7 +368,16 @@ pub(crate) mod test_daemon {
         let current: String = seeds.first().copied().unwrap_or("").to_string();
         let path_context = Arc::new(std::sync::RwLock::new(WirePathContext::default()));
         let daemon_config = Arc::new(std::sync::RwLock::new(WireDaemonConfig::default()));
-        let session_states = Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
+        let session_states = Arc::new(parking_lot::Mutex::new(
+            seeds
+                .iter()
+                .map(|id| {
+                    let mut status = test_status();
+                    status.session_id = (*id).to_string();
+                    ((*id).to_string(), status)
+                })
+                .collect::<std::collections::HashMap<_, _>>(),
+        ));
         let external_ops: Arc<dyn theway_transport::ExternalProtocolOps> =
             Arc::new(theway_transport::CompositeExternalProtocolOps::new(
                 Arc::new(ChannelCommandOps::new(command_tx.clone())),

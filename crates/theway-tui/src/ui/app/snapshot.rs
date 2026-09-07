@@ -118,6 +118,46 @@ impl App {
         // `follow` is deliberately NOT forced here. A scrolled-up view stays
         // pinned while the stream appends; follow is only re-enabled by an
         // explicit user action or by scrolling back to the bottom.
+        self.maybe_clear_restored_notices();
+    }
+
+    /// The "daemon restarted; restored session …" notices are reassurance
+    /// during reconnect: once the restored session proves it works — an
+    /// assistant reply or an error response lands AFTER the newest notice —
+    /// the notices are removed from the feed and from the connection-log
+    /// replay list, so they vanish instead of staying forever.
+    fn maybe_clear_restored_notices(&mut self) {
+        if self.restored_notices.is_empty() {
+            return;
+        }
+        // Locate every pending notice block in the current feed.
+        let mut indices: Vec<usize> = Vec::new();
+        for (index, block) in self.feed.blocks().iter().enumerate() {
+            let FeedBlock::Plain { text, .. } = block else {
+                continue;
+            };
+            if self.restored_notices.iter().any(|notice| notice == text) {
+                indices.push(index);
+            }
+        }
+        let Some(&newest) = indices.last() else {
+            return;
+        };
+        // A response AFTER the newest notice: the session replied since the
+        // last restore. Earlier history (replayed by the restore itself) does
+        // not count.
+        let responded = self.feed.blocks()[newest + 1..]
+            .iter()
+            .any(|block| matches!(block, FeedBlock::Assistant { .. } | FeedBlock::Error { .. }));
+        if !responded {
+            return;
+        }
+        // Remove newest-first so the remaining indices stay valid.
+        for index in indices.into_iter().rev() {
+            self.feed.remove_block(index);
+        }
+        let notices = std::mem::take(&mut self.restored_notices);
+        self.connection_log.retain(|line| !notices.contains(line));
     }
 
     /// A successful SetModel RPC only means the daemon accepted the command.

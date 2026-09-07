@@ -208,7 +208,7 @@ impl App {
                                         "reconnected to daemon at {addr}; state synchronized"
                                     ));
                                 } else {
-                                    self.connection_line(format!(
+                                    self.restored_notice_line(format!(
                                         "daemon restarted at {addr}; restored session {}",
                                         self.session_id
                                     ));

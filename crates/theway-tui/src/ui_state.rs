@@ -10,6 +10,8 @@
 //! [panel]
 //! mode = "shown"              # auto | shown | hidden (/side-panel › Toggle)
 //! position = "left"           # top | bottom | left | right (/side-panel › Position)
+//! show_hooks = true           # render the Hooks section (default: hidden)
+//! show_runtime = true         # render the Runtime section (default: hidden)
 //!
 //! [graph]
 //! position = "side-panel"     # composer-top | side-panel (/graph › Position)
@@ -48,6 +50,12 @@ pub(crate) struct UiState {
     pub panel_mode: Option<SidePanelMode>,
     pub panel_position: Option<SidePanelPosition>,
     pub graph_position: Option<GraphPosition>,
+    /// Render the side-panel `Hooks` section (hidden by default; the section
+    /// is diagnostic detail, opt in via `[ui.panel] show_hooks = true`).
+    pub show_hooks: bool,
+    /// Render the side-panel `Runtime` section (hidden by default; opt in via
+    /// `[ui.panel] show_runtime = true`).
+    pub show_runtime: bool,
 }
 
 /// Load the persisted UI state.
@@ -122,6 +130,14 @@ fn read_ui_sections(
         if let Some(position) = panel.get("position").and_then(toml::Value::as_str) {
             state.panel_position = parse_panel_position(position);
         }
+        state.show_hooks = panel
+            .get("show_hooks")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
+        state.show_runtime = panel
+            .get("show_runtime")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
     }
     if let Some(graph) = container.get("graph").and_then(toml::Value::as_table) {
         if let Some(position) = graph.get("position").and_then(toml::Value::as_str) {
@@ -218,6 +234,10 @@ pub(crate) fn render(state: &UiState) -> String {
         state
             .panel_position
             .map(|position| format!("position = \"{}\"", panel_position_str(position))),
+        state.show_hooks.then(|| "show_hooks = true".to_string()),
+        state
+            .show_runtime
+            .then(|| "show_runtime = true".to_string()),
     ]
     .into_iter()
     .flatten()

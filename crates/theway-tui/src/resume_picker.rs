@@ -35,7 +35,7 @@ pub enum PickerChoice {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Action {
+pub(crate) enum Action {
     Up,
     Down,
     PageUp,
@@ -51,13 +51,13 @@ const SELECTED_PREFIX: &str = "→ ";
 const UNSELECTED_PREFIX: &str = "  ";
 
 /// Total selectable entries: the pinned clean row + every session row.
-fn entry_count(rows: usize) -> usize {
+pub(crate) fn entry_count(rows: usize) -> usize {
     rows + 1
 }
 
 /// Compute the `[start, end)` slice of entries visible in a viewport of `height` rows,
 /// keeping `selected` in view. `height` is clamped to at least 1.
-fn visible_window(selected: usize, total: usize, height: usize) -> (usize, usize) {
+pub(crate) fn visible_window(selected: usize, total: usize, height: usize) -> (usize, usize) {
     let height = height.max(1);
     if total <= height {
         return (0, total);
@@ -72,7 +72,12 @@ fn visible_window(selected: usize, total: usize, height: usize) -> (usize, usize
 
 /// Render the full menu (header, entries in the window, scroll indicators, footer) for a
 /// terminal of `width` columns with `height` entry rows visible.
-fn render_lines(rows: &[PickerRow], selected: usize, width: usize, height: usize) -> Vec<String> {
+pub(crate) fn render_lines(
+    rows: &[PickerRow],
+    selected: usize,
+    width: usize,
+    height: usize,
+) -> Vec<String> {
     let total = entry_count(rows.len());
     let (start, end) = visible_window(selected, total, height);
 
@@ -126,7 +131,7 @@ fn render_lines(rows: &[PickerRow], selected: usize, width: usize, height: usize
     lines
 }
 
-fn truncate_line(line: &str, width: usize) -> String {
+pub(crate) fn truncate_line(line: &str, width: usize) -> String {
     if line.chars().count() <= width {
         return line.to_string();
     }
@@ -135,7 +140,7 @@ fn truncate_line(line: &str, width: usize) -> String {
     out
 }
 
-fn key_action(key: &KeyEvent) -> Action {
+pub(crate) fn key_action(key: &KeyEvent) -> Action {
     if key.kind == crossterm::event::KeyEventKind::Release {
         return Action::None;
     }
@@ -160,7 +165,7 @@ fn key_action(key: &KeyEvent) -> Action {
 /// last row, Down at the bottom to the first); PageUp/PageDown clamp, so
 /// the page keys keep their read-a-page semantics. `total == 0` is a
 /// defensive no-op.
-fn move_selection(selected: usize, total: usize, action: &Action) -> usize {
+pub(crate) fn move_selection(selected: usize, total: usize, action: &Action) -> usize {
     if total == 0 {
         return selected;
     }

@@ -144,7 +144,7 @@ impl App {
             lines.push(panel_line("Session".to_string(), s.section, width));
             lines.push(panel_line(
                 format!(
-                    "…{} · {}",
+                    "{} · {}",
                     id_suffix(&snapshot.info.id, 7),
                     if snapshot.info.name.is_empty() {
                         "unnamed"
@@ -197,16 +197,10 @@ impl App {
                     width,
                 ));
                 for node in snapshot.graph_state.nodes.iter() {
-                    let kind = match node.node_type {
-                        theway_transport::wire::WireSessionGraphNodeType::Collapsed => "collapsed",
-                        theway_transport::wire::WireSessionGraphNodeType::Session => "session",
-                        theway_transport::wire::WireSessionGraphNodeType::Unspecified => "node",
-                    };
+                    // Node rows show only the node id — no kind/title/msg
+                    // decoration, so collapsed nodes read plainly.
                     lines.push(panel_line(
-                        format!(
-                            "  {kind} {} {} ({} msgs)",
-                            node.id, node.title, node.message_count
-                        ),
+                        format!("  {}", node.id),
                         if node.node_type
                             == theway_transport::wire::WireSessionGraphNodeType::Collapsed
                         {
@@ -440,11 +434,18 @@ impl App {
             }
         }
 
-        let hook_rows = self.panel_status.hook_points.len().max(1);
-        let feature_rows = self.panel_status.trigger_features.len().max(1);
-        // Skills + Triggers are variable above. Reserve enough rows for the lower static status
-        // sections so MCP/Hooks/Runtime don't get clipped in ordinary tall terminals.
-        let status_rows = 2 + 2 + 2 + hook_rows + 2 + feature_rows;
+        // Reserve enough rows below the variable sections for the
+        // bottom-anchored MCP block, including every error row, so failures
+        // never get clipped in ordinary tall terminals.
+        let mcp_errors = &self.latest.sidebar.mcp.errors;
+        let show_mcp = self.panel_status.mcp_servers > 0
+            || self.panel_status.mcp_notification_hooks > 0
+            || !mcp_errors.is_empty();
+        let status_rows = if show_mcp {
+            4 + mcp_errors.len() // blank + header + servers + notification hooks + errors
+        } else {
+            0
+        };
         while lines.len() + status_rows < height {
             lines.push(Line::raw(""));
         }
@@ -452,14 +453,9 @@ impl App {
         // MCP: shown when servers/hooks are connected OR any server failed
         // to load — failures render as red `[x] name` rows so a broken
         // mcp.toml entry is visible instead of silently disappearing.
-        let mcp_errors = &self.latest.sidebar.mcp.errors;
-        if self.panel_status.mcp_servers > 0
-            || self.panel_status.mcp_notification_hooks > 0
-            || !mcp_errors.is_empty()
-        {
+        if show_mcp {
             lines.push(Line::raw(""));
             lines.push(panel_line("MCP".to_string(), s.section, width));
-            {
             lines.push(panel_line(
                 format!(
                     "servers {} · tools {}",
@@ -479,26 +475,31 @@ impl App {
             for error in mcp_errors {
                 lines.push(panel_line(format!("[x] {}", error.name), s.error, width));
             }
+        }
+
+        // Hooks: diagnostic detail, hidden unless `[ui.panel] show_hooks`.
+        if self.show_hooks {
+            lines.push(Line::raw(""));
+            lines.push(panel_line("Hooks".to_string(), s.section, width));
+            if self.panel_status.hook_points.is_empty() {
+                lines.push(panel_line("none".to_string(), s.muted, width));
+            } else {
+                for point in &self.panel_status.hook_points {
+                    lines.push(panel_line(format!("· {point}"), s.muted, width));
+                }
             }
         }
 
-        lines.push(Line::raw(""));
-        lines.push(panel_line("Hooks".to_string(), s.section, width));
-        if self.panel_status.hook_points.is_empty() {
-            lines.push(panel_line("none".to_string(), s.muted, width));
-        } else {
-            for point in &self.panel_status.hook_points {
-                lines.push(panel_line(format!("· {point}"), s.muted, width));
-            }
-        }
-
-        lines.push(Line::raw(""));
-        lines.push(panel_line("Runtime".to_string(), s.section, width));
-        if self.panel_status.trigger_features.is_empty() {
-            lines.push(panel_line("none".to_string(), s.muted, width));
-        } else {
-            for feature in &self.panel_status.trigger_features {
-                lines.push(panel_line(format!("• {feature}"), s.muted, width));
+        // Runtime: diagnostic detail, hidden unless `[ui.panel] show_runtime`.
+        if self.show_runtime {
+            lines.push(Line::raw(""));
+            lines.push(panel_line("Runtime".to_string(), s.section, width));
+            if self.panel_status.trigger_features.is_empty() {
+                lines.push(panel_line("none".to_string(), s.muted, width));
+            } else {
+                for feature in &self.panel_status.trigger_features {
+                    lines.push(panel_line(format!("• {feature}"), s.muted, width));
+                }
             }
         }
         lines

@@ -241,7 +241,7 @@ pub(crate) fn print_dynamic_help_and_exit_if_requested() -> Result<()> {
     std::process::exit(0);
 }
 
-fn should_print_dynamic_top_level_help<I>(args: I) -> bool
+pub(crate) fn should_print_dynamic_top_level_help<I>(args: I) -> bool
 where
     I: IntoIterator<Item = std::ffi::OsString>,
 {
@@ -269,7 +269,7 @@ where
 /// offline. Discovery only — this never spawns a daemon: standalone session
 /// commands (`--list-sessions`, `--delete-session`) must not start a
 /// background process just to run (issue #64).
-async fn connect_running_daemon(cwd: &std::path::Path) -> Option<GrpcClient> {
+pub(crate) async fn connect_running_daemon(cwd: &std::path::Path) -> Option<GrpcClient> {
     let addr = discover(std::time::Duration::from_millis(800), cwd)
         .await
         .ok()
@@ -280,7 +280,7 @@ async fn connect_running_daemon(cwd: &std::path::Path) -> Option<GrpcClient> {
 /// Offline-fallback notice for the standalone session commands (issue #64):
 /// no daemon answered for this cwd, so the command reads/writes the local
 /// session repo directly.
-fn print_offline_fallback_notice() {
+pub(crate) fn print_offline_fallback_notice() {
     println!(
         "note: no running daemon for this cwd — falling back to the local session repo (offline)"
     );
@@ -303,7 +303,7 @@ pub(crate) async fn list_sessions_cmd(cwd: &std::path::Path) -> Result<()> {
 /// Online `--list-sessions`: render the daemon's session table (flat, oldest
 /// → newest) with the live `current` / `busy` / graph marks only the daemon
 /// can report.
-async fn list_sessions_online(client: &mut GrpcClient) -> Result<()> {
+pub(crate) async fn list_sessions_online(client: &mut GrpcClient) -> Result<()> {
     let (sessions, current_id) = client
         .list_sessions()
         .await
@@ -326,7 +326,7 @@ async fn list_sessions_online(client: &mut GrpcClient) -> Result<()> {
 /// (`current` / `busy` / graph counts in a badge), then the first user
 /// message preview — mirroring the offline row shape where the wire model
 /// allows (no fork lineage: the wire summary carries no parent id).
-fn online_session_row(summary: &SessionSummary, is_current: bool) -> String {
+pub(crate) fn online_session_row(summary: &SessionSummary, is_current: bool) -> String {
     let mut marks = Vec::new();
     if is_current {
         marks.push("current".to_string());
@@ -366,7 +366,7 @@ fn online_session_row(summary: &SessionSummary, is_current: bool) -> String {
 
 /// Offline `--list-sessions`: read the cwd-scoped repo directly (the pre-#64
 /// behavior; tree view with forks nested under their parent).
-async fn list_sessions_offline(repo: &SqliteSessionRepo) -> Result<()> {
+pub(crate) async fn list_sessions_offline(repo: &SqliteSessionRepo) -> Result<()> {
     let entries = session::list_entries(repo).await?;
     if entries.is_empty() {
         println!("(no sessions for this cwd)");
@@ -463,7 +463,7 @@ pub(crate) async fn delete_session_cmd(cwd: &std::path::Path, id: &str) -> Resul
 /// Online delete via the daemon RPC. Delete protection (running DAG runs
 /// still attached to the session) reports the refusal reason and exits
 /// non-zero; `Ok` means the session is gone.
-async fn delete_session_online(client: &mut GrpcClient, id: &str) -> Result<()> {
+pub(crate) async fn delete_session_online(client: &mut GrpcClient, id: &str) -> Result<()> {
     match client.delete_session(id).await {
         // Contract-level refusal: the response itself names the running runs.
         Ok(running) if !running.is_empty() => {
@@ -490,7 +490,7 @@ async fn delete_session_online(client: &mut GrpcClient, id: &str) -> Result<()> 
 /// `delete_session` handler refuses with `failed_precondition` carrying
 /// "session <id> still has running graphs: <run ids>; ...". `None` when the
 /// failure is unrelated (session not found, transport error, ...).
-fn delete_refusal_reason(err: &anyhow::Error) -> Option<String> {
+pub(crate) fn delete_refusal_reason(err: &anyhow::Error) -> Option<String> {
     let text = err.to_string();
     let marker = "still has running graphs";
     let marker_at = text.find(marker)?;
@@ -506,7 +506,7 @@ fn delete_refusal_reason(err: &anyhow::Error) -> Option<String> {
 
 /// Offline delete: the pre-#64 local-repo path. With no daemon running there
 /// are no live DAG runs, so delete protection cannot apply here.
-async fn delete_session_offline(repo: &SqliteSessionRepo, id: &str) -> Result<()> {
+pub(crate) async fn delete_session_offline(repo: &SqliteSessionRepo, id: &str) -> Result<()> {
     let path = session::delete_by_id(repo, id).await?;
     println!("deleted {}", path.display());
     Ok(())
