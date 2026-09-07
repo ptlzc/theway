@@ -502,3 +502,33 @@ impl crate::types::AgentTool for SysPromptTool {
         Ok(crate::types::AgentToolResult::default())
     }
 }
+
+#[tokio::test]
+async fn call_llm_provider_cache_hit_rate_is_none_when_no_cache_read() {
+    let stream_fn: StreamFn = Arc::new(move |_, _, _| {
+        let (stream, mut sender) = AssistantMessageEventStream::new();
+        let mut msg = assistant_with_text("ok");
+        msg.usage = theway_llm_provider::Usage {
+            input: 100,
+            output: 10,
+            total_tokens: 110,
+            cache_read: 0,
+            cache_write: 0,
+            ..Default::default()
+        };
+        sender.push(AssistantMessageEvent::Done {
+            reason: DoneReason::Stop,
+            message: msg,
+        });
+        stream
+    });
+    let inner = inner_with_stream(stream_fn);
+
+    let msg = call_llm(&inner, &CancellationToken::new(), &CancellationToken::new())
+        .await
+        .unwrap();
+
+    assert_eq!(msg.usage.input, 100);
+    assert_eq!(msg.usage.cache_read, 0);
+    assert_eq!(msg.usage.provider_cache_hit_rate, None);
+}

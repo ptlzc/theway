@@ -139,3 +139,35 @@ fn convert_to_llm_uses_configured_callback_or_default() {
     let out = agent.inner.convert_to_llm(&msgs);
     assert_eq!(out.len(), 1);
 }
+
+#[test]
+fn release_run_is_noop_when_not_active() {
+    let agent = Agent::new(AgentOptions::default());
+    assert!(!agent.is_streaming());
+    agent.inner.release_run();
+    assert!(!agent.is_streaming());
+}
+
+#[test]
+fn unsubscribe_async_listener_noop_when_already_removed() {
+    let agent = Agent::new(AgentOptions::default());
+    let listener: LoopListener = Arc::new(move |_event, _cancel| Box::pin(async {}));
+
+    let unsub = agent.subscribe(listener);
+    assert_eq!(agent.inner.await_listeners.lock().len(), 1);
+    agent.inner.await_listeners.lock().clear();
+    unsub();
+    assert_eq!(agent.inner.await_listeners.lock().len(), 0);
+}
+
+#[test]
+fn unsubscribe_sync_callback_noop_when_already_removed() {
+    let agent = Agent::new(AgentOptions::default());
+    let callback: LoopSyncCallback = Arc::new(move |_event| {});
+
+    let unsub = agent.subscribe_sync(callback);
+    assert_eq!(agent.inner.sync_callbacks.lock().len(), 1);
+    agent.inner.sync_callbacks.lock().clear();
+    unsub();
+    assert_eq!(agent.inner.sync_callbacks.lock().len(), 0);
+}

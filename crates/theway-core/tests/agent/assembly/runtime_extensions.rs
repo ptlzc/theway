@@ -5,20 +5,28 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use tokio_util::sync::CancellationToken;
 use theway_contract::extension::{
-    ExtensionAction, ExtensionActionBatch, ExtensionActionKind,
-    ExtensionGateDecision, ExtensionHookClass, ExtensionLifecycleEvent,
+    ExtensionAction, ExtensionActionBatch, ExtensionActionKind, ExtensionErrorCode,
+    ExtensionErrorEnvelope, ExtensionGateDecision, ExtensionHookClass, ExtensionLifecycleEvent,
 };
 use theway_llm_provider::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, AssistantRole,
-    ContentBlock, DoneReason, ErrorReason, StopReason, Usage,
+    ContentBlock, DoneReason, ErrorReason, ProviderRequestFailure, ProviderRequestFailureStage,
+    ProviderRequestHeaders, ProviderRequestPayload, ProviderResponseMetadata, ProviderWireFormat,
+    StopReason, ToolCall, Usage,
 };
 
 use super::*;
+use crate::agent::assembly::runtime_extensions::HarnessRuntimeExtensions;
+use crate::agent::model_request::{NormalizedGenerationOptions, NormalizedModelRequestDraft};
+use crate::types::{AfterToolCallContext, AgentContext, AgentToolResult};
 use crate::agent::runtime_extensions::{
-    RawRuntimeExtensionResult, RuntimeCompactionExtensionPort, RuntimeExtensionInvocation,
+    ExtensionModelContextProjection, RawRuntimeExtensionResult, RuntimeCompactionExtensionPort,
+    RuntimeExtensionInvocation, RuntimeExtensionPort, RuntimeExtensionResult,
     RuntimeMessageExtensionPort, RuntimeRequestExtensionPort, RuntimeRunExtensionPort,
-    RuntimeSessionExtensionPort, RuntimeToolExtensionPort,
+    RuntimeSessionExtensionPort, RuntimeToolExtensionPort, ValidatedObserveResult,
+    ValidatedRuntimeExtensionResult,
 };
 
 mod compaction_lifecycle;
@@ -770,4 +778,1457 @@ async fn shutdown_waits_for_cancelled_run_settlement_before_session_shutdown() {
         .position(|event| *event == ExtensionLifecycleEvent::SessionShutdown)
         .unwrap();
     assert!(settled < shutdown);
+}
+
+#[tokio::test]
+async fn before_run_patch_persist_failure_returns_agent_error() {
+    let port = Arc::new(RecordingPort::default());
+    port.respond(
+        ExtensionLifecycleEvent::BeforeRun,
+        ExtensionHookClass::Transform,
+        ExtensionActionBatch {
+            decision: None,
+            actions: vec![ExtensionAction {
+                kind: ExtensionActionKind::PatchRunContext,
+                payload: serde_json::json!({
+                    "messages": [user_message("injected context")],
+                }),
+            }],
+        },
+    );
+    let harness = harness_with_port(
+        port,
+        success_stream(Arc::new(AtomicUsize::new(0))),
+        Session::new(Arc::new(FailingAppendStorage::new())),
+    );
+
+    let error = harness.prompt("hello").await.unwrap_err();
+
+    assert!(error.to_string().contains("persist before-run messages"));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Branch coverage for `agent::assembly::runtime_extensions*`
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+type CoverageHandler = Arc<dyn Fn(&RuntimeExtensionInvocation) -> RawRuntimeExtensionResult + Send + Sync>;
+
+struct CoverageFnPort {
+    handler: CoverageHandler,
+    request_has_hook: bool,
+}
+
+impl CoverageFnPort {
+    fn new(
+        handler: impl Fn(&RuntimeExtensionInvocation) -> RawRuntimeExtensionResult + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            handler: Arc::new(handler),
+            request_has_hook: true,
+        }
+    }
+
+    fn with_request_hook(mut self, has: bool) -> Self {
+        self.request_has_hook = has;
+        self
+    }
+
+    fn invoke(&self, invocation: RuntimeExtensionInvocation) -> RawRuntimeExtensionResult {
+        (self.handler)(&invocation)
+    }
+}
+
+macro_rules! impl_coverage_fn_port_domain {
+    ($trait_name:ident, $method:ident) => {
+        #[async_trait]
+        impl $trait_name for CoverageFnPort {
+            async fn $method(
+                &self,
+                invocation: RuntimeExtensionInvocation,
+            ) -> RawRuntimeExtensionResult {
+                self.invoke(invocation)
+            }
+        }
+    };
+}
+
+impl_coverage_fn_port_domain!(RuntimeSessionExtensionPort, invoke_session);
+impl_coverage_fn_port_domain!(RuntimeRunExtensionPort, invoke_run);
+impl_coverage_fn_port_domain!(RuntimeMessageExtensionPort, invoke_message);
+impl_coverage_fn_port_domain!(RuntimeToolExtensionPort, invoke_tool);
+impl_coverage_fn_port_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
+
+#[async_trait]
+impl RuntimeRequestExtensionPort for CoverageFnPort {
+    fn has_request_hook(
+        &self,
+        _event: ExtensionLifecycleEvent,
+        _class: ExtensionHookClass,
+    ) -> bool {
+        self.request_has_hook
+    }
+
+    async fn invoke_request(
+        &self,
+        invocation: RuntimeExtensionInvocation,
+    ) -> RawRuntimeExtensionResult {
+        self.invoke(invocation)
+    }
+}
+
+fn coverage_runtime_with_handler(
+    cwd: &str,
+    handler: impl Fn(&RuntimeExtensionInvocation) -> RawRuntimeExtensionResult + Send + Sync + 'static,
+) -> HarnessRuntimeExtensions {
+    HarnessRuntimeExtensions::new(
+        Arc::new(CoverageFnPort::new(handler)),
+        "coverage-session".into(),
+        cwd.into(),
+        false,
+        None,
+        ExtensionModelContextProjection::default(),
+    )
+}
+
+fn coverage_runtime_with_cwd(cwd: &str) -> HarnessRuntimeExtensions {
+    coverage_runtime_with_handler(cwd, |_| Ok(empty_batch()))
+}
+
+fn coverage_runtime_with_port(port: Arc<dyn RuntimeExtensionPort>) -> HarnessRuntimeExtensions {
+    HarnessRuntimeExtensions::new(
+        port,
+        "coverage-session".into(),
+        "/workspace".into(),
+        false,
+        None,
+        ExtensionModelContextProjection::default(),
+    )
+}
+
+fn coverage_agent_message_eq(left: &AgentMessage, right: &AgentMessage) -> bool {
+    serde_json::to_value(left).unwrap() == serde_json::to_value(right).unwrap()
+}
+
+fn coverage_assert_messages_eq(left: Vec<AgentMessage>, right: Vec<AgentMessage>) {
+    assert_eq!(
+        serde_json::to_value(left).unwrap(),
+        serde_json::to_value(right).unwrap()
+    );
+}
+
+fn coverage_assistant_message(text: &str) -> AgentMessage {
+    AgentMessage::Llm(theway_llm_provider::Message::Assistant(assistant(text)))
+}
+
+fn coverage_follow_up_action(id: &str, message: AgentMessage) -> ExtensionAction {
+    ExtensionAction {
+        kind: ExtensionActionKind::EnqueueFollowUp,
+        payload: serde_json::json!({
+            "followUpId": id,
+            "message": message,
+        }),
+    }
+}
+
+fn coverage_error(code: ExtensionErrorCode, message: &str) -> ExtensionErrorEnvelope {
+    ExtensionErrorEnvelope::new(code, message)
+}
+
+// ── lifecycle idempotency + invocation error paths ─────────────────────────────────────
+
+#[tokio::test]
+async fn runtime_ext_ensure_session_start_second_call_is_noop() {
+    let runtime = coverage_runtime_with_cwd("/workspace");
+    runtime.ensure_session_start().await;
+    runtime.ensure_session_start().await;
+}
+
+#[tokio::test]
+async fn runtime_ext_ensure_session_start_ignores_invocation_error_with_empty_cwd() {
+    let runtime = coverage_runtime_with_cwd("");
+    runtime.ensure_session_start().await;
+}
+
+#[tokio::test]
+async fn runtime_ext_shutdown_second_call_is_noop() {
+    let runtime = coverage_runtime_with_cwd("/workspace");
+    runtime.shutdown().await;
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn runtime_ext_shutdown_ignores_invocation_error_with_empty_cwd() {
+    let runtime = coverage_runtime_with_cwd("");
+    runtime.shutdown().await;
+}
+
+// ── transform_input fallbacks ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn runtime_ext_transform_input_invocation_error_returns_original() {
+    let runtime = coverage_runtime_with_cwd("");
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_dispatch_error_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "input failed"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_replace_payload_missing_message_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceInput,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_replace_invalid_json_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceInput,
+                    payload: serde_json::json!({"message": 42}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_replace_role_mismatch_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceInput,
+                    payload: serde_json::json!({"message": coverage_assistant_message("assistant")}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_emit_command_outcome_invalid_payload_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EmitCommandOutcome,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_enqueue_follow_up_valid_is_accepted() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![coverage_follow_up_action("input-follow-up", user_message("follow"))],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_enqueue_follow_up_invalid_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_enqueue_follow_up_capacity_error_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            let actions = (0..33)
+                .map(|index| coverage_follow_up_action(&format!("input-{index}"), user_message("follow")))
+                .collect();
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions,
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+// parse_follow_up branches exercised through transform_input
+#[tokio::test]
+async fn runtime_ext_transform_input_rejects_empty_follow_up_id() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({
+                        "followUpId": "",
+                        "message": user_message("follow"),
+                    }),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_rejects_oversized_follow_up_id() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({
+                        "followUpId": "x".repeat(129),
+                        "message": user_message("follow"),
+                    }),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_input_rejects_non_user_follow_up_message() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({
+                        "followUpId": "valid-id",
+                        "message": coverage_assistant_message("assistant"),
+                    }),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let original = user_message("original");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+// ── transform_context fallbacks ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn runtime_ext_transform_context_invocation_error_returns_messages() {
+    let runtime = coverage_runtime_with_cwd("");
+    let messages = vec![user_message("a")];
+    coverage_assert_messages_eq(
+        runtime
+            .transform_context(messages.clone(), CancellationToken::new())
+            .await,
+        messages,
+    );
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_context_dispatch_error_returns_messages() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Context {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "context failed"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let messages = vec![user_message("a")];
+    coverage_assert_messages_eq(
+        runtime
+            .transform_context(messages.clone(), CancellationToken::new())
+            .await,
+        messages,
+    );
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_context_invalid_follow_up_returns_messages() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Context {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let messages = vec![user_message("a")];
+    coverage_assert_messages_eq(
+        runtime
+            .transform_context(messages.clone(), CancellationToken::new())
+            .await,
+        messages,
+    );
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_context_enqueue_follow_up_capacity_error_returns_messages() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::Context {
+            let actions = (0..33)
+                .map(|index| coverage_follow_up_action(&format!("context-{index}"), user_message("follow")))
+                .collect();
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions,
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let messages = vec![user_message("a")];
+    coverage_assert_messages_eq(
+        runtime
+            .transform_context(messages.clone(), CancellationToken::new())
+            .await,
+        messages,
+    );
+}
+
+// Dedup-eviction loop: after 8 full batches (256 unique ids) the 257th unique id
+// triggers `while seen_order.len() > FOLLOW_UP_DEDUP_CAPACITY` and `pop_front()`.
+#[tokio::test]
+async fn runtime_ext_follow_up_dedup_evicts_oldest_seen_id_after_capacity() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runtime = coverage_runtime_with_handler("/workspace", {
+        let calls = Arc::clone(&calls);
+        move |invocation| {
+            if invocation.event() == ExtensionLifecycleEvent::Context {
+                let batch_index = calls.fetch_add(1, Ordering::Relaxed);
+                let actions = (0..32)
+                    .map(|index| {
+                        coverage_follow_up_action(
+                            &format!("dedup-{}", batch_index * 32 + index),
+                            user_message("follow"),
+                        )
+                    })
+                    .collect();
+                Ok(ExtensionActionBatch {
+                    decision: None,
+                    actions,
+                })
+            } else {
+                Ok(empty_batch())
+            }
+        }
+    });
+
+    for _ in 0..9 {
+        runtime
+            .transform_context(vec![user_message("a")], CancellationToken::new())
+            .await;
+        while runtime.take_follow_up().is_some() {}
+    }
+}
+
+// ── remaining invocation-error paths ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn runtime_ext_before_model_selection_invocation_error_is_reported() {
+    let runtime = coverage_runtime_with_cwd("");
+    assert!(runtime.before_model_selection(&faux_model()).await.is_err());
+}
+
+#[tokio::test]
+async fn runtime_ext_model_selected_handles_success_and_invocation_error() {
+    let runtime = coverage_runtime_with_cwd("/workspace");
+    runtime.model_selected(&faux_model()).await;
+
+    let runtime = coverage_runtime_with_cwd("");
+    runtime.model_selected(&faux_model()).await;
+}
+
+#[tokio::test]
+async fn runtime_ext_observe_session_operation_ignores_invocation_error() {
+    let runtime = coverage_runtime_with_cwd("");
+    runtime
+        .observe_session_operation(ExtensionLifecycleEvent::SessionStart, serde_json::json!({}))
+        .await;
+}
+
+#[tokio::test]
+async fn runtime_ext_observe_run_ignores_invocation_error() {
+    let runtime = coverage_runtime_with_cwd("");
+    runtime
+        .observe_run(ExtensionLifecycleEvent::RunStarted, serde_json::json!({}), false)
+        .await;
+}
+
+#[tokio::test]
+async fn runtime_ext_before_run_invocation_error_returns_default_patch() {
+    let runtime = coverage_runtime_with_cwd("");
+    let patch = runtime.before_run().await;
+    assert!(patch.messages.is_empty());
+    assert!(patch.system_prompt.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_before_run_dispatch_error_returns_default_patch() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeRun {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "before-run failed"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let patch = runtime.before_run().await;
+    assert!(patch.messages.is_empty());
+    assert!(patch.system_prompt.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_before_run_patch_deserialize_error_returns_default_patch() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeRun {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::PatchRunContext,
+                    payload: serde_json::json!({"systemPrompt": 42}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let patch = runtime.before_run().await;
+    assert!(patch.messages.is_empty());
+    assert!(patch.system_prompt.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_before_run_invalid_follow_up_returns_default_patch() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeRun {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let patch = runtime.before_run().await;
+    assert!(patch.messages.is_empty());
+    assert!(patch.system_prompt.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_before_run_enqueue_follow_up_capacity_error_returns_default_patch() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeRun {
+            let actions = (0..33)
+                .map(|index| coverage_follow_up_action(&format!("before-run-{index}"), user_message("follow")))
+                .collect();
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions,
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let patch = runtime.before_run().await;
+    assert!(patch.messages.is_empty());
+    assert!(patch.system_prompt.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_gate_allows_enqueues_follow_up_and_allows() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeSessionSwitch
+            && invocation.class() == ExtensionHookClass::Gate
+        {
+            Ok(ExtensionActionBatch {
+                decision: Some(ExtensionGateDecision::Allow),
+                actions: vec![coverage_follow_up_action("gate-follow-up", user_message("follow"))],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    runtime
+        .gate_session_operation(ExtensionLifecycleEvent::BeforeSessionSwitch, serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(runtime.take_follow_up().is_some());
+}
+
+struct ReentrantGuardedPort {
+    runtime: OnceLock<Arc<HarnessRuntimeExtensions>>,
+}
+
+#[async_trait]
+impl RuntimeRequestExtensionPort for ReentrantGuardedPort {
+    async fn invoke_request(
+        &self,
+        invocation: RuntimeExtensionInvocation,
+    ) -> RawRuntimeExtensionResult {
+        if invocation.event() == ExtensionLifecycleEvent::Input {
+            self.runtime
+                .get()
+                .unwrap()
+                .observe_session_operation(
+                    ExtensionLifecycleEvent::SessionStart,
+                    serde_json::json!({}),
+                )
+                .await;
+        }
+        Ok(empty_batch())
+    }
+}
+
+macro_rules! impl_reentrant_guarded_noop {
+    ($trait_name:ident, $method:ident) => {
+        #[async_trait]
+        impl $trait_name for ReentrantGuardedPort {
+            async fn $method(
+                &self,
+                _invocation: RuntimeExtensionInvocation,
+            ) -> RawRuntimeExtensionResult {
+                Ok(empty_batch())
+            }
+        }
+    };
+}
+
+impl_reentrant_guarded_noop!(RuntimeSessionExtensionPort, invoke_session);
+impl_reentrant_guarded_noop!(RuntimeRunExtensionPort, invoke_run);
+impl_reentrant_guarded_noop!(RuntimeMessageExtensionPort, invoke_message);
+impl_reentrant_guarded_noop!(RuntimeToolExtensionPort, invoke_tool);
+impl_reentrant_guarded_noop!(RuntimeCompactionExtensionPort, invoke_compaction);
+
+#[tokio::test]
+async fn runtime_ext_guarded_rejects_reentrant_dispatch() {
+    let port = Arc::new(ReentrantGuardedPort {
+        runtime: OnceLock::new(),
+    });
+    let runtime = Arc::new(coverage_runtime_with_port(port.clone()));
+    port.runtime
+        .set(Arc::clone(&runtime))
+        .unwrap_or_else(|_| unreachable!());
+
+    let original = user_message("outer");
+    let outcome = runtime.transform_input(original.clone()).await;
+    assert!(matches!(
+        outcome,
+        crate::agent::assembly::runtime_extensions::InputTransformOutcome::Run(message)
+            if coverage_agent_message_eq(&message, &original)
+    ));
+}
+
+// ── message seams ──────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn runtime_ext_observe_message_update_without_message_id_is_noop() {
+    let runtime = Arc::new(coverage_runtime_with_cwd("/workspace"));
+    let (listener, _) = runtime.make_loop_listener();
+    listener(
+        crate::types::LoopEvent::MessageUpdate {
+            message: user_message("hello"),
+            assistant_message_event: AssistantMessageEvent::Start {
+                partial: assistant(""),
+            },
+        },
+        CancellationToken::new(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_invocation_error_returns_message() {
+    let runtime = coverage_runtime_with_cwd("");
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_dispatch_error_returns_message() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::MessageEnd
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "message failed"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_replace_payload_missing_message_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::MessageEnd
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceMessage,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_replace_invalid_json_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::MessageEnd
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceMessage,
+                    payload: serde_json::json!({"message": 42}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_role_mismatch_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::MessageEnd
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceMessage,
+                    payload: serde_json::json!({"message": coverage_assistant_message("assistant")}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_invalid_follow_up_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::MessageEnd
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_message_enqueue_follow_up_capacity_error_returns_original() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::MessageEnd
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            let actions = (0..33)
+                .map(|index| coverage_follow_up_action(&format!("message-{index}"), user_message("follow")))
+                .collect();
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions,
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let message = user_message("hello");
+    let transformed = runtime
+        .transform_message(message.clone(), CancellationToken::new())
+        .await;
+    assert!(coverage_agent_message_eq(&transformed, &message));
+}
+
+// ── tool seams ─────────────────────────────────────────────────────────────────────────
+
+fn coverage_tool_call() -> ToolCall {
+    ToolCall {
+        id: "tool-1".into(),
+        name: "coverage-tool".into(),
+        arguments: serde_json::Map::new(),
+        thought_signature: None,
+    }
+}
+
+fn coverage_after_tool_context() -> AfterToolCallContext {
+    AfterToolCallContext {
+        assistant_message: assistant("assistant"),
+        tool_call: coverage_tool_call(),
+        args: serde_json::json!({}),
+        result: AgentToolResult::default(),
+        is_error: false,
+        context: AgentContext::default(),
+    }
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_tool_result_invocation_error_returns_default() {
+    let runtime = coverage_runtime_with_cwd("");
+    let result = runtime
+        .transform_tool_result(&coverage_after_tool_context(), &CancellationToken::new())
+        .await;
+    assert!(result.content.is_none());
+    assert!(result.is_error.is_none());
+    assert!(result.terminate.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_tool_result_dispatch_error_returns_default() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::ToolResult
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "tool result failed"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let result = runtime
+        .transform_tool_result(&coverage_after_tool_context(), &CancellationToken::new())
+        .await;
+    assert!(result.content.is_none());
+    assert!(result.is_error.is_none());
+    assert!(result.terminate.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_tool_result_invalid_follow_up_returns_default() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::ToolResult
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let result = runtime
+        .transform_tool_result(&coverage_after_tool_context(), &CancellationToken::new())
+        .await;
+    assert!(result.content.is_none());
+    assert!(result.is_error.is_none());
+    assert!(result.terminate.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_transform_tool_result_enqueue_follow_up_capacity_error_returns_default() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::ToolResult
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            let actions = (0..33)
+                .map(|index| coverage_follow_up_action(&format!("tool-{index}"), user_message("follow")))
+                .collect();
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions,
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let result = runtime
+        .transform_tool_result(&coverage_after_tool_context(), &CancellationToken::new())
+        .await;
+    assert!(result.content.is_none());
+    assert!(result.is_error.is_none());
+    assert!(result.terminate.is_none());
+}
+
+#[tokio::test]
+async fn runtime_ext_observe_tool_execution_ignores_invocation_error_with_empty_cwd() {
+    let runtime = Arc::new(coverage_runtime_with_cwd(""));
+    let (listener, _) = runtime.make_loop_listener();
+    listener(
+        crate::types::LoopEvent::ToolExecutionStart {
+            tool_call_id: "tool-1".into(),
+            tool_name: "coverage-tool".into(),
+            args: serde_json::json!({}),
+        },
+        CancellationToken::new(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn runtime_ext_before_tool_call_blocked_error_non_cancelled() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::ToolCall
+            && invocation.class() == ExtensionHookClass::Gate
+        {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "limit reached"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let context = crate::types::BeforeToolCallContext {
+        assistant_message: assistant("assistant"),
+        tool_call: coverage_tool_call(),
+        args: serde_json::json!({}),
+        context: AgentContext::default(),
+    };
+    let result = runtime.before_tool_call(&context, &CancellationToken::new()).await;
+    assert!(result.block);
+    assert!(result.reason.unwrap().contains("resource_limit"));
+}
+
+#[tokio::test]
+async fn runtime_ext_before_tool_call_blocked_error_malformed_cancelled() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::ToolCall
+            && invocation.class() == ExtensionHookClass::Gate
+        {
+            Err(coverage_error(ExtensionErrorCode::Cancelled, "no separator here"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let context = crate::types::BeforeToolCallContext {
+        assistant_message: assistant("assistant"),
+        tool_call: coverage_tool_call(),
+        args: serde_json::json!({}),
+        context: AgentContext::default(),
+    };
+    let result = runtime.before_tool_call(&context, &CancellationToken::new()).await;
+    assert!(result.block);
+    assert!(result.reason.unwrap().contains("cancelled"));
+}
+
+// ── request seams ──────────────────────────────────────────────────────────────────────
+
+fn coverage_request_draft() -> NormalizedModelRequestDraft {
+    NormalizedModelRequestDraft {
+        provider: "test-provider".into(),
+        model: "test-model".into(),
+        system_instructions: Some("base system".into()),
+        messages: Vec::new(),
+        visible_tools: vec![
+            theway_llm_provider::Tool {
+                name: "bash".into(),
+                description: "bash tool".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+            theway_llm_provider::Tool {
+                name: "edit".into(),
+                description: "edit tool".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+        ],
+        executable_tool_names: vec!["bash".into(), "edit".into()],
+        generation_options: NormalizedGenerationOptions::default(),
+    }
+}
+
+fn coverage_assert_request_unchanged(
+    accepted: NormalizedModelRequestDraft,
+    base: &NormalizedModelRequestDraft,
+) {
+    assert_eq!(
+        serde_json::to_value(accepted).unwrap(),
+        serde_json::to_value(base).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn runtime_ext_before_model_request_invocation_error_returns_request() {
+    let runtime = coverage_runtime_with_cwd("");
+    let base = coverage_request_draft();
+    let accepted = runtime
+        .before_model_request(base.clone(), 16_384, CancellationToken::new())
+        .await;
+    coverage_assert_request_unchanged(accepted, &base);
+}
+
+#[tokio::test]
+async fn runtime_ext_before_model_request_dispatch_error_returns_request() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeModelRequest
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Err(coverage_error(ExtensionErrorCode::ResourceLimit, "request failed"))
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let base = coverage_request_draft();
+    let accepted = runtime
+        .before_model_request(base.clone(), 16_384, CancellationToken::new())
+        .await;
+    coverage_assert_request_unchanged(accepted, &base);
+}
+
+#[tokio::test]
+async fn runtime_ext_before_model_request_replace_payload_invalid_returns_request() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeModelRequest
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::ReplaceModelRequest,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let base = coverage_request_draft();
+    let accepted = runtime
+        .before_model_request(base.clone(), 16_384, CancellationToken::new())
+        .await;
+    coverage_assert_request_unchanged(accepted, &base);
+}
+
+#[tokio::test]
+async fn runtime_ext_before_model_request_invalid_follow_up_returns_request() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeModelRequest
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions: vec![ExtensionAction {
+                    kind: ExtensionActionKind::EnqueueFollowUp,
+                    payload: serde_json::json!({}),
+                }],
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let base = coverage_request_draft();
+    let accepted = runtime
+        .before_model_request(base.clone(), 16_384, CancellationToken::new())
+        .await;
+    coverage_assert_request_unchanged(accepted, &base);
+}
+
+#[tokio::test]
+async fn runtime_ext_before_model_request_enqueue_follow_up_capacity_error_returns_request() {
+    let runtime = coverage_runtime_with_handler("/workspace", |invocation| {
+        if invocation.event() == ExtensionLifecycleEvent::BeforeModelRequest
+            && invocation.class() == ExtensionHookClass::Transform
+        {
+            let actions = (0..33)
+                .map(|index| coverage_follow_up_action(&format!("request-{index}"), user_message("follow")))
+                .collect();
+            Ok(ExtensionActionBatch {
+                decision: None,
+                actions,
+            })
+        } else {
+            Ok(empty_batch())
+        }
+    });
+    let base = coverage_request_draft();
+    let accepted = runtime
+        .before_model_request(base.clone(), 16_384, CancellationToken::new())
+        .await;
+    coverage_assert_request_unchanged(accepted, &base);
+}
+
+// ── provider seams ─────────────────────────────────────────────────────────────────────
+
+struct NonTransformRequestPort;
+
+macro_rules! impl_non_transform_noop_domain {
+    ($trait_name:ident, $method:ident) => {
+        #[async_trait]
+        impl $trait_name for NonTransformRequestPort {
+            async fn $method(
+                &self,
+                _invocation: RuntimeExtensionInvocation,
+            ) -> RawRuntimeExtensionResult {
+                Ok(empty_batch())
+            }
+        }
+    };
+}
+
+impl_non_transform_noop_domain!(RuntimeSessionExtensionPort, invoke_session);
+impl_non_transform_noop_domain!(RuntimeRunExtensionPort, invoke_run);
+impl_non_transform_noop_domain!(RuntimeMessageExtensionPort, invoke_message);
+impl_non_transform_noop_domain!(RuntimeToolExtensionPort, invoke_tool);
+impl_non_transform_noop_domain!(RuntimeCompactionExtensionPort, invoke_compaction);
+
+#[async_trait]
+impl RuntimeRequestExtensionPort for NonTransformRequestPort {
+    fn has_request_hook(
+        &self,
+        _event: ExtensionLifecycleEvent,
+        _class: ExtensionHookClass,
+    ) -> bool {
+        true
+    }
+
+    async fn invoke_request(
+        &self,
+        _invocation: RuntimeExtensionInvocation,
+    ) -> RawRuntimeExtensionResult {
+        Ok(empty_batch())
+    }
+
+    async fn dispatch_request(
+        &self,
+        _invocation: RuntimeExtensionInvocation,
+    ) -> RuntimeExtensionResult {
+        Ok(ValidatedRuntimeExtensionResult::Observe(ValidatedObserveResult))
+    }
+}
+
+fn coverage_provider_runtime_with_port(
+    port: Arc<dyn RuntimeExtensionPort>,
+    cwd: &str,
+) -> Arc<HarnessRuntimeExtensions> {
+    Arc::new(HarnessRuntimeExtensions::new(
+        port,
+        "coverage-provider-session".into(),
+        cwd.into(),
+        false,
+        None,
+        ExtensionModelContextProjection::default(),
+    ))
+}
+
+fn coverage_headers() -> ProviderRequestHeaders {
+    ProviderRequestHeaders {
+        format: ProviderWireFormat::OpenAiResponses,
+        headers: [("x-base".into(), "base".into())]
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn coverage_payload() -> ProviderRequestPayload {
+    ProviderRequestPayload {
+        format: ProviderWireFormat::OpenAiResponses,
+        payload: serde_json::json!({"model": "base"}),
+    }
+}
+
+fn coverage_response() -> ProviderResponseMetadata {
+    ProviderResponseMetadata {
+        format: ProviderWireFormat::OpenAiResponses,
+        status: 200,
+        headers: [("content-type".into(), "text/event-stream".into())]
+            .into_iter()
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn runtime_ext_provider_returns_original_request_when_no_hook_subscribed() {
+    let runtime = coverage_provider_runtime_with_port(
+        Arc::new(CoverageFnPort::new(|_| Ok(empty_batch())).with_request_hook(false)),
+        "/workspace",
+    );
+    let interceptor = runtime.provider_request_interceptor();
+
+    let returned_headers = interceptor
+        .interceptor()
+        .transform_headers(coverage_headers())
+        .await
+        .unwrap();
+    assert_eq!(returned_headers.headers.get("x-base").map(String::as_str), Some("base"));
+
+    let returned_payload = interceptor
+        .interceptor()
+        .transform_payload(coverage_payload())
+        .await
+        .unwrap();
+    assert_eq!(returned_payload.payload["model"], "base");
+}
+
+#[tokio::test]
+async fn runtime_ext_provider_observe_no_hook_subscribed_is_noop() {
+    let runtime = coverage_provider_runtime_with_port(
+        Arc::new(CoverageFnPort::new(|_| Ok(empty_batch())).with_request_hook(false)),
+        "/workspace",
+    );
+    let interceptor = runtime.provider_request_interceptor();
+    interceptor
+        .interceptor()
+        .observe_response(coverage_response())
+        .await;
+}
+
+#[tokio::test]
+async fn runtime_ext_provider_rejects_non_transform_result() {
+    let runtime = coverage_provider_runtime_with_port(Arc::new(NonTransformRequestPort), "/workspace");
+    let interceptor = runtime.provider_request_interceptor();
+
+    let headers_error = interceptor
+        .interceptor()
+        .transform_headers(coverage_headers())
+        .await
+        .unwrap_err();
+    assert_eq!(headers_error.code, "contract_violation");
+
+    let payload_error = interceptor
+        .interceptor()
+        .transform_payload(coverage_payload())
+        .await
+        .unwrap_err();
+    assert_eq!(payload_error.code, "contract_violation");
+}
+
+#[tokio::test]
+async fn runtime_ext_provider_rejects_disallowed_transform_action() {
+    let runtime = coverage_provider_runtime_with_port(
+        Arc::new(CoverageFnPort::new(|invocation| {
+            if matches!(
+                invocation.event(),
+                ExtensionLifecycleEvent::BeforeProviderRequestHeaders
+                    | ExtensionLifecycleEvent::BeforeProviderRequestRaw
+            ) {
+                Ok(ExtensionActionBatch {
+                    decision: None,
+                    actions: vec![coverage_follow_up_action(
+                        "provider-follow-up",
+                        user_message("follow"),
+                    )],
+                })
+            } else {
+                Ok(empty_batch())
+            }
+        })),
+        "/workspace",
+    );
+    let interceptor = runtime.provider_request_interceptor();
+
+    let headers_error = interceptor
+        .interceptor()
+        .transform_headers(coverage_headers())
+        .await
+        .unwrap_err();
+    assert_eq!(headers_error.code, "invalid_provider_action");
+
+    let payload_error = interceptor
+        .interceptor()
+        .transform_payload(coverage_payload())
+        .await
+        .unwrap_err();
+    assert_eq!(payload_error.code, "invalid_provider_action");
+}
+
+#[tokio::test]
+async fn runtime_ext_provider_observe_ignores_invocation_error_with_empty_cwd() {
+    let runtime = coverage_provider_runtime_with_port(
+        Arc::new(CoverageFnPort::new(|_| Ok(empty_batch()))),
+        "",
+    );
+    let interceptor = runtime.provider_request_interceptor();
+    interceptor
+        .interceptor()
+        .observe_response(coverage_response())
+        .await;
+}
+
+#[tokio::test]
+async fn runtime_ext_provider_observe_request_failure_ignores_invocation_error_with_empty_cwd() {
+    let runtime = coverage_provider_runtime_with_port(
+        Arc::new(CoverageFnPort::new(|_| Ok(empty_batch()))),
+        "",
+    );
+    let interceptor = runtime.provider_request_interceptor();
+    interceptor
+        .interceptor()
+        .observe_request_failure(ProviderRequestFailure {
+            format: ProviderWireFormat::AnthropicMessages,
+            stage: ProviderRequestFailureStage::Transport,
+            code: "tcp_connect".into(),
+            message: "connection refused".into(),
+        })
+        .await;
 }

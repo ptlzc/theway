@@ -797,3 +797,97 @@ fn replace_mcp_tools_drops_new_tools_with_colliding_names() {
         "exactly one shared_tool remains"
     );
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Coverage-gap additions: events / session / run edge branches
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn subscribe_harness_unsubscribe_noop_after_listener_removed() {
+    let h = harness();
+    let unsubscribe = h.subscribe_harness(Arc::new(|_event| {}));
+    h.harness_listeners.lock().clear();
+    // The closure must be a no-op when the listener is already gone.
+    unsubscribe();
+    assert!(h.harness_listeners.lock().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_runtime_extensions_times_out_when_run_never_idles() {
+    let h = harness();
+    // Simulate a run that never releases admission.
+    *h.agent.inner.run_active.lock() = true;
+    h.agent.inner.state.lock().is_streaming = true;
+
+    h.shutdown_runtime_extensions().await;
+
+    // The call returned despite the wedged run; cleanup state for the next tests.
+    h.agent.inner.release_run();
+}
+
+#[tokio::test]
+async fn rehydrate_from_session_ignores_unknown_model_and_invalid_thinking() {
+    let h = harness();
+    h.session()
+        .append_model_change("unknown-provider", "unknown-model")
+        .await
+        .unwrap();
+    h.session()
+        .append_thinking_level_change("not-a-level")
+        .await
+        .unwrap();
+    h.agent.state().model = None;
+    h.agent.state().thinking_level = None;
+
+    let ctx = h.rehydrate_from_session().await.unwrap();
+
+    assert_eq!(ctx.model.as_ref().unwrap().model_id, "unknown-model");
+    assert!(h.agent.state().model.is_none());
+    assert_eq!(h.agent.state().thinking_level, None);
+}
+
+#[tokio::test]
+async fn prompt_with_images_with_empty_text_still_sends_images() {
+    let h = harness_with_stream(faux_stream("ok"));
+    h.prompt_with_images(
+        "",
+        vec![ImageContent {
+            data: "base64".into(),
+            mime_type: "image/png".into(),
+        }],
+    )
+    .await
+    .unwrap();
+
+    let messages = h.agent.state().messages.clone();
+    let user = messages.iter().find_map(|m| match m {
+        AgentMessage::Llm(PiMessage::User(user)) => Some(user),
+        _ => None,
+    });
+    let user = user.unwrap();
+    match &user.content {
+        UserContent::Blocks(blocks) => {
+            assert_eq!(blocks.len(), 1);
+            assert!(matches!(blocks[0], UserContentBlock::Image(_)));
+        }
+        other => panic!("expected image block, got {other:?}"),
+    }
+}
+
+#[test]
+fn check_budget_cap_allows_when_cost_below_cap() {
+    let mut h = harness();
+    h.budget_cap_usd = Some(1.0);
+    h.cost.reset();
+    assert!(h.check_budget_cap().is_ok());
+}
+
+#[test]
+fn harness_construction_falls_back_to_dot_cwd_when_blank() {
+    let storage: Arc<dyn SessionStorage> = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage);
+    let mut opts = AgentHarnessOptions::new(faux_model(), session);
+    opts.runtime_extension_cwd = "   ".into();
+
+    let _h = AgentHarness::new(opts);
+}

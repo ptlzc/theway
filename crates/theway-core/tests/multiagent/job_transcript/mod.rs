@@ -210,3 +210,37 @@ fn job_transcript_exposes_all_fields() {
 // daemon's `Arc<dyn JobTranscriptStore>` injection seam.
 #[allow(dead_code)]
 fn assert_store_is_object_safe(_store: &dyn JobTranscriptStore) {}
+
+#[test]
+fn tail_within_bytes_starts_on_char_boundary_when_aligned() {
+    let value = "abcdef";
+    let tail = super::tail_within_bytes(value, 3);
+    assert_eq!(tail, "def");
+}
+
+#[test]
+fn append_message_drops_oldest_until_total_fits_before_len_one() {
+    let mut job = job();
+    let cap = MAX_MESSAGES_BYTES;
+    // B and C fit together; appending A pushes the total over the cap, and
+    // dropping B brings it back under the cap while len is still > 1.
+    let b = serde_json::json!({"role": "b", "blob": "x".repeat(cap / 2)});
+    let c = serde_json::json!({"role": "c", "blob": "x".repeat(cap / 4)});
+    let a = serde_json::json!({"role": "a", "blob": "x".repeat(cap / 2)});
+
+    append_message(&mut job, &b);
+    append_message(&mut job, &c);
+    assert_eq!(job.messages.len(), 2);
+    assert!(!job.messages_truncated);
+
+    append_message(&mut job, &a);
+    assert_eq!(job.messages.len(), 2);
+    assert_eq!(job.messages[0]["role"], serde_json::json!("c"));
+    assert_eq!(job.messages[1]["role"], serde_json::json!("a"));
+    assert!(job.messages_truncated);
+}
+
+#[test]
+fn tail_within_bytes_with_zero_budget_returns_empty() {
+    assert_eq!(super::tail_within_bytes("abcdef", 0), "");
+}

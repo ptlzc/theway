@@ -1,6 +1,7 @@
 //! Tests for deterministic tool-result virtualization in LLM context.
 
 use super::*;
+use crate::agent::session::session::SessionTreeEntry;
 use crate::AgentMessage;
 use serde_json::json;
 use theway_llm_provider::{
@@ -269,4 +270,199 @@ fn config_override_falls_back_on_non_positive() {
     let message = tool_result("call_1", "bash", &"x".repeat(100), None, false);
     let out = virtualize_tool_results(vec![message]);
     assert_eq!(text_of(&out[0]), "x".repeat(100));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// collapse / transform / assembly coverage gap additions
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn compact_context_from_entry_skips_non_custom_and_other_types() {
+    let message = SessionTreeEntry::Message {
+        id: "m".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        message: user_message_for_context("hi"),
+    };
+    assert_eq!(
+        super::collapse::compact_context_from_entry(&message),
+        None
+    );
+
+    let other = SessionTreeEntry::Custom {
+        id: "c".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: "other".into(),
+        data: Some(serde_json::json!({ "compactText": "text" })),
+    };
+    assert_eq!(super::collapse::compact_context_from_entry(&other), None);
+}
+
+#[test]
+fn compact_context_from_entry_parses_partial_and_legacy_payloads() {
+    // sourceSessionId present => short-circuit skips the later && operands.
+    let with_source = SessionTreeEntry::Custom {
+        id: "c1".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: super::collapse::COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "s",
+            "compactText": "",
+            "rawTextRef": ""
+        })),
+    };
+    let parsed = super::collapse::compact_context_from_entry(&with_source).unwrap();
+    assert_eq!(parsed.source_session_id, "s");
+
+    // source empty + compactText non-empty => second operand False.
+    let with_text = SessionTreeEntry::Custom {
+        id: "c2".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: super::collapse::COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "",
+            "compactText": "summary",
+            "rawTextRef": ""
+        })),
+    };
+    let parsed = super::collapse::compact_context_from_entry(&with_text).unwrap();
+    assert_eq!(parsed.compact_text, "summary");
+
+    // source/compact empty + rawTextRef non-empty => third operand False.
+    let with_raw = SessionTreeEntry::Custom {
+        id: "c3".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: super::collapse::COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "",
+            "compactText": "",
+            "rawTextRef": "raw"
+        })),
+    };
+    let parsed = super::collapse::compact_context_from_entry(&with_raw).unwrap();
+    assert_eq!(parsed.raw_text_ref, "raw");
+
+    // All empty => None.
+    let all_empty = SessionTreeEntry::Custom {
+        id: "c4".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: super::collapse::COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "",
+            "compactText": "",
+            "rawTextRef": ""
+        })),
+    };
+    assert_eq!(
+        super::collapse::compact_context_from_entry(&all_empty),
+        None
+    );
+}
+
+#[test]
+fn compact_context_text_filters_empty_text() {
+    let entry = SessionTreeEntry::Custom {
+        id: "c".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: super::collapse::COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+        data: Some(serde_json::json!({
+            "sourceSessionId": "s",
+            "compactText": "  ",
+            "rawTextRef": "raw"
+        })),
+    };
+    assert_eq!(super::collapse::compact_context_text(&entry), None);
+}
+
+#[test]
+fn exit_code_handles_u64_and_string_values() {
+    let result = |details: Option<serde_json::Value>| ToolResultMessage {
+        role: ToolResultRole::ToolResult,
+        tool_call_id: "c".into(),
+        tool_name: "bash".into(),
+        content: vec![UserContentBlock::text("x".repeat(5000))],
+        details,
+        is_error: false,
+        timestamp: 0,
+    };
+
+    // u64::MAX is not representable as i64; as_i64 fails, as_u64 succeeds.
+    let out = super::transform::virtualize_tool_results_with_max_chars(
+        vec![AgentMessage::Llm(PiMessage::ToolResult(result(Some(
+            serde_json::json!({ "exitCode": u64::MAX }),
+        ))))],
+        100,
+    );
+    let text = text_of(&out[0]);
+    assert!(text.contains(&format!("exit {};", u64::MAX)), "{text}");
+
+    // A string exit code fails both i64 and u64 and falls back to is_error.
+    let out = super::transform::virtualize_tool_results_with_max_chars(
+        vec![AgentMessage::Llm(PiMessage::ToolResult(result(Some(
+            serde_json::json!({ "exitCode": "not-a-number" }),
+        ))))],
+        100,
+    );
+    let text = text_of(&out[0]);
+    assert!(text.contains("exit 0;"), "{text}");
+}
+
+#[test]
+fn exit_code_without_exit_keys_falls_back_to_is_error() {
+    let result = ToolResultMessage {
+        role: ToolResultRole::ToolResult,
+        tool_call_id: "c".into(),
+        tool_name: "bash".into(),
+        content: vec![UserContentBlock::text("x".repeat(5000))],
+        details: Some(serde_json::json!({ "full_text": "y".repeat(5000) })),
+        is_error: true,
+        timestamp: 0,
+    };
+    let out = super::transform::virtualize_tool_results_with_max_chars(
+        vec![AgentMessage::Llm(PiMessage::ToolResult(result))],
+        100,
+    );
+    let text = text_of(&out[0]);
+    assert!(text.contains("exit 1;"), "{text}");
+}
+
+#[test]
+fn build_session_context_skips_other_custom_types_and_empty_compact_text() {
+    let entries = vec![
+        SessionTreeEntry::Custom {
+            id: "c1".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            custom_type: "other_custom".into(),
+            data: Some(serde_json::json!({ "a": 1 })),
+        },
+        SessionTreeEntry::Custom {
+            id: "c2".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            custom_type: super::collapse::COMPACT_CONTEXT_CUSTOM_TYPE.into(),
+            data: Some(serde_json::json!({
+                "sourceSessionId": "s",
+                "compactText": " ",
+                "rawTextRef": "raw"
+            })),
+        },
+    ];
+
+    let ctx = super::assembly::build_session_context(&entries);
+    assert!(ctx.messages.is_empty(), "{:?}", ctx.messages);
+}
+
+fn user_message_for_context(text: &str) -> AgentMessage {
+    AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
+        role: theway_llm_provider::UserRole::User,
+        content: theway_llm_provider::UserContent::Text(text.into()),
+        timestamp: 0,
+    }))
 }

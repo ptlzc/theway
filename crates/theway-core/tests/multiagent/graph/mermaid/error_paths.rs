@@ -114,3 +114,29 @@ fn render_tree_handles_missing_dependency() {
 
     assert!(tree.contains("[wait]"));
 }
+
+#[test]
+fn parse_mermaid_malformed_target_with_already_declared_id_is_an_error() {
+    let res = parse_mermaid("graph TD\nA[\"a: 1\"] --> A,");
+    assert!(
+        res.errors
+            .iter()
+            .any(|e| e.contains("Line 2") && e.contains("unable to parse target node")),
+        "{:?}",
+        res.errors
+    );
+}
+
+#[test]
+fn parse_mermaid_label_with_closing_bracket_reports_parse_error() {
+    // `]` inside a label is not representable in the preprocess regexes; the
+    // line is reported as unparseable instead.
+    let res = parse_mermaid("graph TD\nA[a: 1]]");
+    assert!(
+        res.errors
+            .iter()
+            .any(|e| e.contains("Line 2") && e.contains("unable to parse")),
+        "{:?}",
+        res.errors
+    );
+}

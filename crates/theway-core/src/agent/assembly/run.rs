@@ -9,15 +9,37 @@ use super::{AgentHarness, OnTurnEndContext, SessionEvent, TurnEndAction};
 
 const RUNTIME_EXTENSION_FOLLOW_UP_CHAIN_CAP: u32 = 16;
 
+fn user_message_from_text(text: impl Into<String>) -> AgentMessage {
+    AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
+        role: theway_llm_provider::UserRole::User,
+        content: theway_llm_provider::UserContent::Text(text.into()),
+        timestamp: chrono::Utc::now().timestamp_millis(),
+    }))
+}
+
+fn user_message_from_text_and_images(
+    text: impl Into<String>,
+    images: Vec<ImageContent>,
+) -> AgentMessage {
+    let mut blocks: Vec<theway_llm_provider::UserContentBlock> = images
+        .into_iter()
+        .map(theway_llm_provider::UserContentBlock::Image)
+        .collect();
+    let text = text.into();
+    if !text.is_empty() {
+        blocks.insert(0, theway_llm_provider::UserContentBlock::text(text));
+    }
+    AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
+        role: theway_llm_provider::UserRole::User,
+        content: theway_llm_provider::UserContent::Blocks(blocks),
+        timestamp: chrono::Utc::now().timestamp_millis(),
+    }))
+}
+
 impl AgentHarness {
     /// Prompt the agent with text. Runs auto-compaction first and persists results.
     pub async fn prompt(&self, text: impl Into<String>) -> Result<(), AgentRunError> {
-        let user_message = AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
-            role: theway_llm_provider::UserRole::User,
-            content: theway_llm_provider::UserContent::Text(text.into()),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        }));
-        self.prompt_with_message(user_message).await
+        self.prompt_with_message(user_message_from_text(text)).await
     }
 
     /// Prompt with text and images.
@@ -26,20 +48,27 @@ impl AgentHarness {
         text: impl Into<String>,
         images: Vec<ImageContent>,
     ) -> Result<(), AgentRunError> {
-        let mut blocks: Vec<theway_llm_provider::UserContentBlock> = images
-            .into_iter()
-            .map(theway_llm_provider::UserContentBlock::Image)
-            .collect();
-        let text = text.into();
-        if !text.is_empty() {
-            blocks.insert(0, theway_llm_provider::UserContentBlock::text(text));
-        }
-        let user_message = AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
-            role: theway_llm_provider::UserRole::User,
-            content: theway_llm_provider::UserContent::Blocks(blocks),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        }));
-        self.prompt_with_message(user_message).await
+        self.prompt_with_message(user_message_from_text_and_images(text, images))
+            .await
+    }
+
+    /// Persist a user prompt that the caller is queueing for a later run
+    /// (e.g. a model-less session). The message is appended to the persisted
+    /// transcript and the in-memory agent state, so the future queued run can
+    /// use [`AgentHarness::continue_`] instead of appending a duplicate.
+    pub async fn record_user_prompt(
+        &self,
+        text: impl Into<String>,
+        images: Vec<ImageContent>,
+    ) -> Result<(), crate::agent::types::SessionError> {
+        let message = if images.is_empty() {
+            user_message_from_text(text)
+        } else {
+            user_message_from_text_and_images(text, images)
+        };
+        self.session.append_messages(vec![message.clone()]).await?;
+        self.agent.state().messages.push(message);
+        Ok(())
     }
 
     async fn prompt_with_message(&self, message: AgentMessage) -> Result<(), AgentRunError> {

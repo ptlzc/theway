@@ -8,6 +8,7 @@ use crate::agent::session::memory_storage::MemorySessionStorage;
 use crate::agent::session::session::{Session, SessionStorage, SessionTreeEntry};
 use crate::agent::types::SessionError;
 use crate::multiagent::graph::engine::DagEngine;
+use crate::multiagent::graph::types::DagStatus;
 use crate::multiagent::jobs::SubagentJobRegistry;
 use crate::multiagent::types::AgentRunParams;
 use theway_llm_provider::{
@@ -268,4 +269,146 @@ async fn persist_state_best_effort_warns_when_append_fails() {
     };
 
     persist_state_best_effort(&h, &state).await;
+}
+
+#[test]
+fn transcript_from_messages_skips_custom_messages() {
+    let messages = vec![
+        user_msg("hi"),
+        AgentMessage::Custom(crate::types::CustomMessage {
+            role: "note".into(),
+            timestamp: 0,
+            payload: serde_json::json!({"a": 1}),
+        }),
+    ];
+
+    let transcript = transcript_from_messages(&messages, 10_000);
+
+    assert!(transcript.contains("User: hi"));
+    assert!(!transcript.contains("note"));
+}
+
+#[tokio::test]
+async fn stop_hook_with_uninitialized_harness_cell_pauses() {
+    let hook = stop_hook(
+        Arc::new(std::sync::OnceLock::new()),
+        Arc::new(DagEngine::new()),
+        goal_resolver(),
+        SubagentJobRegistry::new(),
+        None,
+    );
+
+    let decision = hook(
+        ctx(),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    match decision.action {
+        TurnEndAction::Pause { ref reason } => {
+            assert!(reason.contains("not initialized"), "{reason}");
+        }
+        other => panic!("expected Pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn ensure_goal_run_skips_non_goal_runs_and_terminal_goal_runs() {
+    let h = harness();
+    let engine = DagEngine::new();
+    // Insert a non-goal run first; the goal search must not match it.
+    let dag_def = crate::multiagent::graph::types::DagRunDef {
+        name: "dag".into(),
+        nodes: vec![crate::multiagent::graph::types::DagNodeDef {
+            id: "a".into(),
+            agent: "x".into(),
+            task: "task".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            provider: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    engine.plan(dag_def, None, None).unwrap();
+    let run_id = ensure_goal_run(&engine, &h, "condition").await.unwrap();
+    assert!(run_id.starts_with("goal-"));
+
+    // A terminal goal run must also be skipped.
+    let engine = DagEngine::new();
+    let old_goal = engine.plan_goal("old goal", None);
+    engine.complete_goal(&old_goal, DagStatus::Completed, None);
+    let run_id = ensure_goal_run(&engine, &h, "condition").await.unwrap();
+    assert!(run_id.starts_with("goal-"));
+    assert_ne!(run_id, old_goal);
+}
+
+#[tokio::test]
+async fn evaluate_stop_hook_pauses_when_evaluator_run_fails() {
+    let h = harness();
+    set(&h, "finish".into()).await.unwrap();
+    let stream_fn: crate::types::StreamFn = Arc::new(move |_, _, _| {
+        let (stream, mut sender) =
+            theway_llm_provider::AssistantMessageEventStream::new();
+        let error = AssistantMessage {
+            role: theway_llm_provider::AssistantRole::Assistant,
+            content: vec![],
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: theway_llm_provider::Usage::default(),
+            stop_reason: theway_llm_provider::StopReason::Error,
+            error_message: Some("evaluator exploded".into()),
+            timestamp: 0,
+        };
+        sender.push(theway_llm_provider::AssistantMessageEvent::Error {
+            reason: theway_llm_provider::ErrorReason::Error,
+            error,
+        });
+        stream
+    });
+
+    let decision = evaluate_stop_hook(
+        h.clone(),
+        Arc::new(DagEngine::new()),
+        goal_resolver(),
+        SubagentJobRegistry::new(),
+        Some(stream_fn),
+        ctx(),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    match decision.action {
+        TurnEndAction::Pause { ref reason } => {
+            assert!(reason.contains("evaluator exploded"), "{reason}");
+        }
+        other => panic!("expected Pause, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn stop_hook_with_initialized_harness_cell_returns_noop_when_no_goal() {
+    let cell = Arc::new(std::sync::OnceLock::new());
+    let _ = cell.set(harness());
+    let hook = stop_hook(
+        cell,
+        Arc::new(DagEngine::new()),
+        goal_resolver(),
+        SubagentJobRegistry::new(),
+        None,
+    );
+
+    let decision = hook(ctx(), tokio_util::sync::CancellationToken::new()).await;
+
+    assert!(matches!(decision.action, TurnEndAction::Noop));
 }

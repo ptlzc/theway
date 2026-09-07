@@ -328,3 +328,96 @@ async fn persistent_state_port_rejects_cross_owner_batches_before_append() {
     ));
     assert!(store.appended_batch_sizes.lock().is_empty());
 }
+
+#[test]
+fn scope_allocator_rejects_blank_session_id() {
+    let err = RuntimeExtensionScopeAllocator::new("   ").unwrap_err();
+    assert!(matches!(err, ScopeAllocationError::EmptySessionId));
+}
+
+#[test]
+fn model_context_projection_apply_to_request_appends_system_sections() {
+    let projection = ExtensionModelContextProjection::rebuild(vec![
+        durable_context("anchor", "sys", 1, "section-one"),
+        durable_context("anchor", "sys2", 2, "section-two"),
+    ])
+    .unwrap();
+
+    let mut request = crate::agent::model_request::NormalizedModelRequestDraft {
+        provider: "p".into(),
+        model: "m".into(),
+        system_instructions: Some("base".into()),
+        messages: vec![],
+        visible_tools: vec![],
+        executable_tool_names: vec![],
+        generation_options: crate::agent::model_request::NormalizedGenerationOptions::default(),
+    };
+    projection.apply_to_request(&mut request);
+
+    assert_eq!(
+        request.system_instructions.as_deref(),
+        Some("base\n\nsection-one\n\nsection-two")
+    );
+}
+
+#[test]
+fn model_context_projection_apply_to_request_with_empty_base_uses_suffix() {
+    let projection = ExtensionModelContextProjection::rebuild(vec![
+        durable_context("anchor", "sys", 1, "section"),
+    ])
+    .unwrap();
+
+    let mut request = crate::agent::model_request::NormalizedModelRequestDraft {
+        provider: "p".into(),
+        model: "m".into(),
+        system_instructions: Some(String::new()),
+        messages: vec![],
+        visible_tools: vec![],
+        executable_tool_names: vec![],
+        generation_options: crate::agent::model_request::NormalizedGenerationOptions::default(),
+    };
+    projection.apply_to_request(&mut request);
+
+    assert_eq!(request.system_instructions.as_deref(), Some("section"));
+}
+
+#[test]
+fn invocation_rejects_blank_context_fields_and_zero_sequence() {
+    let err = RuntimeExtensionInvocation::new(
+        ExtensionLifecycleEvent::Input,
+        ExtensionHookClass::Transform,
+        RuntimeExtensionContext::new("   ", "/workspace", 1),
+        serde_json::json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ExtensionErrorCode::InvalidPayload);
+
+    let err = RuntimeExtensionInvocation::new(
+        ExtensionLifecycleEvent::Input,
+        ExtensionHookClass::Transform,
+        RuntimeExtensionContext::new("session-1", "   ", 1),
+        serde_json::json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ExtensionErrorCode::InvalidPayload);
+
+    let err = RuntimeExtensionInvocation::new(
+        ExtensionLifecycleEvent::Input,
+        ExtensionHookClass::Transform,
+        RuntimeExtensionContext::new("session-1", "/workspace", 0),
+        serde_json::json!({}),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ExtensionErrorCode::InvalidPayload);
+}
+
+#[test]
+fn validate_domain_event_rejects_mismatched_domain() {
+    let err = super::validate_domain_event(
+        RuntimeExtensionDomain::Session,
+        &invocation(ExtensionLifecycleEvent::Input, ExtensionHookClass::Transform),
+    )
+    .unwrap_err();
+
+    assert_eq!(err.code, ExtensionErrorCode::InvalidHook);
+}

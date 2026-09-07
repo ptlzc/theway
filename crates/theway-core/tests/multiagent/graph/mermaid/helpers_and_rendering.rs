@@ -207,3 +207,142 @@ fn run_token_stats_sums_all_nodes() {
 
     assert_eq!(run_token_stats(&run), (17, 8));
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Coverage-gap additions
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn split_ampersand_does_not_close_quote_after_backslash() {
+    // The `"` after `\` must not end the quoted section, so the `&` stays inside.
+    let parts = split_ampersand_outside_quotes(r#"A["x\" & y"] & B"#);
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0], r#"A["x\" & y"] "#);
+    assert_eq!(parts[1], " B");
+}
+
+#[test]
+fn split_label_handles_double_quotes_and_unclosed_quotes() {
+    let (agent, task) = split_label("\"agent: task\"");
+    assert_eq!(agent.as_deref(), Some("agent"));
+    assert_eq!(task.as_deref(), Some("task"));
+
+    let (agent, task) = split_label("\"unclosed");
+    assert_eq!(agent, None);
+    assert_eq!(task.as_deref(), Some("\"unclosed"));
+
+    let (agent, task) = split_label("'unclosed");
+    assert_eq!(agent, None);
+    assert_eq!(task.as_deref(), Some("'unclosed"));
+}
+
+#[test]
+fn split_label_handles_colon_at_zero_and_whitespace_before_colon() {
+    let (agent, task) = split_label(": task");
+    assert_eq!(agent, None);
+    assert_eq!(task.as_deref(), Some(": task"));
+
+    let (agent, task) = split_label("a b: task");
+    assert_eq!(agent, None);
+    assert_eq!(task.as_deref(), Some("a b: task"));
+}
+
+#[test]
+fn split_label_handles_agent_with_empty_task() {
+    let (agent, task) = split_label("agent:");
+    assert_eq!(agent.as_deref(), Some("agent"));
+    assert_eq!(task, None);
+}
+
+#[test]
+fn node_summary_line_without_attempt_or_error_has_no_suffix() {
+    let mut run = build_run(&DagRunDef {
+        name: "t".into(),
+        nodes: vec![node_def("a", &[])],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    });
+    let n = run.node_mut("a").unwrap();
+    n.status = NodeStatus::Succeeded;
+    n.attempt = 1;
+    n.error = None;
+
+    let line = node_summary_line(run.node("a").unwrap());
+
+    assert!(line.contains("[done] a [x] task"));
+    assert!(!line.contains("attempts="));
+    assert!(!line.contains('—'));
+}
+
+#[test]
+fn run_summary_line_skips_nodes_without_started_at_and_without_output() {
+    let mut run = build_run(&DagRunDef {
+        name: "t".into(),
+        nodes: vec![node_def("a", &[])],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    });
+    run.id = "dag-1".into();
+    let n = run.node_mut("a").unwrap();
+    n.status = NodeStatus::Succeeded;
+    n.started_at = None;
+    n.completed_at = None;
+    n.output_tokens = None;
+
+    let line = run_summary_line(&run);
+
+    assert!(line.contains("dag-1"));
+    assert!(!line.contains("tok/s"));
+
+    let n = run.node_mut("a").unwrap();
+    n.started_at = Some(1_000);
+    n.completed_at = Some(2_000);
+    n.output_tokens = Some(0);
+    let line = run_summary_line(&run);
+    assert!(!line.contains("tok/s"), "{line}");
+}
+
+#[test]
+fn run_summary_line_computes_tps_when_tokens_and_positive_active_time() {
+    let mut run = build_run(&DagRunDef {
+        name: "t".into(),
+        nodes: vec![node_def("a", &[])],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    });
+    run.id = "dag-1".into();
+    let n = run.node_mut("a").unwrap();
+    n.status = NodeStatus::Succeeded;
+    n.started_at = Some(1_000);
+    n.completed_at = Some(11_000);
+    n.output_tokens = Some(20);
+
+    let line = run_summary_line(&run);
+
+    assert!(line.contains("2.0 tok/s"), "{line}");
+    assert!(line.contains("↑"));
+}
+
+#[test]
+fn run_summary_line_active_time_zero_or_negative_is_skipped() {
+    let mut run = build_run(&DagRunDef {
+        name: "t".into(),
+        nodes: vec![node_def("a", &[])],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    });
+    run.id = "dag-1".into();
+    let n = run.node_mut("a").unwrap();
+    n.status = NodeStatus::Succeeded;
+    n.started_at = Some(1_000);
+    n.completed_at = Some(1_000);
+    n.output_tokens = Some(20);
+
+    let line = run_summary_line(&run);
+
+    assert!(!line.contains("tok/s"), "{line}");
+}

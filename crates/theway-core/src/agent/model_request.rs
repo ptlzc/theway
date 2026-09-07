@@ -122,3 +122,179 @@ impl NormalizedModelRequestDraft {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use theway_llm_provider::Tool;
+
+    fn tool(name: &str, parameters: serde_json::Value) -> Tool {
+        Tool {
+            name: name.to_string(),
+            description: String::new(),
+            parameters,
+        }
+    }
+
+    fn draft(provider: &str, model: &str, tools: &[&str]) -> NormalizedModelRequestDraft {
+        NormalizedModelRequestDraft {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            system_instructions: None,
+            messages: Vec::new(),
+            visible_tools: tools
+                .iter()
+                .map(|name| tool(name, serde_json::json!({"type": "object"})))
+                .collect(),
+            executable_tool_names: tools.iter().map(|name| name.to_string()).collect(),
+            generation_options: NormalizedGenerationOptions::default(),
+        }
+    }
+
+    #[test]
+    fn validates_identical_draft_and_model_identity() {
+        let base = draft("p", "m", &["t"]);
+        assert!(
+            draft("p", "m", &["t"])
+                .validate_replacement(&base, 100)
+                .is_ok()
+        );
+
+        let model_changed = draft("p", "other", &["t"])
+            .validate_replacement(&base, 100)
+            .unwrap_err();
+        assert!(model_changed.contains("identity is immutable"));
+
+        let empty_provider = draft("", "m", &["t"])
+            .validate_replacement(&draft("", "m", &["t"]), 100)
+            .unwrap_err();
+        assert!(empty_provider.contains("cannot be empty"));
+
+        let empty_model = draft("p", "", &["t"])
+            .validate_replacement(&draft("p", "", &["t"]), 100)
+            .unwrap_err();
+        assert!(empty_model.contains("cannot be empty"));
+    }
+
+    #[test]
+    fn validates_visible_tool_names_and_parameters() {
+        let base = draft("p", "m", &["t"]);
+
+        let mut empty_name = draft("p", "m", &["t"]);
+        empty_name.visible_tools = vec![tool("", serde_json::json!({"type": "object"}))];
+        assert!(
+            empty_name
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("non-empty and unique")
+        );
+
+        let mut duplicate = draft("p", "m", &["t", "t"]);
+        duplicate.visible_tools = vec![
+            tool("t", serde_json::json!({"type": "object"})),
+            tool("t", serde_json::json!({"type": "object"})),
+        ];
+        assert!(
+            duplicate
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("non-empty and unique")
+        );
+
+        let mut boolean_params = draft("p", "m", &["t"]);
+        boolean_params.visible_tools = vec![tool("t", serde_json::Value::Bool(true))];
+        assert!(boolean_params.validate_replacement(&base, 100).is_ok());
+
+        let mut missing_ref = draft("p", "m", &["t"]);
+        missing_ref.visible_tools = vec![tool("other", serde_json::json!({"type": "object"}))];
+        missing_ref.executable_tool_names = vec!["other".to_string()];
+        assert!(
+            missing_ref
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("no executable reference")
+        );
+    }
+
+    #[test]
+    fn validates_executable_tool_names_and_set_equality() {
+        let base = draft("p", "m", &["t"]);
+
+        let mut duplicate = draft("p", "m", &["t"]);
+        duplicate.executable_tool_names = vec!["t".to_string(), "t".to_string()];
+        assert!(
+            duplicate
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("unique members")
+        );
+
+        let mut missing = draft("p", "m", &["t"]);
+        missing.executable_tool_names = vec!["other".to_string()];
+        assert!(
+            missing
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("unique members")
+        );
+
+        let mut mismatch = draft("p", "m", &["t"]);
+        mismatch.executable_tool_names = Vec::new();
+        assert!(
+            mismatch
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("same catalog")
+        );
+    }
+
+    #[test]
+    fn validates_generation_options_limits() {
+        let base = draft("p", "m", &[]);
+
+        let mut non_finite = draft("p", "m", &[]);
+        non_finite.generation_options.temperature = Some(f32::NAN);
+        assert!(
+            non_finite
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("temperature must be finite")
+        );
+
+        let mut zero_max = draft("p", "m", &[]);
+        zero_max.generation_options.max_tokens = Some(0);
+        assert!(
+            zero_max
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("maxTokens")
+        );
+
+        let mut over_max = draft("p", "m", &[]);
+        over_max.generation_options.max_tokens = Some(200);
+        assert!(
+            over_max
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("maxTokens")
+        );
+
+        let mut no_limit = draft("p", "m", &[]);
+        no_limit.generation_options.max_tokens = Some(200);
+        assert!(no_limit.validate_replacement(&base, 0).is_ok());
+
+        let mut zero_budget = draft("p", "m", &[]);
+        zero_budget.generation_options.thinking_budgets = Some(ThinkingBudgets {
+            minimal: Some(0),
+            low: Some(1),
+            medium: Some(1),
+            high: Some(1),
+        });
+        assert!(
+            zero_budget
+                .validate_replacement(&base, 100)
+                .unwrap_err()
+                .contains("thinking budgets")
+        );
+    }
+}

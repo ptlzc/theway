@@ -179,3 +179,94 @@ fn list_runs_orders_newest_first() {
     let pos2 = list.iter().position(|r| r.id == r2.id).unwrap();
     assert!(pos2 < pos1, "newest run must sort first");
 }
+
+#[test]
+fn rehome_runs_without_matching_session_returns_zero() {
+    let engine = DagEngine::new();
+    engine.set_launcher(Some(Arc::new(FakeLauncher)));
+    let run = engine
+        .plan(run_def("t"), None, Some("session-a".into()))
+        .unwrap();
+
+    assert_eq!(engine.rehome_runs("session-b", "session-c"), 0);
+    assert_eq!(engine.get_run(&run.id).unwrap().session_id, Some("session-a".into()));
+}
+
+#[test]
+fn cancel_run_with_running_node_without_job_token_is_noop_for_jobs() {
+    let engine = DagEngine::new();
+    engine.inner.lock().runs.insert(
+        "run".into(),
+        DagRun {
+            id: "run".into(),
+            name: "t".into(),
+            nodes: vec![DagNode {
+                id: "a".into(),
+                agent: "x".into(),
+                task: "task".into(),
+                depends_on: Vec::new(),
+                timeout: None,
+                cwd: None,
+                provider: None,
+                model: None,
+                thinking: None,
+                max_iterations: None,
+                tools: None,
+                status: NodeStatus::Running,
+                job_id: None,
+                attempt: 0,
+                launch_gen: 0,
+                started_at: Some(1),
+                completed_at: None,
+                error: None,
+                input_tokens: None,
+                output_tokens: None,
+                result: None,
+                output: None,
+                live_preview: None,
+                last_active_at: None,
+            }],
+            status: DagStatus::Running,
+            kind: RunKind::Dag,
+            max_concurrency: 1,
+            fail_fast: false,
+            direction: Direction::Td,
+            created_at: 1,
+            session_id: None,
+            completed_at: None,
+            last_activity_at: 1,
+            error: None,
+        },
+    );
+
+    engine.cancel_run("run", Some("shutdown"));
+
+    let run = engine.get_run("run").unwrap();
+    assert_eq!(run.status, DagStatus::Cancelled);
+    assert_eq!(run.node("a").unwrap().status, NodeStatus::Cancelled);
+}
+
+#[test]
+fn retry_with_empty_explicit_ids_uses_all_blocked_nodes() {
+    let (engine, _launcher) = super::engine_with_launcher();
+    let def = super::run_def(
+        "t",
+        None,
+        None,
+        &[
+            ("a", "x", "t1", &[]),
+            ("b", "x", "t2", &["a"]),
+        ],
+    );
+    let run = engine.plan(def, None, None).unwrap();
+    let id = run.id.clone();
+    engine.on_node_completed(&id, "a", super::fail_outcome("boom"));
+    assert_eq!(
+        engine.get_run(&id).unwrap().node("b").unwrap().status,
+        NodeStatus::Cancelled
+    );
+
+    let reset = engine.retry(&id, Some(&[]));
+
+    assert_eq!(reset, vec!["a".to_string(), "b".to_string()]);
+}

@@ -779,3 +779,31 @@ fn build_session_context_with_compaction_missing_first_kept_keeps_only_summary()
         AgentMessage::Llm(PiMessage::Assistant(_))
     ));
 }
+
+#[test]
+fn latest_session_graph_state_skips_non_custom_entries() {
+    let entries = vec![SessionTreeEntry::Message {
+        id: "m".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        message: user_msg("hi"),
+    }];
+
+    assert!(latest_session_graph_state(&entries).is_none());
+}
+
+#[tokio::test]
+async fn session_name_skips_session_info_without_name() {
+    let (session, _storage) = session_with_storage();
+    session
+        .append_typed(SessionTreeEntry::SessionInfo {
+            id: "s".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            name: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(session.session_name().await.unwrap(), None);
+}

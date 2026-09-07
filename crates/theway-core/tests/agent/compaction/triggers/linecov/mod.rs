@@ -172,3 +172,124 @@ async fn do_compact_with_empty_first_kept_id_keeps_summary() {
     assert_eq!(messages.len(), 1);
     assert!(matches!(&messages[0], AgentMessage::Custom(c) if c.role == "compaction_summary"));
 }
+
+// Storage whose append_entry always fails, for append_compaction persistence-error paths.
+struct FailingAppendStorage {
+    inner: Arc<MemorySessionStorage>,
+}
+
+impl FailingAppendStorage {
+    fn new(inner: Arc<MemorySessionStorage>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStorage for FailingAppendStorage {
+    async fn get_metadata_json(&self) -> Result<serde_json::Value, crate::agent::types::SessionError> {
+        self.inner.get_metadata_json().await
+    }
+
+    async fn get_leaf_id(&self) -> Result<Option<String>, crate::agent::types::SessionError> {
+        self.inner.get_leaf_id().await
+    }
+
+    async fn set_leaf_id(&self, id: Option<String>) -> Result<(), crate::agent::types::SessionError> {
+        self.inner.set_leaf_id(id).await
+    }
+
+    async fn create_entry_id(&self) -> Result<String, crate::agent::types::SessionError> {
+        self.inner.create_entry_id().await
+    }
+
+    async fn append_entry(&self, _entry: SessionTreeEntry) -> Result<(), crate::agent::types::SessionError> {
+        Err(crate::agent::types::SessionError {
+            code: crate::agent::types::SessionErrorCode::StorageFailure,
+            message: "append failed".into(),
+        })
+    }
+
+    async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, crate::agent::types::SessionError> {
+        self.inner.get_entry(id).await
+    }
+
+    async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, crate::agent::types::SessionError> {
+        self.inner.get_entries().await
+    }
+
+    async fn get_path_to_root(
+        &self,
+        leaf_id: Option<&str>,
+    ) -> Result<Vec<SessionTreeEntry>, crate::agent::types::SessionError> {
+        self.inner.get_path_to_root(leaf_id).await
+    }
+
+    async fn find_entries(&self, entry_type: &str) -> Result<Vec<SessionTreeEntry>, crate::agent::types::SessionError> {
+        self.inner.find_entries(entry_type).await
+    }
+
+    async fn get_label(&self, id: &str) -> Result<Option<String>, crate::agent::types::SessionError> {
+        self.inner.get_label(id).await
+    }
+}
+
+#[tokio::test]
+async fn do_compact_append_compaction_failure_returns_error() {
+    let inner = Arc::new(MemorySessionStorage::new());
+    let seed_session = Session::new(inner.clone());
+    seed_session.append_message(user_msg("hello")).await.unwrap();
+    let storage: Arc<dyn SessionStorage> = Arc::new(FailingAppendStorage::new(inner));
+    let session = Session::new(storage);
+    let registry = Arc::new(CompactAlgorithmRegistry::new());
+    let mut opts = AgentHarnessOptions::new(faux_model(), session.clone());
+    opts.compact_algorithms = registry;
+    opts.compaction.algorithm = "failing-append".to_string();
+    opts.compaction.keep_recent_tokens = 0;
+    let mut h = AgentHarness::new(opts);
+    let alg = FakeAlgorithm::new("failing-append");
+    Arc::get_mut(&mut h.compact_algorithms)
+        .expect("only owner")
+        .register(Arc::new(alg));
+
+    let err = h.do_compact(true, None).await.unwrap_err();
+
+    assert!(err.to_string().contains("session append compaction"));
+}
+
+#[tokio::test]
+async fn do_compact_keeps_summary_when_memory_state_diverged() {
+    let (mut h, session) = harness_with_session("diverged-memory");
+    session.append_message(user_msg("one")).await.unwrap();
+    session.append_message(user_msg("two")).await.unwrap();
+    session.append_message(user_msg("three")).await.unwrap();
+    // The in-memory mirror only has one message; the first kept entry is the
+    // third session message, so kept_in_memory_start (2) exceeds state len.
+    h.agent().state().messages = vec![user_msg("one")];
+    let entries = session.entries().await.unwrap();
+    let first_kept_entry_id = entries[2].id().to_string();
+    let mut alg = FakeAlgorithm::new("diverged-memory");
+    alg.first_kept_entry_id = Some(first_kept_entry_id);
+    Arc::get_mut(&mut h.compact_algorithms)
+        .expect("only owner")
+        .register(Arc::new(alg));
+
+    let ran = h.do_compact(true, None).await.unwrap();
+
+    assert!(ran);
+    let messages = h.agent().state().messages.clone();
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(&messages[0], AgentMessage::Custom(c) if c.role == "compaction_summary"));
+}
+
+#[tokio::test]
+async fn run_auto_compaction_triggers_do_compact_branch() {
+    let (h, session) = harness_with_session("auto-trigger");
+    h.compaction_settings.lock().keep_recent_tokens = 0;
+    let mut model = faux_model();
+    model.context_window = 100;
+    h.agent().state().model = Some(model);
+    h.agent().state().messages = vec![user_msg(&"x".repeat(4_000))];
+
+    assert!(h.run_auto_compaction().await.is_ok());
+    assert!(session.entries().await.unwrap().is_empty());
+}

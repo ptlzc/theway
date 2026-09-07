@@ -44,3 +44,23 @@ fn status_label_variants_and_predicates() {
     assert!(is_blocked(&NodeStatus::Cancelled));
     assert!(!is_blocked(&NodeStatus::Running));
 }
+
+#[test]
+fn downstream_closure_deduplicates_diamond_paths() {
+    let run = build_run(&run_def(
+        "t",
+        vec![
+            node_def("a", "x", "t", &[]),
+            node_def("b", "x", "t", &["a"]),
+            node_def("c", "x", "t", &["a"]),
+            node_def("d", "x", "t", &["b", "c"]),
+        ],
+    ));
+
+    let closure = downstream_closure(&run.nodes, "a");
+
+    assert_eq!(closure.len(), 3, "{closure:?}");
+    assert!(closure.contains(&"b".to_string()));
+    assert!(closure.contains(&"c".to_string()));
+    assert!(closure.contains(&"d".to_string()));
+}

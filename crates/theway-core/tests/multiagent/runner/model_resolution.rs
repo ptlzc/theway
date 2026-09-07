@@ -1,7 +1,7 @@
 //! `resolve_run_model`: explicit provider/model catalog resolution, the legacy
 //! model-only id rewrite, and the no-override parent fallback.
 
-use crate::multiagent::runner::resolve_run_model;
+use crate::multiagent::runner::{resolve_run_model, subagent_model_not_found_message};
 use theway_llm_provider::{
     Api, InputModality, Model, ModelCost, Provider, register_custom_model,
     unregister_custom_model,
@@ -122,4 +122,53 @@ fn no_overrides_return_the_parent_model() {
     assert!(resolve_run_model(None, None, None)
         .expect("no overrides must not error")
         .is_none());
+}
+
+#[test]
+fn model_not_found_message_for_known_provider_lists_candidates() {
+    let known = theway_llm_provider::list_models();
+    let Some(first) = known.first() else {
+        return;
+    };
+    let provider = first.provider.0.clone();
+
+    let message = subagent_model_not_found_message(&provider, "no-such-model-id");
+
+    assert!(message.contains("model not found in catalog"), "{message}");
+    assert!(message.contains(&provider), "{message}");
+}
+
+#[test]
+fn model_not_found_message_for_small_provider_lists_candidates_without_more_hint() {
+    let provider = "test-small-provider";
+    register_custom_model(model(provider, "only-model", "http://catalog.local/v1"));
+
+    let message = subagent_model_not_found_message(provider, "missing-id");
+
+    assert!(message.contains("model not found in catalog"), "{message}");
+    assert!(message.contains("only-model"), "{message}");
+    assert!(!message.contains("inside theway for all"), "{message}");
+
+    unregister_custom_model(&Provider::from(provider), "only-model");
+}
+
+#[test]
+fn model_not_found_message_for_provider_with_many_models_adds_more_hint() {
+    let provider = "test-many-provider";
+    for i in 0..13 {
+        register_custom_model(model(
+            provider,
+            &format!("model-{i}"),
+            "http://catalog.local/v1",
+        ));
+    }
+
+    let message = subagent_model_not_found_message(provider, "missing-id");
+
+    assert!(message.contains("model not found in catalog"), "{message}");
+    assert!(message.contains("inside theway for all 13 models"), "{message}");
+
+    for i in 0..13 {
+        unregister_custom_model(&Provider::from(provider), &format!("model-{i}"));
+    }
 }

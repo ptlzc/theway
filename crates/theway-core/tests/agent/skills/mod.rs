@@ -569,3 +569,71 @@ fn env_path_helpers_normalize_relative_paths() {
     assert_eq!(relative_env_path("/root", "/root/a"), "a");
     assert_eq!(relative_env_path("/root", "/other/a"), "other/a");
 }
+
+#[tokio::test]
+async fn walker_skips_node_modules_and_non_md_root_files() {
+    let mut env = TestEnv::default();
+    let root = "/skills";
+    env.put_info(root, FileKind::Directory);
+    env.dir_with_file(root, ".gitignore", FileKind::File);
+    env.put_content(&format!("{root}/.gitignore"), "# comment\nbuild/\n");
+    env.dir_with_skill("/skills/kept", "kept body");
+    // Root-level non-md file: ignored by the *.md-only rule.
+    env.put_info("/skills/notes.txt", FileKind::File);
+    env.put_content("/skills/notes.txt", "not a skill");
+    // node_modules directory must be skipped.
+    env.put_info("/skills/node_modules", FileKind::Directory);
+    // A symlink whose canonical target is missing: resolve_kind returns None
+    // in the second pass (no diagnostics).
+    env.put_info("/skills/link", FileKind::Symlink);
+    env.put_children(
+        root,
+        vec![
+            TestEnv::info("/skills/.gitignore", FileKind::File),
+            TestEnv::info("/skills/kept", FileKind::Directory),
+            TestEnv::info("/skills/link", FileKind::Symlink),
+            TestEnv::info("/skills/node_modules", FileKind::Directory),
+            TestEnv::info("/skills/notes.txt", FileKind::File),
+        ],
+    );
+
+    let out = load_skills(&env, &[root], cancel()).await;
+
+    let names: Vec<&str> = out.skills.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, vec!["kept"]);
+    assert!(out.diagnostics.is_empty());
+}
+
+#[tokio::test]
+async fn resolve_kind_file_info_not_found_after_canonical_is_silent() {
+    let mut env = TestEnv::default();
+    env.put_info("/link", FileKind::Symlink);
+    env.put_canonical("/link", "/real.md");
+    // canonical path exists, but file_info on it reports NotFound.
+    env.file_info_errors.insert(
+        "/real.md".into(),
+        FileError::new(FileErrorCode::NotFound, "missing").with_path("/real.md"),
+    );
+
+    let mut diagnostics = Vec::new();
+    let info = TestEnv::info("/link", FileKind::Symlink);
+
+    let kind = resolve_kind(&env, &info, &mut diagnostics, &cancel()).await;
+
+    assert_eq!(kind, None);
+    assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn validate_name_allows_digits_and_rejects_trailing_hyphen() {
+    assert!(validate_name("skill-2", "skill-2").is_empty());
+    assert!(!validate_name("skill-", "skill-").is_empty());
+}
+
+#[test]
+fn prefix_ignore_pattern_treats_backslash_hash_as_literal() {
+    assert_eq!(
+        prefix_ignore_pattern("\\# not a comment", "sub/"),
+        Some("sub/\\# not a comment".into())
+    );
+}

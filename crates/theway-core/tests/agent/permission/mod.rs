@@ -269,3 +269,15 @@ async fn as_before_tool_call_blocks_and_allows() {
     assert!(!result.block);
     assert!(result.reason.is_none());
 }
+
+#[test]
+fn rm_recursive_force_home_target_matches_home_string() {
+    assert!(rm_recursive_force_on_home_target("rm -rf $HOME"));
+    assert!(rm_recursive_force_on_home_target("rm -rf $HOME/projects"));
+}
+
+#[test]
+fn strip_one_layer_of_quotes_handles_unclosed_quotes() {
+    assert_eq!(strip_one_layer_of_quotes("\"unclosed"), "\"unclosed");
+    assert_eq!(strip_one_layer_of_quotes("'unclosed"), "'unclosed");
+}

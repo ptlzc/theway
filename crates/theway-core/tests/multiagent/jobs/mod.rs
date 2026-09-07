@@ -66,7 +66,17 @@ fn list_returns_newest_first() {
 #[test]
 fn update_finish_and_find_with_unknown_id_are_noops() {
     let registry = SubagentJobRegistry::new();
-    registry.update("missing", |job| job.chars += 1);
+    let bump = |job: &mut SubagentJob| job.chars += 1;
+    registry.update("missing", bump);
+    let id = registry.register(SubagentJobInit {
+        agent: "a".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        session_id: None,
+    });
+    registry.update(&id, bump);
+    assert_eq!(registry.job(&id).unwrap().chars, 1);
     registry.set_control("missing", None);
     registry.finish("missing", SubagentJobStatus::Succeeded, None);
     assert!(registry.job("missing").is_none());
@@ -183,4 +193,103 @@ fn control_handle_debug_does_not_leak() {
         steer: Arc::new(|_| {}),
     };
     assert_eq!(format!("{handle:?}"), "SubagentControlHandle");
+}
+
+#[test]
+fn finish_without_operation_scope_skips_observation_finish() {
+    let registry = SubagentJobRegistry::new();
+    let id = registry.register(SubagentJobInit {
+        agent: "a".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        session_id: None,
+    });
+    registry.operations.lock().remove(&id);
+
+    registry.finish(&id, SubagentJobStatus::Succeeded, None);
+
+    assert!(registry.job(&id).unwrap().completed_at.is_some());
+}
+
+#[derive(Default)]
+struct IncludeObserver {
+    observations: std::sync::Mutex<Vec<crate::observability::RuntimeObservation>>,
+}
+
+impl crate::observability::RuntimeObserver for IncludeObserver {
+    fn observe(&self, observation: crate::observability::RuntimeObservation) {
+        self.observations.lock().unwrap().push(observation);
+    }
+
+    fn include_content(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn finish_with_include_content_attaches_content() {
+    let observer = Arc::new(IncludeObserver::default());
+    let registry = SubagentJobRegistry::with_observer(observer.clone());
+    let id = registry.register(SubagentJobInit {
+        agent: "a".into(),
+        source: "subagent".into(),
+        run_id: Some("run".into()),
+        node_id: Some("node".into()),
+        session_id: None,
+    });
+
+    registry.finish(&id, SubagentJobStatus::Succeeded, None);
+
+    assert!(observer
+        .observations
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|obs| matches!(obs, crate::observability::RuntimeObservation::OperationFinished(_))));
+}
+
+#[test]
+fn node_messages_falls_back_to_store_when_job_has_empty_messages() {
+    let registry = SubagentJobRegistry::new();
+    let id = registry.register(SubagentJobInit {
+        agent: "a".into(),
+        source: "dag".into(),
+        run_id: Some("run".into()),
+        node_id: Some("node".into()),
+        session_id: None,
+    });
+
+    assert!(registry.node_messages("run", "node").is_none());
+    let _ = id;
+}
+
+#[test]
+fn node_messages_for_session_requires_node_id_match() {
+    let registry = SubagentJobRegistry::new();
+    registry.register(SubagentJobInit {
+        agent: "a".into(),
+        source: "dag".into(),
+        run_id: Some("run".into()),
+        node_id: Some("other-node".into()),
+        session_id: Some("session".into()),
+    });
+
+    assert!(registry
+        .node_messages_for_session(Some("session"), "run", "node")
+        .is_none());
+}
+
+#[test]
+fn job_messages_falls_back_to_store_when_job_has_empty_messages() {
+    let registry = SubagentJobRegistry::new();
+    let id = registry.register(SubagentJobInit {
+        agent: "a".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        session_id: None,
+    });
+
+    assert!(registry.job_messages(&id).is_none());
 }

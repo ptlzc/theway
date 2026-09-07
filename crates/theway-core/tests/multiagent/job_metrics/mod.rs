@@ -101,3 +101,21 @@ fn metrics_listener_message_end_counts_tokens_for_assistant() {
     assert_eq!(job.input_tokens, 15);
     assert_eq!(job.output_tokens, 5);
 }
+
+#[test]
+fn metrics_listener_message_end_unknown_job_is_noop() {
+    let registry = SubagentJobRegistry::new();
+    let listener = metrics_listener(registry.clone(), "missing-job".into());
+
+    listener(&LoopEvent::MessageEnd {
+        message: crate::AgentMessage::Llm(theway_llm_provider::Message::User(
+            theway_llm_provider::UserMessage {
+                role: theway_llm_provider::UserRole::User,
+                content: theway_llm_provider::UserContent::Text("hi".into()),
+                timestamp: 0,
+            },
+        )),
+    });
+
+    assert!(registry.job("missing-job").is_none());
+}

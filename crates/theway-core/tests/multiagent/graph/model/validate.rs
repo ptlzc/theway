@@ -92,3 +92,11 @@ fn validate_catches_invalid_id_missing_agent_and_empty_task() {
     assert!(errors.iter().any(|e| e.contains("缺少 agent")));
     assert!(errors.iter().any(|e| e.contains("缺少 task")));
 }
+
+#[test]
+fn validate_accepts_agent_listed_in_known_agents() {
+    let nodes = vec![node_def("a", "explorer", "t", &[])];
+    let known = vec!["explorer".to_string(), "planner".to_string()];
+    let errors = validate_graph(&nodes, Some(&known));
+    assert!(errors.is_empty(), "{errors:?}");
+}

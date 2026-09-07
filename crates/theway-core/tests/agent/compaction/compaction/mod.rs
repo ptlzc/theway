@@ -600,3 +600,236 @@ fn projection_caps_tool_outputs_and_bounds_total() {
         "projected total {total} must fit the budget {SUMMARY_PROJECTED_BUDGET_TOKENS}"
     );
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Coverage-gap additions: estimate and compaction edge branches
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn get_last_assistant_usage_skips_non_message_entries() {
+    let entries = vec![SessionTreeEntry::Custom {
+        id: "c".into(),
+        parent_id: None,
+        timestamp: "t".into(),
+        custom_type: "other".into(),
+        data: None,
+    }];
+    assert!(super::super::estimate::get_last_assistant_usage(&entries).is_none());
+}
+
+#[test]
+fn assistant_usage_accepts_any_nonzero_usage_field() {
+    let usage = |total_tokens: u64, input: u64, output: u64, cache_read: u64, cache_write: u64| {
+        theway_llm_provider::Usage {
+            total_tokens,
+            input,
+            output,
+            cache_read,
+            cache_write,
+            ..Default::default()
+        }
+    };
+
+    let assistant = |usage: theway_llm_provider::Usage| {
+        AgentMessage::Llm(PiMessage::Assistant(theway_llm_provider::AssistantMessage {
+            role: theway_llm_provider::AssistantRole::Assistant,
+            content: vec![],
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage,
+            stop_reason: theway_llm_provider::StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+        }))
+    };
+
+    for usage in [
+        usage(0, 1, 0, 0, 0),
+        usage(0, 0, 1, 0, 0),
+        usage(0, 0, 0, 1, 0),
+        usage(0, 0, 0, 0, 1),
+    ] {
+        let entries = vec![SessionTreeEntry::Message {
+            id: "m".into(),
+            parent_id: None,
+            timestamp: "t".into(),
+            message: assistant(usage),
+        }];
+        assert!(super::super::estimate::get_last_assistant_usage(&entries).is_some());
+    }
+}
+
+#[test]
+fn serialize_conversation_tool_result_skips_image_blocks() {
+    let tool_result = AgentMessage::Llm(PiMessage::ToolResult(
+        theway_llm_provider::ToolResultMessage {
+            role: theway_llm_provider::ToolResultRole::ToolResult,
+            tool_call_id: "t".into(),
+            tool_name: "bash".into(),
+            content: vec![
+                theway_llm_provider::UserContentBlock::text("line"),
+                theway_llm_provider::UserContentBlock::Image(
+                    theway_llm_provider::ImageContent {
+                        data: "base64".into(),
+                        mime_type: "image/png".into(),
+                    },
+                ),
+            ],
+            details: None,
+            is_error: false,
+            timestamp: 0,
+        },
+    ));
+    let serialized = serialize_conversation(std::slice::from_ref(&tool_result));
+    assert!(serialized.contains("TOOL_RESULT[bash]:"));
+    assert!(serialized.contains("line"));
+    assert!(!serialized.contains("base64"));
+}
+
+#[test]
+fn project_summary_message_caps_user_blocks_and_tool_result_image_blocks() {
+    let user_blocks = AgentMessage::Llm(PiMessage::User(
+        theway_llm_provider::UserMessage {
+            role: theway_llm_provider::UserRole::User,
+            content: theway_llm_provider::UserContent::Blocks(vec![
+                theway_llm_provider::UserContentBlock::text("hello"),
+                theway_llm_provider::UserContentBlock::Image(
+                    theway_llm_provider::ImageContent {
+                        data: "base64".into(),
+                        mime_type: "image/png".into(),
+                    },
+                ),
+            ]),
+            timestamp: 0,
+        },
+    ));
+    let projected = project_summary_message(&user_blocks).unwrap();
+    match projected {
+        AgentMessage::Llm(PiMessage::User(user)) => match &user.content {
+            theway_llm_provider::UserContent::Blocks(blocks) => assert_eq!(blocks.len(), 2),
+            other => panic!("expected blocks, got {other:?}"),
+        },
+        other => panic!("expected user message, got {other:?}"),
+    }
+
+    let tool_result = AgentMessage::Llm(PiMessage::ToolResult(
+        theway_llm_provider::ToolResultMessage {
+            role: theway_llm_provider::ToolResultRole::ToolResult,
+            tool_call_id: "t".into(),
+            tool_name: "bash".into(),
+            content: vec![theway_llm_provider::UserContentBlock::Image(
+                theway_llm_provider::ImageContent {
+                    data: "base64".into(),
+                    mime_type: "image/png".into(),
+                },
+            )],
+            details: Some(serde_json::json!({"exitCode": 1})),
+            is_error: false,
+            timestamp: 0,
+        },
+    ));
+    let projected = project_summary_message(&tool_result).unwrap();
+    match projected {
+        AgentMessage::Llm(PiMessage::ToolResult(result)) => {
+            assert!(result.details.is_none());
+            assert!(matches!(&result.content[0], theway_llm_provider::UserContentBlock::Image(_)));
+        }
+        other => panic!("expected tool result, got {other:?}"),
+    }
+}
+
+#[test]
+fn project_summary_message_small_tool_call_arguments_are_kept() {
+    let assistant = AgentMessage::Llm(PiMessage::Assistant(
+        theway_llm_provider::AssistantMessage {
+            role: theway_llm_provider::AssistantRole::Assistant,
+            content: vec![theway_llm_provider::ContentBlock::ToolCall(
+                theway_llm_provider::ToolCall {
+                    id: "t".into(),
+                    name: "read".into(),
+                    arguments: serde_json::Map::from_iter([(
+                        "file_path".into(),
+                        serde_json::Value::String("small".into()),
+                    )]),
+                    thought_signature: None,
+                },
+            )],
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: theway_llm_provider::Usage::default(),
+            stop_reason: theway_llm_provider::StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+        },
+    ));
+
+    let projected = project_summary_message(&assistant).unwrap();
+    match projected {
+        AgentMessage::Llm(PiMessage::Assistant(a)) => {
+            match &a.content[0] {
+                theway_llm_provider::ContentBlock::ToolCall(call) => {
+                    assert_eq!(
+                        call.arguments.get("file_path").and_then(|v| v.as_str()),
+                        Some("small")
+                    );
+                }
+                other => panic!("expected tool call, got {other:?}"),
+            }
+        }
+        other => panic!("expected assistant, got {other:?}"),
+    }
+}
+
+#[test]
+fn trim_projected_budget_single_oversized_message_is_kept() {
+    let huge = user(&"x".repeat(400_000));
+    let messages = vec![huge];
+    let trimmed = trim_projected_budget(messages);
+    assert_eq!(trimmed.len(), 1);
+}
+
+#[tokio::test]
+async fn summarize_with_llm_budget_floor_reports_context_overflow() {
+    let stream_fn: StreamFn = Arc::new(move |_, _, _| {
+        let (stream, mut sender) = theway_llm_provider::AssistantMessageEventStream::new();
+        let error = theway_llm_provider::AssistantMessage {
+            role: theway_llm_provider::AssistantRole::Assistant,
+            content: vec![],
+            api: theway_llm_provider::Api::from("faux"),
+            provider: theway_llm_provider::Provider::from("faux"),
+            model: "faux".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: theway_llm_provider::Usage::default(),
+            stop_reason: theway_llm_provider::StopReason::Error,
+            error_message: Some("prompt is too long".into()),
+            timestamp: 0,
+        };
+        sender.push(theway_llm_provider::AssistantMessageEvent::Error {
+            reason: theway_llm_provider::ErrorReason::Error,
+            error,
+        });
+        stream
+    });
+    let request = SummarizeRequest {
+        model: &model_with_limits(1_300, 0),
+        messages: &[user("hi")],
+        custom_instructions: None,
+        settings: &DEFAULT_COMPACTION_SETTINGS,
+        stream_fn: Some(&stream_fn),
+        cancel: &CancellationToken::new(),
+    };
+
+    let err = summarize_with_llm(&request).await.unwrap_err();
+
+    assert!(matches!(err, SummarizeError::ContextOverflow(_)));
+}

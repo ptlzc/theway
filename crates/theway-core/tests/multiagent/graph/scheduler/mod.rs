@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::multiagent::graph::engine::NodeLauncher;
-use crate::multiagent::graph::types::{DagNodeDef, DagRunDef};
+use crate::multiagent::graph::types::{DagNodeDef, DagRunDef, Direction};
 use tokio_util::sync::CancellationToken;
 
 mod no_op_paths;
@@ -219,4 +219,68 @@ async fn wait_for_runs_unknown_run_is_immediately_finished() {
 fn wake_waiters_without_waiters_is_noop() {
     let engine = DagEngine::new();
     engine.wake_waiters("missing");
+}
+
+#[test]
+fn on_node_update_with_none_fields_refreshes_activity() {
+    let (engine, _launcher) = engine_with_launcher();
+    let run = engine.plan(run_def("t", None, None), None, None).unwrap();
+
+    engine.on_node_update(&run.id, "a", 1, None, None, None);
+
+    let node = engine.get_run(&run.id).unwrap().node("a").unwrap().clone();
+    assert_eq!(node.input_tokens, None);
+    assert_eq!(node.output_tokens, None);
+    assert_eq!(node.live_preview, None);
+    assert!(node.last_active_at.is_some());
+}
+
+#[test]
+fn restore_terminal_run_skips_run_observation() {
+    use crate::multiagent::graph::persist::{PersistedNode, PersistedRun};
+    use crate::multiagent::graph::types::RunKind;
+
+    let engine = DagEngine::new();
+    let p = PersistedRun {
+        id: "dag-3".to_string(),
+        name: "finished".to_string(),
+        max_concurrency: 1,
+        fail_fast: false,
+        direction: Direction::Td,
+        created_at: 100,
+        session_id: None,
+        kind: RunKind::Dag,
+        nodes: vec![PersistedNode {
+            id: "a".to_string(),
+            agent: "x".to_string(),
+            task: "task".to_string(),
+            depends_on: Vec::new(),
+            timeout: None,
+            cwd: None,
+            provider: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+            status: NodeStatus::Succeeded,
+            attempt: 0,
+            started_at: None,
+            completed_at: None,
+            error: None,
+            input_tokens: None,
+            output_tokens: None,
+            result: None,
+            output: None,
+            live_preview: None,
+        }],
+    };
+
+    let restored = engine.restore(vec![p]);
+
+    assert_eq!(restored, vec!["dag-3".to_string()]);
+    assert_eq!(engine.get_run("dag-3").unwrap().status, DagStatus::Running);
+    assert_eq!(
+        engine.get_run("dag-3").unwrap().node("a").unwrap().status,
+        NodeStatus::Succeeded
+    );
 }
