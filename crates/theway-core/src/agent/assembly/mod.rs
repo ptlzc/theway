@@ -34,7 +34,7 @@ use crate::observability::{
 };
 use crate::types::*;
 
-use self::catalog::build_system_prompt;
+use self::catalog::{build_system_prompt, deduplicate_tools};
 use super::compaction::algorithm::CompactAlgorithmRegistry;
 use super::compaction::compaction::{CompactionSettings, DEFAULT_COMPACTION_SETTINGS};
 use super::cost::{CostSnapshot, CostTracker};
@@ -207,10 +207,17 @@ impl AgentHarness {
                 }),
             options.runtime_extension_model_context.clone(),
         ));
+        let (tools, dropped_tools) = deduplicate_tools(options.tools);
+        if !dropped_tools.is_empty() {
+            tracing::warn!(
+                "dropped duplicate tool name(s) at harness construction (earlier registrations win): {}",
+                dropped_tools.join(", ")
+            );
+        }
         let state = AgentState {
             model: options.model,
             thinking_level: Some(options.thinking_level),
-            tools: options.tools,
+            tools,
             system_prompt: build_system_prompt(&options.system_prompt, &options.skills),
             ..Default::default()
         };

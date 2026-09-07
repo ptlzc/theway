@@ -1,6 +1,7 @@
 //! Tests for `agent::assembly` — split out of src (see docs/rust-test-files.md).
 
 mod runtime_extensions;
+mod tool_dedup;
 
 use std::sync::Arc;
 
@@ -412,10 +413,12 @@ fn replace_mcp_tools_removes_matching_arcs_and_appends_new() {
 fn replace_mcp_tools_leaves_non_old_tools_of_same_name_untouched() {
     // Identity semantics: a tool sharing a name with a removed MCP tool but backed by a
     // different Arc (here: another provisioning round, or a builtin collision) is kept,
-    // because removal keys on `Arc::ptr_eq`, not on the name.
+    // because removal keys on `Arc::ptr_eq`, not on the name. Construction dedups by
+    // name, so seed the live catalog directly to exercise the replacement path alone.
     let stale_a = mcp_tool("mcp_a");
     let stale_b = mcp_tool("mcp_a");
-    let h = harness_with_tools(vec![stale_a.clone(), stale_b.clone()]);
+    let h = harness_with_tools(vec![mcp_tool("builtin")]);
+    h.agent().state().tools = vec![stale_a.clone(), stale_b.clone()];
 
     h.replace_mcp_tools(std::slice::from_ref(&stale_a), Vec::new());
 

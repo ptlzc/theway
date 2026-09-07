@@ -1,5 +1,6 @@
 //! LLM streaming call for the agent loop.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -66,6 +67,16 @@ pub(super) async fn call_llm(
             model,
             g.thinking_level,
         )
+    };
+    // Final provider-request invariant: DeepSeek rejects duplicate tool names
+    // with HTTP 400. Catalog mutation paths dedup, but AgentState can also be
+    // seeded directly or replaced by a loop update, so keep the request unique
+    // at this boundary as well. First registration wins.
+    let tools = {
+        let mut tools = tools;
+        let mut seen = HashSet::new();
+        tools.retain(|tool| seen.insert(tool.definition().name.clone()));
+        tools
     };
     let active_turn = *inner.active_turn_operation.lock();
     let context = active_turn

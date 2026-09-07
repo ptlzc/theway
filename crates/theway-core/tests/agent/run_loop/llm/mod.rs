@@ -426,6 +426,58 @@ async fn call_llm_builds_system_prompt_and_tool_definitions() {
     assert_eq!(tools[0].name, "echo");
 }
 
+#[tokio::test]
+async fn call_llm_drops_duplicate_tool_definitions_before_provider_request() {
+    // Raw AgentState may be seeded with colliding names (or replaced by a loop
+    // update); the LLM request must still carry unique tool names.
+    let captured = Arc::new(Mutex::new(None::<PiContext>));
+    let captured_clone = captured.clone();
+    let stream_fn: StreamFn = Arc::new(move |_, context, _| {
+        *captured_clone.lock().unwrap() = Some(context.clone());
+        done_stream("ok")
+    });
+
+    let first = theway_llm_provider::Tool {
+        name: "duplicate".into(),
+        description: "first registration".into(),
+        parameters: serde_json::json!({"type": "object"}),
+    };
+    let later = theway_llm_provider::Tool {
+        name: "duplicate".into(),
+        description: "later registration".into(),
+        parameters: serde_json::json!({"type": "object"}),
+    };
+    let unique = theway_llm_provider::Tool {
+        name: "unique".into(),
+        description: "unique tool".into(),
+        parameters: serde_json::json!({"type": "object"}),
+    };
+
+    let mut state = AgentState::default();
+    state.model = Some(faux_model());
+    state.tools = vec![
+        Arc::new(SysPromptTool { def: first }),
+        Arc::new(SysPromptTool { def: later }),
+        Arc::new(SysPromptTool { def: unique }),
+    ];
+    let agent = Agent::new(AgentOptions {
+        initial_state: Some(state),
+        stream_fn: Some(stream_fn),
+        ..Default::default()
+    });
+
+    call_llm(&agent.inner.clone(), &CancellationToken::new(), &CancellationToken::new())
+        .await
+        .unwrap();
+
+    let ctx = captured.lock().unwrap().clone().unwrap();
+    let tools = ctx.tools.expect("tools must be present");
+    assert_eq!(tools.len(), 2, "the later duplicate must be dropped");
+    assert_eq!(tools[0].name, "duplicate");
+    assert_eq!(tools[0].description, "first registration");
+    assert_eq!(tools[1].name, "unique");
+}
+
 struct SysPromptTool {
     def: theway_llm_provider::Tool,
 }

@@ -3,7 +3,41 @@ use crate::agent::system_prompt::format_skills_for_system_prompt;
 use crate::agent::types::{PromptTemplate, Skill};
 
 use super::{AgentHarness, ReloadSkillsError, SessionEvent};
+use std::collections::HashSet;
 use std::sync::Arc;
+
+/// Keep only the first tool registered under each name.
+///
+/// Providers reject duplicate tool names outright (DeepSeek: HTTP 400 "Tool names
+/// must be unique"), so every path that replaces the live tool catalog must run
+/// through this helper — not just MCP re-provisioning. The earlier registration
+/// wins because daemon assembly intentionally appends provisioned MCP tools after
+/// the built-in harness tools.
+pub(super) fn deduplicate_tools(
+    tools: Vec<Arc<dyn crate::AgentTool>>,
+) -> (Vec<Arc<dyn crate::AgentTool>>, Vec<String>) {
+    let mut seen = HashSet::new();
+    let mut dropped = Vec::new();
+    let mut kept = Vec::with_capacity(tools.len());
+    for tool in tools {
+        let name = tool.definition().name.clone();
+        if seen.insert(name.clone()) {
+            kept.push(tool);
+        } else {
+            dropped.push(name);
+        }
+    }
+    (kept, dropped)
+}
+
+fn warn_dropped_tools(context: &str, dropped: &[String]) {
+    if !dropped.is_empty() {
+        tracing::warn!(
+            "dropped duplicate tool name(s) {context} (earlier registrations win): {}",
+            dropped.join(", ")
+        );
+    }
+}
 
 impl AgentHarness {
     pub fn skills(&self) -> Vec<Skill> {
@@ -28,6 +62,20 @@ impl AgentHarness {
         self.agent.state().system_prompt = prompt;
     }
 
+    /// Atomically replace the complete live tool catalog, dropping later tools
+    /// whose name was already registered earlier (first registration wins).
+    ///
+    /// This is the escape hatch for embedders that own full tool-set hot reloads
+    /// (runtime extensions rebuild the base catalog + their registrations and
+    /// publish the merged list). The daemon's construction-time and
+    /// `replace_mcp_tools` paths already dedup, but a full replacement must not
+    /// reintroduce provider-rejected duplicate names.
+    pub fn replace_tools(&self, tools: Vec<Arc<dyn crate::AgentTool>>) {
+        let (tools, dropped) = deduplicate_tools(tools);
+        warn_dropped_tools("on tool replacement", &dropped);
+        self.agent.state().tools = tools;
+    }
+
     /// Replace a previously provisioned set of MCP tools. Every currently-loaded tool whose
     /// `Arc` pointer matches one in `old` (via [`Arc::ptr_eq`]) is removed from the live
     /// harness tool set, then `new` is appended. Used by MCP re-provisioning so that a
@@ -47,8 +95,7 @@ impl AgentHarness {
     ) {
         let mut tools = std::mem::take(&mut self.agent.state().tools);
         tools.retain(|t| !old.iter().any(|o| Arc::ptr_eq(o, t)));
-        let mut seen: std::collections::HashSet<String> =
-            tools.iter().map(|t| t.definition().name.clone()).collect();
+        let mut seen: HashSet<String> = tools.iter().map(|t| t.definition().name.clone()).collect();
         let mut dropped: Vec<String> = Vec::new();
         for tool in new {
             let name = tool.definition().name.clone();
@@ -58,12 +105,7 @@ impl AgentHarness {
                 dropped.push(name);
             }
         }
-        if !dropped.is_empty() {
-            tracing::warn!(
-                "dropped MCP tool(s) with duplicate names (built-ins and earlier servers win): {}",
-                dropped.join(", ")
-            );
-        }
+        warn_dropped_tools("on MCP tool replacement", &dropped);
         self.agent.state().tools = tools;
     }
 
