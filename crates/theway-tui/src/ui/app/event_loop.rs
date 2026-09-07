@@ -7,10 +7,11 @@ async fn open_recovered_stream(
     reused: bool,
     notes: Vec<String>,
     session_id: &str,
+    feed_limit: Option<u32>,
 ) -> Option<RecoveredConnection> {
     let stream = match crate::ui::daemon_call(
         "stream_events",
-        client.stream_events_for_session(Some(session_id)),
+        client.stream_events_for_session_with_limit(Some(session_id), feed_limit),
     )
     .await
     {
@@ -22,7 +23,7 @@ async fn open_recovered_stream(
     };
     let state = match crate::ui::daemon_call(
         "get_snapshot_for_session",
-        client.get_snapshot_for_session(session_id),
+        client.get_snapshot_for_session_with_limit(session_id, feed_limit),
     )
     .await
     {
@@ -80,10 +81,11 @@ impl App {
         let mut stream = if self.pending_fresh_attach {
             None
         } else {
+            let feed_limit = Some(self.feed_limit());
             match crate::ui::daemon_call(
                 "stream_events",
                 self.client
-                    .stream_events_for_session(Some(&self.session_id)),
+                    .stream_events_for_session_with_limit(Some(&self.session_id), feed_limit),
             )
             .await
             {
@@ -113,9 +115,11 @@ impl App {
                             // session instead of staying on the old filter.
                             if let Some(new_id) = self.resubscribe_session.take() {
                                 stream = None;
+                                let feed_limit = Some(self.feed_limit());
                                 match crate::ui::daemon_call(
                                     "stream_events",
-                                    self.client.stream_events_for_session(Some(&new_id)),
+                                    self.client
+                                        .stream_events_for_session_with_limit(Some(&new_id), feed_limit),
                                 )
                                 .await
                                 {
@@ -226,6 +230,7 @@ impl App {
                         let connector = self.connector.take();
                         let base_client = self.client.clone();
                         let session_id = self.session_id.clone();
+                        let feed_limit = Some(self.feed_limit());
                         self.reconnect_handle = Some(tokio::spawn(async move {
                             let mut connector = connector;
                             let recovered = if let Some(c) = connector.as_mut() {
@@ -236,6 +241,7 @@ impl App {
                                             connection.reused,
                                             connection.notes,
                                             &session_id,
+                                            feed_limit,
                                         )
                                         .await
                                     }
@@ -247,8 +253,14 @@ impl App {
                                     }
                                 }
                             } else {
-                                open_recovered_stream(base_client, true, Vec::new(), &session_id)
-                                    .await
+                                open_recovered_stream(
+                                    base_client,
+                                    true,
+                                    Vec::new(),
+                                    &session_id,
+                                    feed_limit,
+                                )
+                                .await
                             };
                             (connector, recovered)
                         }));

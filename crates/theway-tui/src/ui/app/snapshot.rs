@@ -1,6 +1,16 @@
 impl App {
     // ── snapshot application (the daemon owns the transcript) ──────────────────────────
 
+    /// Feed scrollback limit to request from the daemon: the configured
+    /// `[tui] max_feed_lines` when present, otherwise the TUI default.
+    pub(super) fn feed_limit(&self) -> u32 {
+        self.latest
+            .tui_max_feed_lines
+            .and_then(|limit| u32::try_from(limit).ok())
+            .filter(|limit| *limit > 0)
+            .unwrap_or(crate::ui::DEFAULT_MAX_FEED_LINES as u32)
+    }
+
     /// Apply either an authoritative full snapshot or a per-stream feed
     /// patch frame, then resync every renderable status field.
     pub(super) fn apply_snapshot(&mut self, mut status: WireStatus) {

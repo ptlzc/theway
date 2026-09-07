@@ -142,7 +142,12 @@ impl DaemonConnector {
         let mut connection = self.connect(args, false).await?;
         connection.status = crate::ui::daemon_call(
             "restore_session",
-            restore_session(&mut connection.client, connection.status, session_id),
+            restore_session(
+                &mut connection.client,
+                connection.status,
+                session_id,
+                Some(connection_feed_limit(&self.desired_config)),
+            ),
         )
         .await?;
         Ok(connection)
@@ -194,8 +199,11 @@ impl DaemonConnector {
         if outcome.pushed {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
-        let state =
-            crate::ui::daemon_call("get_snapshot", client.get_snapshot_for_session("")).await?;
+        let state = crate::ui::daemon_call(
+            "get_snapshot",
+            client.get_snapshot_for_session_with_limit("", Some(connection_feed_limit(&desired))),
+        )
+        .await?;
         Ok(Some(DaemonConnection {
             client,
             status: wire_status_from_session_snapshot(&state),
@@ -236,8 +244,14 @@ impl DaemonConnector {
             tracing::info!("provisioned daemon config at {addr} via settings RPC");
         }
         notes.extend(outcome.notes);
-        let state =
-            crate::ui::daemon_call("get_snapshot", client.get_snapshot_for_session("")).await?;
+        let state = crate::ui::daemon_call(
+            "get_snapshot",
+            client.get_snapshot_for_session_with_limit(
+                "",
+                Some(connection_feed_limit(&self.desired_config)),
+            ),
+        )
+        .await?;
         Ok(DaemonConnection {
             client,
             status: wire_status_from_session_snapshot(&state),
@@ -270,6 +284,14 @@ impl Drop for DaemonConnector {
     }
 }
 
+fn connection_feed_limit(config: &WireDaemonConfig) -> u32 {
+    config
+        .tui_max_feed_lines
+        .and_then(|limit| u32::try_from(limit).ok())
+        .filter(|limit| *limit > 0)
+        .unwrap_or(crate::ui::DEFAULT_MAX_FEED_LINES as u32)
+}
+
 fn config_for_existing_controller(
     desired: &WireDaemonConfig,
     current: &WireDaemonConfig,
@@ -288,12 +310,15 @@ async fn restore_session(
     client: &mut GrpcClient,
     current: WireStatus,
     session_id: &str,
+    feed_limit: Option<u32>,
 ) -> Result<WireStatus> {
     if current.session_id == session_id {
         return Ok(current);
     }
     // No session switch: read the requested session's state directly.
-    let state = client.get_snapshot_for_session(session_id).await?;
+    let state = client
+        .get_snapshot_for_session_with_limit(session_id, feed_limit)
+        .await?;
     let status = wire_status_from_session_snapshot(&state);
     if status.session_id != session_id {
         anyhow::bail!(

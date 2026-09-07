@@ -26,7 +26,8 @@ impl App {
         // must not freeze the selection.
         match crate::ui::daemon_call(
             "get_snapshot_for_session",
-            self.client.get_snapshot_for_session(&id),
+            self.client
+                .get_snapshot_for_session_with_limit(&id, Some(self.feed_limit())),
         )
         .await
         {
@@ -54,7 +55,8 @@ impl App {
     pub(super) async fn refresh_session_snapshot(&mut self) {
         match crate::ui::daemon_call(
             "get_snapshot_for_session",
-            self.client.get_snapshot_for_session(&self.session_id),
+            self.client
+                .get_snapshot_for_session_with_limit(&self.session_id, Some(self.feed_limit())),
         )
         .await
         {
