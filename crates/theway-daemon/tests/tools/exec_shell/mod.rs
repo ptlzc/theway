@@ -13,7 +13,7 @@ mod tools;
 /// race. A single process-wide mutex keeps the registry stable per test.
 pub(super) fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().expect("exec_shell registry test lock poisoned")
+    LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 pub(super) fn text_of(result: &AgentToolResult) -> String {

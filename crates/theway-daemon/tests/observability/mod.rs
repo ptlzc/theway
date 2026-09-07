@@ -236,6 +236,52 @@ async fn prometheus_endpoint_has_bounded_labels_and_exact_measurements() {
 }
 
 #[test]
+fn parse_headers_handles_valid_malformed_and_empty_inputs() {
+    assert_eq!(parse_headers(None), None);
+    assert_eq!(parse_headers(Some("".to_string())), None);
+    assert_eq!(parse_headers(Some("   ".to_string())), None);
+
+    let headers = parse_headers(Some(
+        "Authorization=Basic dGVzdA==, X-Env=prod, badpair, =empty-key, empty-value=".to_string(),
+    ))
+    .unwrap();
+    assert_eq!(headers.get("Authorization").map(String::as_str), Some("Basic dGVzdA=="));
+    assert_eq!(headers.get("X-Env").map(String::as_str), Some("prod"));
+    assert!(!headers.contains_key("badpair"));
+    assert!(!headers.contains_key(""));
+    assert!(!headers.contains_key("empty-value"));
+}
+
+#[test]
+fn load_env_file_parses_comments_blanks_quotes_and_malformed_lines() {
+    let _guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("observability.env"),
+        "# comment\n\n\
+         KEY1=value1\n\
+         KEY2=\"quoted value\"\n\
+         KEY3= a=b \n\
+         malformed-no-equals\n\
+         =no-key\n\
+         EMPTY=\n",
+    )
+    .unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set("THEWAY_DIR", temp.path());
+
+    let values = load_env_file();
+
+    assert_eq!(values.get("KEY1").map(String::as_str), Some("value1"));
+    assert_eq!(values.get("KEY2").map(String::as_str), Some("quoted value"));
+    assert_eq!(values.get("KEY3").map(String::as_str), Some("a=b"));
+    assert!(!values.contains_key("malformed-no-equals"));
+    assert!(!values.contains_key(""));
+    // `EMPTY=` is a syntactically valid (if unusual) env entry; the
+    // loader keeps it as an empty string rather than dropping it.
+    assert_eq!(values.get("EMPTY").map(String::as_str), Some(""));
+}
+
+#[test]
 fn metric_context_from_detail_extracts_llm_and_compaction_fields() {
     let llm = MetricContext::from_detail(&OperationDetail::LlmRequest {
         provider: "provider-a".into(),

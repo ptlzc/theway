@@ -470,6 +470,37 @@ async fn handle_extension_reload_cancel_active_aborts_in_flight_turn() {
 }
 
 #[tokio::test]
+async fn handle_extension_reload_cancel_active_without_turn_checks_busy() {
+    let (mut host, _scratch, _repo) = build_host();
+    let extension_host = install_quiet_extension(&mut host).await;
+
+    // cancel_active with no in-flight future and not busy: both `turn.fut`
+    // and `session.busy` branches evaluate to false.
+    let mut idle = TurnState::default();
+    let result = host
+        .handle_extension_reload(true, &mut idle)
+        .await
+        .expect("reload should succeed");
+    assert!(!idle.aborted);
+    assert_eq!(result.status, "unchanged");
+
+    // cancel_active with no future but a busy session: `turn.fut` is false
+    // and `session.busy` is true, so request_abort is still invoked.
+    host.session.busy = true;
+    let mut idle = TurnState::default();
+    let result = host
+        .handle_extension_reload(true, &mut idle)
+        .await
+        .expect("reload should succeed");
+    assert!(!idle.aborted, "no future to mark aborted");
+    assert_eq!(result.status, "unchanged");
+    host.session.busy = false;
+
+    extension_host.shutdown().await;
+}
+
+
+#[tokio::test]
 async fn handle_extension_trust_rejects_invalid_requests() {
     let (mut host, _scratch, _repo) = build_host();
     let extension_host = install_quiet_extension(&mut host).await;

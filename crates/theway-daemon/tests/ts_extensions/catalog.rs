@@ -148,3 +148,64 @@ fn trust_error_blocks_project_without_trust() {
         .iter()
         .any(|e| e.status == ExtensionCatalogStatus::Blocked));
 }
+
+#[test]
+fn discover_rejects_package_directory_that_resolves_outside_root() {
+    let project = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let root = project.path().join(".theway/extensions");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(
+        outside.path().join("theway-extension.json"),
+        serde_json::to_vec_pretty(&json!({
+            "id": "linked",
+            "version": "1.0.0",
+            "entry": "index.js",
+            "priority": 0,
+            "scope": "session",
+            "permissions": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(outside.path().join("index.js"), "export {}").unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("linked")).unwrap();
+
+    let catalog = PackageCatalog::discover(project.path(), base.path());
+    assert!(catalog.selected_packages().is_empty());
+    assert!(catalog
+        .entries()
+        .iter()
+        .any(|e| e.status == ExtensionCatalogStatus::Rejected));
+}
+
+#[test]
+fn discover_rejects_entry_that_is_a_directory() {
+    let project = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let root = project.path().join(".theway/extensions");
+    let package = root.join("dir-entry");
+    std::fs::create_dir_all(package.join("entry-dir")).unwrap();
+    std::fs::write(
+        package.join("theway-extension.json"),
+        serde_json::to_vec_pretty(&json!({
+            "id": "dir-entry",
+            "version": "1.0.0",
+            "entry": "entry-dir",
+            "priority": 0,
+            "scope": "session",
+            "permissions": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let catalog = PackageCatalog::discover(project.path(), base.path());
+    assert!(catalog.selected_packages().is_empty());
+    assert!(catalog
+        .entries()
+        .iter()
+        .any(|e| e.status == ExtensionCatalogStatus::Rejected));
+}

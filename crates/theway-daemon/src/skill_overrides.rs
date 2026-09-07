@@ -328,4 +328,36 @@ mod tests {
             Some(false)
         );
     }
+
+    #[tokio::test]
+    async fn remove_and_save_without_entry_is_a_noop_that_skips_write() {
+        let dir = tempfile::tempdir().unwrap();
+        remove_and_save(dir.path(), "absent", SkillSource::User)
+            .await
+            .unwrap();
+        assert!(!state_path(dir.path()).exists());
+    }
+
+    #[tokio::test]
+    async fn save_cleans_temp_when_rename_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = state_path(dir.path());
+        std::fs::create_dir(&target).unwrap();
+
+        save(dir.path(), &SkillOverrides::default())
+            .await
+            .unwrap_err();
+
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if name.starts_with(".skill-overrides.json") {
+                names.push(name);
+            }
+        }
+        assert!(
+            names.is_empty(),
+            "temporary file should be cleaned up: {names:?}"
+        );
+    }
 }

@@ -108,6 +108,7 @@ async fn skill_command_requires_exactly_one_name() {
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
         inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -128,6 +129,7 @@ async fn skill_command_attaches_loaded_skill() {
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+       collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
 };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -145,6 +147,7 @@ async fn skill_command_rejects_disabled_skill() {
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+       collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
 };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -166,6 +169,7 @@ async fn skill_command_suggests_prefix_and_contains_matches() {
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+       collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
 };
     let ctx = command_ctx(&extra, tmp.path());
 
@@ -186,6 +190,7 @@ async fn skill_command_unknown_name_has_no_hint() {
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+       collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
 };
     let ctx = command_ctx(&extra, tmp.path());
 

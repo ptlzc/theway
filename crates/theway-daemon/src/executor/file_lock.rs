@@ -185,3 +185,27 @@ mod tests {
         assert!(lock_file_path(&p).unwrap().exists());
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn lock_file_path_uses_current_directory_for_bare_relative_name() {
+        // Never mutate the process-wide cwd in tests: parallel suites resolve
+        // paths against it. A missing bare file name falls back to the
+        // canonicalized parent (the current directory), which yields the same
+        // digest as the explicit absolute form.
+        let path = lock_file_path(Path::new("bare.txt")).unwrap();
+        let absolute = lock_file_path(&std::env::current_dir().unwrap().join("bare.txt")).unwrap();
+        assert_eq!(path, absolute);
+        assert!(path.parent().is_some());
+    }
+
+    #[test]
+    fn lock_file_path_rejects_path_without_file_name() {
+        let err = lock_file_path(Path::new("")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("no file name"));
+    }
+}

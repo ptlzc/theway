@@ -161,6 +161,44 @@ async fn git_missing_args_is_an_executor_error() {
     assert!(err.to_string().contains("git: missing args"), "{err}");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn atomic_write_through_working_symlink_updates_target_and_keeps_link() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("real.txt");
+    let link = dir.path().join("link.txt");
+    std::fs::write(&target, "old").unwrap();
+    symlink(&target, &link).unwrap();
+
+    atomic_write(&link, b"new").await.unwrap();
+
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    let meta = std::fs::symlink_metadata(&link).unwrap();
+    assert!(meta.file_type().is_symlink(), "link must remain a symlink");
+}
+
+#[tokio::test]
+async fn atomic_write_rejects_path_without_file_name() {
+    let err = atomic_write(Path::new("/"), b"x").await.unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("no file name"), "{err}");
+}
+
+#[tokio::test]
+async fn write_file_without_parent_directory_skips_create_dir_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let ex = LocalExecutor::with_cwd(dir.path());
+
+    ex.write_file(Path::new("bare.txt"), "bare").await.unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("bare.txt")).unwrap(),
+        "bare"
+    );
+}
+
 #[tokio::test]
 async fn write_file_reports_error_when_parent_is_a_file() {
     let dir = tempfile::tempdir().unwrap();

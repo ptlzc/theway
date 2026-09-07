@@ -369,3 +369,170 @@ pub fn cron_trigger_listener(registry: CronRegistry, inbox_path: PathBuf) -> Tri
 // Test files live in `tests/triggers/cron/hook/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("triggers/cron/hook");
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn cron_notification_hook_status_empty_registry() {
+        let hook = CronNotificationHook::new(CronRegistry::new());
+        let status = hook.status();
+        assert_eq!(status.queued_count, 0);
+        assert_eq!(status.subscription_labels, vec!["local crontab: 0 jobs"]);
+    }
+
+    #[test]
+    fn read_loop_state_handles_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_loop_state(&dir.path().join("missing.md")), None);
+    }
+
+    #[test]
+    fn extract_tag_block_handles_missing_and_unclosed_tags() {
+        assert_eq!(extract_tag_block("no tags here", "loop-state"), None);
+        assert_eq!(extract_tag_block("<loop-state>cut off", "loop-state"), None);
+    }
+
+    #[test]
+    fn extract_tag_all_skips_empty_bodies_and_honors_max() {
+        assert!(extract_tag_all("no tags", "inbox", 2).is_empty());
+        assert_eq!(
+            extract_tag_all("<inbox>   </inbox><inbox>b</inbox>", "inbox", 2),
+            vec!["b".to_string()]
+        );
+        let many: String = (0..5).map(|i| format!("<inbox>f{i}</inbox>")).collect();
+        assert_eq!(extract_tag_all(&many, "inbox", 3).len(), 3);
+    }
+
+    #[tokio::test]
+    async fn cron_trigger_listener_completed_non_stateful_job_clears_trace() {
+        let registry = CronRegistry::new();
+        let _job = registry.add_job("* * * * *", "do work").unwrap();
+        let since = chrono::Utc.with_ymd_and_hms(2026, 5, 26, 22, 0, 0).unwrap();
+        let now = chrono::Utc.with_ymd_and_hms(2026, 5, 26, 22, 1, 5).unwrap();
+        let trace_id = registry.due_jobs(since, now)[0]
+            .0
+            .running_trace_id
+            .clone()
+            .unwrap();
+
+        let listener = cron_trigger_listener(
+            registry.clone(),
+            std::env::temp_dir().join("unused-inbox.jsonl"),
+        );
+        listener(TriggerEvent::TriggerCompleted {
+            trace_id: trace_id.clone(),
+            summary: Some("completed summary".into()),
+            cost_usd: None,
+            details: serde_json::Value::Null,
+        });
+
+        let job = registry.job_for_trace(&trace_id);
+        assert!(job.is_none(), "non-stateful job must be marked completed");
+        let job = registry.list().remove(0);
+        assert!(job.running_trace_id.is_none());
+        assert!(job.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn cron_trigger_listener_completed_without_summary_still_clears_trace() {
+        let registry = CronRegistry::new();
+        let _job = registry.add_job_full("* * * * *", "do work", true).unwrap();
+        let since = chrono::Utc.with_ymd_and_hms(2026, 5, 26, 22, 0, 0).unwrap();
+        let now = chrono::Utc.with_ymd_and_hms(2026, 5, 26, 22, 1, 5).unwrap();
+        let trace_id = registry.due_jobs(since, now)[0]
+            .0
+            .running_trace_id
+            .clone()
+            .unwrap();
+
+        let listener = cron_trigger_listener(
+            registry.clone(),
+            std::env::temp_dir().join("unused-inbox.jsonl"),
+        );
+        listener(TriggerEvent::TriggerCompleted {
+            trace_id: trace_id.clone(),
+            summary: None,
+            cost_usd: None,
+            details: serde_json::Value::Null,
+        });
+
+        let job = registry.list().remove(0);
+        assert!(job.running_trace_id.is_none());
+        assert!(job.last_completed_at.is_some());
+    }
+
+    #[test]
+    fn read_and_write_loop_state_cap_long_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("loop.md");
+        let long = "x".repeat(LOOP_STATE_MAX_CHARS + 50);
+        write_loop_state(&path, &long).unwrap();
+        let read = read_loop_state(&path).unwrap();
+        assert_eq!(read.chars().count(), LOOP_STATE_MAX_CHARS + 1);
+        assert!(read.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn cron_action_hook_non_stateful_job_uses_inject_and_run() {
+        let registry = CronRegistry::new();
+        let job = registry.add_job("* * * * *", "run tests").unwrap();
+        let inner: BeforeTriggerActionHook = Arc::new(|_ctx, _cancel| {
+            Box::pin(async move { TriggerAction::default_for(&_ctx.trigger) })
+        });
+        let hook = cron_action_hook(registry, inner);
+        let trigger = cron_trigger_for_job(&job, chrono::Utc::now(), "trace-non-stateful".into());
+        let action = hook(
+            BeforeTriggerActionContext {
+                trigger,
+                runtime: crate::trigger_engine::runtime::TriggerRuntimeSnapshot {
+                    dedup_entries: 0,
+                    active_traces: 0,
+                    accepted_total: 0,
+                    deduped_total: 0,
+                    cycle_suppressed_total: 0,
+                },
+            },
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(action.prompt, "run tests");
+        assert_eq!(action.delivery, TriggerDelivery::InjectAndRun);
+    }
+
+    #[test]
+    fn cron_trigger_listener_stateful_persists_state_and_appends_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = dir.path().join("sess.cron.toml");
+        let inbox_path = dir.path().join("inbox.jsonl");
+        let registry = CronRegistry::new();
+        registry.load_from_path(&sidecar).unwrap();
+        let job = registry.add_job_full("* * * * *", "watch", true).unwrap();
+        let since = chrono::Utc.with_ymd_and_hms(2026, 5, 26, 22, 0, 0).unwrap();
+        let now = chrono::Utc.with_ymd_and_hms(2026, 5, 26, 22, 1, 5).unwrap();
+        let trace_id = registry.due_jobs(since, now)[0]
+            .0
+            .running_trace_id
+            .clone()
+            .unwrap();
+        let listener = cron_trigger_listener(registry.clone(), inbox_path.clone());
+        listener(TriggerEvent::TriggerCompleted {
+            trace_id: trace_id.clone(),
+            summary: Some(
+                "<inbox>found one</inbox>\n<loop-state>next baseline</loop-state>".into(),
+            ),
+            cost_usd: None,
+            details: serde_json::Value::Null,
+        });
+        let state_path = loop_state_path(&sidecar, &job.id);
+        assert_eq!(
+            read_loop_state(&state_path).as_deref(),
+            Some("next baseline")
+        );
+        let entries = theway_transport::inbox::list_new(&inbox_path).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].trace_id, trace_id);
+    }
+}

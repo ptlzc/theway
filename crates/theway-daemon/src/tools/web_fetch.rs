@@ -365,3 +365,165 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn missing_url_is_rejected() {
+        let err = WebFetchTool
+            .execute("w", json!({}), CancellationToken::new(), None)
+            .await
+            .expect_err("missing url must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("missing required arg: url"), "got: {msg}");
+    }
+
+    #[test]
+    fn html_to_text_strips_style_and_other_block_tags() {
+        let html = "<html><body><style>body { color: red; }</style><br><div>one</div><ul><li>item</li></ul><p>two</p></body></html>";
+        let text = html_to_text(html);
+        assert!(text.contains("one"), "got: {text}");
+        assert!(text.contains("item"), "got: {text}");
+        assert!(text.contains("two"), "got: {text}");
+        assert!(!text.contains("color"), "style must be stripped: {text}");
+    }
+
+    /// `read_body_capped` must stop as soon as the cap is exceeded and return
+    /// `truncated=true`. A tiny cap against a local TCP server keeps this test
+    /// unit-sized instead of streaming 5 MiB.
+    #[tokio::test]
+    async fn read_body_capped_stops_at_cap() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let body = b"0123456789abcdef";
+                let _ = sock
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await;
+                let _ = sock.write_all(body).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut resp = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect("local HTTP request");
+        let (body, truncated) = read_body_capped(&mut resp, 4, &CancellationToken::new())
+            .await
+            .expect("read_body_capped");
+        assert!(truncated, "cap 4 should truncate a 16-byte body");
+        assert_eq!(body, b"0123");
+        server.await.unwrap();
+    }
+
+    /// EOF without hitting the cap returns `truncated=false`.
+    #[tokio::test]
+    async fn read_body_capped_eof_without_truncation() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\n0123",
+                    )
+                    .await;
+                let _ = sock.shutdown().await;
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut resp = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect("local HTTP request");
+        let (body, truncated) = read_body_capped(&mut resp, 100, &CancellationToken::new())
+            .await
+            .expect("read_body_capped");
+        assert!(!truncated);
+        assert_eq!(body, b"0123");
+        server.await.unwrap();
+    }
+
+    /// Pre-cancelled token must win over a server that keeps the body open.
+    #[tokio::test]
+    async fn read_body_capped_cancel_branch() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                // Send the headers plus one body byte, then keep the connection
+                // open so the response future can resolve while `chunk()` never
+                // reaches EOF. The pre-cancelled token is the only exit.
+                let _ = sock
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 100\r\n\r\na")
+                    .await;
+                let _ = tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut resp = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect("local HTTP request");
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let err = read_body_capped(&mut resp, 100, &cancel)
+            .await
+            .expect_err("pre-cancelled token must abort read_body_capped");
+        let msg = err.to_string();
+        assert!(msg.contains("cancelled"), "got: {msg}");
+        server.abort();
+    }
+
+    #[test]
+    fn collapse_whitespace_handles_tabs_trailing_spaces_and_empty() {
+        assert_eq!(collapse_whitespace(""), "");
+        assert_eq!(collapse_whitespace("  a\t b  "), "a b");
+        assert_eq!(collapse_whitespace("\n\n\n"), "");
+        assert_eq!(collapse_whitespace("a \n \n b"), "a \n\nb");
+    }
+
+    #[test]
+    fn starts_with_at_false_at_end_or_missing() {
+        assert!(!starts_with_at(b"<div>", 5, b"</div>"));
+        assert!(!starts_with_at(b"<div>", 0, b"</div>"));
+        assert!(starts_with_at(b"<div>", 0, b"<div"));
+    }
+
+    #[test]
+    fn html_to_text_preserves_non_html_text() {
+        assert_eq!(html_to_text("plain text"), "plain text");
+    }
+}

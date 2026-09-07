@@ -38,6 +38,10 @@ pub enum QueuedTurn {
         display: String,
         prompt: String,
         images: Vec<ImageContent>,
+        /// `true` when the prompt was already appended to the persisted
+        /// transcript while the session waited for a model; the queued run
+        /// must continue from state instead of appending a duplicate.
+        persisted: bool,
     },
     AgentPrompt {
         display: String,

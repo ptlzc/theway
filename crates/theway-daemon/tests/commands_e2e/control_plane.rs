@@ -54,6 +54,7 @@ async fn dispatch_new_trigger_registers_dynamic_rule() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };

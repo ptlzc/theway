@@ -518,3 +518,145 @@ impl TriggerExecutor {
         });
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[tokio::test]
+    async fn abort_without_active_prompt_hook_is_a_noop() {
+        let storage = std::sync::Arc::new(theway_core::MemorySessionStorage::new());
+        let session = Session::new(storage as std::sync::Arc<dyn theway_core::SessionStorage>);
+        let harness = std::sync::Arc::new(theway_core::AgentHarness::new(
+            theway_core::AgentHarnessOptions::new(
+                theway_llm_provider::Model {
+                    id: "faux".into(),
+                    name: "Faux".into(),
+                    api: theway_llm_provider::Api::from("faux"),
+                    provider: theway_llm_provider::Provider::from("faux"),
+                    base_url: String::new(),
+                    reasoning: false,
+                    thinking_level_map: None,
+                    input: vec![],
+                    cost: theway_llm_provider::ModelCost::default(),
+                    context_window: 0,
+                    max_tokens: 0,
+                    headers: None,
+                    compat: None,
+                },
+                session.clone(),
+            ),
+        ));
+        let executor = TriggerExecutor::new(
+            harness.agent_arc(),
+            session,
+            TriggerRuntimeConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        executor.abort();
+        assert!(executor.notification_status_snapshot().running.is_empty());
+    }
+
+    #[tokio::test]
+    async fn emit_isolates_panicking_listener_and_continues_to_others() {
+        let storage = std::sync::Arc::new(theway_core::MemorySessionStorage::new());
+        let session = Session::new(storage as std::sync::Arc<dyn theway_core::SessionStorage>);
+        let harness = std::sync::Arc::new(theway_core::AgentHarness::new(
+            theway_core::AgentHarnessOptions::new(
+                theway_llm_provider::Model {
+                    id: "faux".into(),
+                    name: "Faux".into(),
+                    api: theway_llm_provider::Api::from("faux"),
+                    provider: theway_llm_provider::Provider::from("faux"),
+                    base_url: String::new(),
+                    reasoning: false,
+                    thinking_level_map: None,
+                    input: vec![],
+                    cost: theway_llm_provider::ModelCost::default(),
+                    context_window: 0,
+                    max_tokens: 0,
+                    headers: None,
+                    compat: None,
+                },
+                session.clone(),
+            ),
+        ));
+        let executor = TriggerExecutor::new(
+            harness.agent_arc(),
+            session,
+            TriggerRuntimeConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let _panic_listener = executor.subscribe(std::sync::Arc::new(move |_| {
+            panic!("listener panic");
+        }));
+        let calls_sink2 = calls.clone();
+        let _counting_listener = executor.subscribe(std::sync::Arc::new(move |_| {
+            calls_sink2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        executor.emit(TriggerEvent::TriggerHandlingStart {
+            idempotency_key: "k".into(),
+            source_kind: super::super::types::SourceKind::Mcp,
+            source_label: "src".into(),
+            event_label: "evt".into(),
+            trace_id: "trace".into(),
+        });
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn abort_trigger_unknown_and_all_are_noops_when_no_running_triggers() {
+        let storage = std::sync::Arc::new(theway_core::MemorySessionStorage::new());
+        let session = Session::new(storage as std::sync::Arc<dyn theway_core::SessionStorage>);
+        let harness = std::sync::Arc::new(theway_core::AgentHarness::new(
+            theway_core::AgentHarnessOptions::new(
+                theway_llm_provider::Model {
+                    id: "faux".into(),
+                    name: "Faux".into(),
+                    api: theway_llm_provider::Api::from("faux"),
+                    provider: theway_llm_provider::Provider::from("faux"),
+                    base_url: String::new(),
+                    reasoning: false,
+                    thinking_level_map: None,
+                    input: vec![],
+                    cost: theway_llm_provider::ModelCost::default(),
+                    context_window: 0,
+                    max_tokens: 0,
+                    headers: None,
+                    compat: None,
+                },
+                session.clone(),
+            ),
+        ));
+        let executor = TriggerExecutor::new(
+            harness.agent_arc(),
+            session,
+            TriggerRuntimeConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        executor.abort_trigger("no-such-trace");
+        executor.abort_all_triggers();
+        assert!(executor.notification_status_snapshot().running.is_empty());
+    }
+}

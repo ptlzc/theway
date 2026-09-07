@@ -175,6 +175,33 @@ export default defineExtension((api) => {
 });
 "#;
 
+const TYPED_CUSTOM_EVENT_SOURCE: &str = r#"
+import { defineExtension } from "@theway-ai/plugin-sdk";
+export default defineExtension((api) => {
+  api.on("metrics/typed", { payloadSchema: { type: "object" } }, (event) => event.payload);
+});
+"#;
+
+#[tokio::test]
+async fn custom_event_payload_schema_mismatch_is_rejected() {
+    let base = tempdir().unwrap();
+    write_package(
+        &global_root(base.path()),
+        "typed-event",
+        TYPED_CUSTOM_EVENT_SOURCE,
+    );
+    let catalog = PackageCatalog::discover(base.path(), base.path());
+    let engine = QuickJsEnginePool::new(1);
+    let host = SessionPluginHost::start(catalog, engine, "session", base.path()).await;
+
+    let err = host
+        .publish_live_event("metrics/typed", serde_json::json!("not-an-object"), "emit")
+        .await
+        .unwrap_err();
+    assert!(err.contains("payloadSchema"), "{err}");
+    host.shutdown().await;
+}
+
 #[tokio::test]
 async fn api_emit_routes_to_same_session_subscriber() {
     let base = tempdir().unwrap();

@@ -201,3 +201,100 @@ async fn execute_rejects_relative_path_source() {
         "got: {err}"
     );
 }
+
+#[test]
+fn audit_source_reference_url_uses_redacted_url_reference() {
+    let reference = audit_source_reference(&Source::Url {
+        url: "https://example.com/skill.md".into(),
+    });
+    assert_eq!(reference["scheme"], "https");
+    assert_eq!(reference["host"], "example.com");
+    assert_eq!(reference["redacted"], true);
+    let serialized = serde_json::to_string(&reference).unwrap();
+    assert!(
+        !serialized.contains("skill.md"),
+        "url path must be redacted: {serialized}"
+    );
+}
+
+#[test]
+fn default_skills_root_and_target_path_are_stable() {
+    let root = default_skills_root();
+    assert!(root.ends_with("skills"), "got: {root:?}");
+}
+
+#[tokio::test]
+async fn on_disk_skill_hash_matches_content_hash_semantics() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("name").join("SKILL.md");
+    tokio::fs::create_dir_all(target.parent().unwrap()).await.unwrap();
+    tokio::fs::write(&target, "---\r\nname: name\r\ndescription: d\r\n---\r\nbody\r\n")
+        .await
+        .unwrap();
+    let hash = on_disk_skill_hash(&target).await.expect("utf8 file");
+    assert_eq!(hash.len(), 64);
+}
+
+#[tokio::test]
+async fn install_includes_reload_diagnostics_matching_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dir_path = dir.path().to_path_buf();
+    let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;
+    let session = Session::new(storage);
+    let mut opts = AgentHarnessOptions::new(fake_model(), session);
+    let loader: ReloadSkillsFn = Arc::new(move || {
+        let dir_for_fut = dir_path.clone();
+        Box::pin(async move {
+            let target = dir_for_fut
+                .join("alpha")
+                .join("SKILL.md")
+                .to_string_lossy()
+                .to_string();
+            LoadSkillsOutput {
+                skills: vec![],
+                diagnostics: vec![
+                    theway_core::SkillDiagnostic {
+                        code: theway_core::SkillDiagnosticCode::ReadFailed,
+                        message: "read failed".into(),
+                        path: target.clone(),
+                    },
+                    theway_core::SkillDiagnostic {
+                        code: theway_core::SkillDiagnosticCode::ParseFailed,
+                        message: "parse failed".into(),
+                        path: "other/skill.md".into(),
+                    },
+                ],
+            }
+        })
+    });
+    opts.reload_skills_fn = Some(loader);
+    let harness = Arc::new(AgentHarness::new(opts));
+    let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
+    assert!(cell.set(harness.clone()).is_ok(), "set once");
+
+    let tool = InstallSkillTool::with_skills_root(cell, dir.path().to_path_buf());
+    let md = "---\nname: alpha\ndescription: d\n---\nbody\n";
+    let result = execute(
+        &tool,
+        json!({ "source": { "type": "content", "content": md }, "confirm": true }),
+    )
+    .await
+    .expect("install succeeds with reload diagnostics");
+    let warnings = result.details["warnings"].to_string();
+    assert!(warnings.contains("read failed"), "got: {warnings}");
+    assert!(!warnings.contains("parse failed"), "unrelated diagnostic leaked: {warnings}");
+}
+
+#[tokio::test]
+async fn atomic_write_skill_reports_rename_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    // A directory at the target path makes the final rename fail on Unix (and is
+    // also an invalid skill target), exercising the error branch.
+    let target = dir.path().join("occupied");
+    tokio::fs::create_dir(&target).await.unwrap();
+
+    let err = atomic_write_skill(&target, "---\nname: x\ndescription: d\n---\nbody\n")
+        .await
+        .expect_err("rename over a directory must fail");
+    assert!(err.to_string().contains("rename"), "got: {err}");
+}

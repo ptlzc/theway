@@ -291,7 +291,8 @@ async fn submit_web_text_for_session_interrupt_clears_stale_queue_and_queues_new
         display: "stale".into(),
         prompt: "stale prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     host.submit_web_text_for_session("other", "hello parked interrupt".into(), Vec::new(), true)
         .await;
@@ -405,12 +406,14 @@ async fn start_next_queued_turn_reports_remaining_count() {
         display: "first".into(),
         prompt: "first prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
     host.enqueue_turn(QueuedTurn::UserPrompt {
         display: "second".into(),
         prompt: "second prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     let mut turn = TurnState::default();
     assert!(host.start_next_queued_turn(&mut turn));
@@ -461,7 +464,8 @@ async fn start_next_queued_turn_holds_job_until_model_is_assigned() {
         display: "waiting".into(),
         prompt: "waiting prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     let mut turn = TurnState::default();
     assert!(
@@ -496,7 +500,8 @@ async fn start_parked_turn_holds_job_until_model_is_assigned() {
             display: "parked waiting".into(),
             prompt: "parked waiting prompt".into(),
             images: Vec::new(),
-        });
+
+        persisted: false,});
     }
     let mut unordered = futures::stream::FuturesUnordered::new();
 
@@ -529,7 +534,8 @@ async fn set_model_command_releases_queued_job() {
         display: "held".into(),
         prompt: "held prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     let model = theway_llm_provider::list_models()
         .into_iter()
@@ -562,7 +568,8 @@ async fn configure_model_patch_releases_queued_job() {
         display: "configured".into(),
         prompt: "configured prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     let model = theway_llm_provider::list_models()
         .into_iter()
@@ -588,7 +595,8 @@ async fn dispatch_web_slash_model_spec_releases_queued_job() {
         display: "slash-model".into(),
         prompt: "slash-model prompt".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     let model = theway_llm_provider::list_models()
         .into_iter()

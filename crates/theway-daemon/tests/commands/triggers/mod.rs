@@ -10,7 +10,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use theway_core::{
-    AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage,
+    AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionError,
+    SessionErrorCode, SessionStorage, SessionTreeEntry,
 };
 use theway_llm_provider::Model;
 use theway_transport::commands::{CommandCtx, CommandOutcome};
@@ -78,6 +79,7 @@ pub(super) fn daemon_ctx(
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
         inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 
@@ -102,6 +104,53 @@ pub(super) fn dynamic_trigger_lock() -> std::sync::MutexGuard<'static, ()> {
 
 pub(super) fn cron_lock() -> std::sync::MutexGuard<'static, ()> {
     CRON_LOCK.lock().unwrap()
+}
+
+struct FailingAppendTriggerSession {
+    inner: Arc<MemorySessionStorage>,
+}
+
+#[async_trait::async_trait]
+impl SessionStorage for FailingAppendTriggerSession {
+    async fn get_metadata_json(&self) -> Result<serde_json::Value, SessionError> {
+        self.inner.get_metadata_json().await
+    }
+    async fn append_entry(&self, _entry: SessionTreeEntry) -> Result<(), SessionError> {
+        Err(SessionError {
+            code: SessionErrorCode::StorageFailure,
+            message: "synthetic append failure".into(),
+        })
+    }
+    async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+        self.inner.get_entry(id).await
+    }
+    async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.get_entries().await
+    }
+    async fn get_path_to_root(
+        &self,
+        entry_id: Option<&str>,
+    ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.get_path_to_root(entry_id).await
+    }
+    async fn find_entries(
+        &self,
+        entry_type: &str,
+    ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.find_entries(entry_type).await
+    }
+    async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {
+        self.inner.get_leaf_id().await
+    }
+    async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+        self.inner.set_leaf_id(id).await
+    }
+    async fn create_entry_id(&self) -> Result<String, SessionError> {
+        self.inner.create_entry_id().await
+    }
+    async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
+        self.inner.get_label(id).await
+    }
 }
 
 #[test]
@@ -499,4 +548,252 @@ fn resolve_inbox_target_resolves_number_id_and_prefix() {
 
     let err = resolve_inbox_target(&path, Some(&"inb-unknown".into())).unwrap_err();
     assert!(err.contains("no new inbox entry matching"), "{err}");
+}
+
+#[tokio::test]
+async fn triggers_status_without_arg_is_handled() {
+    let _guard = dynamic_trigger_lock();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = TriggersCommand.run(&[], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[tokio::test]
+async fn triggers_remove_all_clears_rules() {
+    let _guard = dynamic_trigger_lock();
+    crate::triggers::global_registry().clear_for_tests();
+    crate::triggers::global_registry()
+        .add_rule("event says a", "echo a")
+        .unwrap();
+    crate::triggers::global_registry()
+        .add_rule("event says b", "echo b")
+        .unwrap();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = TriggersCommand.run(&["remove".into(), "--all".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+    assert!(crate::triggers::global_registry().list().is_empty());
+}
+
+#[tokio::test]
+async fn triggers_enable_disable_missing_id_are_errors() {
+    let _guard = dynamic_trigger_lock();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = TriggersCommand.run(&["enable".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /triggers enable")));
+    let outcome = TriggersCommand.run(&["disable".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /triggers disable")));
+}
+
+#[tokio::test]
+async fn triggers_audit_with_numeric_limit_is_handled() {
+    let _guard = dynamic_trigger_lock();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = TriggersCommand.run(&["audit".into(), "3".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[tokio::test]
+async fn cron_add_invalid_schedule_is_error() {
+    let _guard = cron_lock();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = CronCommand
+        .run(&["add".into(), "not a schedule".into(), "echo hi".into()], &ctx)
+        .await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("invalid cron field") || msg.contains("cron schedule")));
+}
+
+#[tokio::test]
+async fn cron_add_stateful_job_prints_mode_line() {
+    let _guard = cron_lock();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = CronCommand
+        .run(&["add".into(), "--stateful".into(), "*/5 * * * *".into(), "echo hi".into()], &ctx)
+        .await;
+    assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn cron_list_with_jobs_is_handled() {
+    let _guard = cron_lock();
+    crate::triggers::global_cron_registry().clear_for_tests();
+    crate::triggers::global_cron_registry()
+        .add_job("* * * * *", "echo hi")
+        .unwrap();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = CronCommand.run(&["list".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[tokio::test]
+async fn cron_remove_unknown_id_is_error() {
+    let _guard = cron_lock();
+    crate::triggers::global_cron_registry().clear_for_tests();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = CronCommand.run(&["remove".into(), "cron-nope".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("no cron job with id")));
+}
+
+#[test]
+fn set_dynamic_trigger_enabled_with_repeat_rule_does_not_print_fire_once_hint() {
+    let _guard = dynamic_trigger_lock();
+    let rule = crate::triggers::global_registry()
+        .add_rule_with_options("event says repeat", "echo repeat", false)
+        .unwrap();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    // Disable then re-enable: the repeat rule must not hit the fire-once hint.
+    let outcome = set_dynamic_trigger_enabled(&ctx, Some(&rule.id), false);
+    assert!(matches!(outcome, CommandOutcome::Handled));
+    let outcome = set_dynamic_trigger_enabled(&ctx, Some(&rule.id), true);
+    assert!(matches!(outcome, CommandOutcome::Handled));
+    crate::triggers::global_registry().remove_rule(&rule.id).unwrap();
+}
+
+#[tokio::test]
+async fn cron_enable_disable_success_updates_registry() {
+    let _guard = cron_lock();
+    crate::triggers::global_cron_registry().clear_for_tests();
+    let job = crate::triggers::global_cron_registry()
+        .add_job("* * * * *", "echo enable")
+        .unwrap();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = CronCommand.run(&["disable".into(), job.id.clone()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+    let job = crate::triggers::global_cron_registry()
+        .list()
+        .into_iter()
+        .find(|j| j.id == job.id)
+        .unwrap();
+    assert!(!job.enabled);
+
+    let outcome = CronCommand.run(&["enable".into(), job.id.clone()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+    let job = crate::triggers::global_cron_registry()
+        .list()
+        .into_iter()
+        .find(|j| j.id == job.id)
+        .unwrap();
+    assert!(job.enabled);
+
+    crate::triggers::global_cron_registry().remove_job(&job.id).unwrap();
+}
+
+#[tokio::test]
+async fn write_cron_control_plane_audit_swallows_failure() {
+    let session = Session::new(
+        Arc::new(FailingAppendTriggerSession {
+            inner: Arc::new(MemorySessionStorage::new()),
+        }) as Arc<dyn SessionStorage>,
+    );
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    write_cron_control_plane_audit(&ctx, "disable", None, None).await;
+}
+
+#[tokio::test]
+async fn inbox_list_all_claim_dismiss_clear_roundtrip() {
+    use crate::test_env::{EnvGuard, ENV_LOCK};
+    use theway_transport::inbox;
+
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+    let path = theway_transport::inbox::default_inbox_path();
+    let _first = inbox::append(&path, "cron:test", "first finding", "trace-1", "session-1").unwrap();
+    let _second = inbox::append(&path, "cron:test", "second finding", "trace-2", "session-1").unwrap();
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = InboxCommand.run(&["list".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+
+    let outcome = InboxCommand.run(&["all".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+
+    let outcome = InboxCommand.run(&["claim".into(), "1".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::RunAgentPrompt { .. }));
+
+    let outcome = InboxCommand.run(&["dismiss".into(), "1".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+
+    let outcome = InboxCommand.run(&["clear".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
 }

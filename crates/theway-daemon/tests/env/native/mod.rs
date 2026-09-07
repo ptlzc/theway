@@ -259,6 +259,31 @@ async fn remove_handles_file_dir_and_missing_paths() {
 }
 
 #[tokio::test]
+async fn read_text_lines_zero_max_returns_empty() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "lines.txt", "a\nb\n");
+    let env = env_for(&dir);
+
+    let lines = env.read_text_lines("lines.txt", Some(0), cancel()).await.unwrap();
+    assert!(lines.is_empty());
+}
+
+#[tokio::test]
+async fn create_temp_without_prefix_or_suffix_uses_defaults() {
+    let env = NativeEnv::new(std::env::temp_dir().to_string_lossy().to_string());
+
+    let dir = env.create_temp_dir(None, cancel()).await.unwrap();
+    assert!(dir.contains("tmp-"));
+    assert!(std::path::Path::new(&dir).is_dir());
+
+    let file = env.create_temp_file(None, None, cancel()).await.unwrap();
+    assert!(std::path::Path::new(&file).is_file());
+
+    let _ = env.remove(&dir, true, false, cancel()).await;
+    let _ = env.remove(&file, false, false, cancel()).await;
+}
+
+#[tokio::test]
 async fn create_temp_dir_and_file_return_existing_paths() {
     let env = NativeEnv::new(std::env::temp_dir().to_string_lossy().to_string());
 

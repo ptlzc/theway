@@ -154,3 +154,46 @@ async fn confirm_without_harness_writes_skill_then_errors() {
         .expect("SKILL.md should be written before the harness lookup fails");
     assert!(written.contains("name: orphan"), "{written}");
 }
+
+#[test]
+fn render_omits_examples_section_when_examples_are_blank() {
+    let rendered = render_skill_md("alpha", "desc", "body", Some("   \n\t"))
+        .expect("blank examples should be omitted, not fail");
+    assert!(!rendered.contains("## Examples"), "{rendered}");
+}
+
+#[tokio::test]
+async fn preview_does_not_warn_when_same_name_user_skill_exists() {
+    let existing = Skill {
+        name: "alpha".into(),
+        description: "user alpha".into(),
+        file_path: "/home/u/.theway/skills/alpha/SKILL.md".into(),
+        content: "body".into(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+    let (_harness, cell) = build_test_harness(vec![existing]);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let tool = SkillBuilderTool::with_skills_root(cell, dir.path().to_path_buf());
+
+    let preview = execute(&tool, build_args("alpha", false))
+        .await
+        .expect("preview should succeed");
+    let warnings = preview.details["warnings"].to_string();
+    assert!(
+        !warnings.contains("shadow"),
+        "user-sourced same-name skill must not produce a shadow warning: {warnings}"
+    );
+}
+
+#[test]
+fn permission_classification_confirm_without_name_uses_invalid_placeholder() {
+    let tool = SkillBuilderTool::with_skills_root(empty_cell(), PathBuf::from("/tmp"));
+    let cls = tool.permission_classification(&json!({ "confirm": true }));
+    match cls {
+        PermissionClassification::Prompt { reason } => {
+            assert!(reason.contains("<invalid name>"), "got: {reason}");
+        }
+        other => panic!("confirm must prompt, got {other:?}"),
+    }
+}

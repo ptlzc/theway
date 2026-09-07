@@ -50,6 +50,7 @@ async fn dispatch_triggers_status_is_read_only_and_available() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -96,6 +97,7 @@ async fn dispatch_triggers_remove_deletes_dynamic_rule() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -144,6 +146,7 @@ async fn dispatch_triggers_disable_and_enable_updates_rule_state() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -194,6 +197,7 @@ async fn dispatch_cron_add_lists_toggles_and_removes_job() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -328,6 +332,7 @@ async fn dispatch_cron_add_audit_redacts_secret_like_action_preview() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -388,6 +393,7 @@ async fn dispatch_triggers_abort_missing_trace_returns_error() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -434,6 +440,7 @@ async fn dispatch_triggers_abort_all_empty_harness_is_handled_and_read_only() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };

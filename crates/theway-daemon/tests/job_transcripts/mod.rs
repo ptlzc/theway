@@ -95,6 +95,37 @@ fn load_missing_or_corrupt_transcript_returns_none() {
 }
 
 #[test]
+fn memory_transcript_store_round_trips_node_and_job_transcripts() {
+    let store = MemoryTranscriptStore::new();
+    let node_messages = vec![serde_json::json!({ "role": "user", "content": "node" })];
+    let job_messages = vec![serde_json::json!({ "role": "user", "content": "job" })];
+
+    store.save(&JobTranscript {
+        job_id: "job-1",
+        run_id: Some("run-1"),
+        node_id: Some("node-1"),
+        messages: &node_messages,
+    });
+    store.save(&JobTranscript {
+        job_id: "job-2",
+        run_id: None,
+        node_id: None,
+        messages: &job_messages,
+    });
+
+    assert_eq!(
+        store.load_node("run-1", "node-1").as_deref(),
+        Some(node_messages.as_slice())
+    );
+    assert_eq!(
+        store.load_job("job-2").as_deref(),
+        Some(job_messages.as_slice())
+    );
+    assert!(store.load_node("missing", "missing").is_none());
+    assert!(store.load_job("missing").is_none());
+}
+
+#[test]
 fn sanitize_path_segment_replaces_unsafe_chars_and_caps_length() {
     // Assert
     assert_eq!(sanitize_path_segment(""), "default");

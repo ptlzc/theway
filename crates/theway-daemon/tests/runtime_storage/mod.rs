@@ -541,6 +541,115 @@ async fn remote_dag_persist_saves_running_runs_as_snapshots() {
     }
 }
 
+// ── automation counts and hint helpers ──────────────────────────────────────
+
+#[test]
+fn automation_counts_badge_and_any_enabled() {
+    let empty = AutomationCounts::default();
+    assert!(!empty.any_enabled());
+    assert_eq!(empty.badge(), None);
+
+    let cron = AutomationCounts {
+        cron_enabled: 2,
+        cron_total: 3,
+        trigger_enabled: 0,
+        trigger_total: 0,
+    };
+    assert!(cron.any_enabled());
+    assert_eq!(cron.badge().as_deref(), Some("2 cron"));
+
+    let trigger = AutomationCounts {
+        cron_enabled: 0,
+        cron_total: 0,
+        trigger_enabled: 1,
+        trigger_total: 2,
+    };
+    assert!(trigger.any_enabled());
+    assert_eq!(trigger.badge().as_deref(), Some("1 trigger"));
+
+    let both = AutomationCounts {
+        cron_enabled: 1,
+        cron_total: 1,
+        trigger_enabled: 2,
+        trigger_total: 2,
+    };
+    assert_eq!(both.badge().as_deref(), Some("1 cron, 2 trigger"));
+
+    let all_disabled = AutomationCounts {
+        cron_enabled: 0,
+        cron_total: 2,
+        trigger_enabled: 0,
+        trigger_total: 1,
+    };
+    assert!(!all_disabled.any_enabled());
+    assert_eq!(all_disabled.badge().as_deref(), Some("automation off"));
+}
+
+#[test]
+fn automation_elsewhere_hint_handles_none_single_and_multiple_holders() {
+    fn record(id: &str, counts: AutomationCounts) -> SessionRecord {
+        SessionRecord {
+            id: id.into(),
+            created_at: String::new(),
+            preview: None,
+            tree_prefix: String::new(),
+            name: None,
+            cwd: String::new(),
+            model: String::new(),
+            last_activity_at: 0,
+            automation: counts,
+        }
+    }
+
+    assert!(automation_elsewhere_hint(&[], "current").is_none());
+    assert!(
+        automation_elsewhere_hint(
+            &[record("current", AutomationCounts::default())],
+            "current"
+        )
+        .is_none()
+    );
+
+    let single = automation_elsewhere_hint(
+        &[
+            record("current", AutomationCounts::default()),
+            record("sess-abc", AutomationCounts {
+                cron_enabled: 2,
+                cron_total: 2,
+                trigger_enabled: 0,
+                trigger_total: 0,
+            }),
+        ],
+        "current",
+    )
+    .unwrap();
+    assert!(single.contains("sess-abc"));
+    assert!(single.contains("2 cron"));
+    assert!(!single.contains("+1 more"));
+
+    let multiple = automation_elsewhere_hint(
+        &[
+            record("current", AutomationCounts::default()),
+            record("first", AutomationCounts {
+                cron_enabled: 1,
+                cron_total: 1,
+                trigger_enabled: 0,
+                trigger_total: 0,
+            }),
+            record("second", AutomationCounts {
+                cron_enabled: 0,
+                cron_total: 1,
+                trigger_enabled: 1,
+                trigger_total: 1,
+            }),
+        ],
+        "current",
+    )
+    .unwrap();
+    assert!(multiple.contains("+1 more"));
+    assert!(multiple.contains("first") || multiple.contains("second"));
+}
+
 // ── wire conversion helpers ───────────────────────────────────────────────────
 
 #[test]

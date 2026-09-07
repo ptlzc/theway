@@ -189,6 +189,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_frontmatter_handles_crlf_malformed_and_missing_markers() {
+        let (front, body) = parse_frontmatter("---\r\ndescription: hi\r\n---\r\nbody\r\n");
+        assert_eq!(front.description, "hi");
+        assert_eq!(body, "body");
+
+        let (front, body) = parse_frontmatter("---\nnot: [valid yaml\n---\nbody");
+        assert_eq!(front.description, "");
+        assert_eq!(body, "body");
+
+        let (front, body) = parse_frontmatter("---\nname: x\nno close");
+        assert_eq!(front.description, "");
+        assert_eq!(body, "---\nname: x\nno close");
+
+        let (front, body) = parse_frontmatter("plain body");
+        assert_eq!(front.description, "");
+        assert_eq!(body, "plain body");
+    }
+
+    #[test]
     fn expand_substitutes_arguments_and_positionals() {
         let cmd = FileCommand {
             name: "commit".into(),

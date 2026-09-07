@@ -100,3 +100,40 @@ async fn no_cwd_compatibility_keeps_process_cwd_behavior() {
         .unwrap();
     assert!(text(&direct_ls).starts_with(". ("), "{}", text(&direct_ls));
 }
+
+/// Explicit caller cwd must remain authoritative for every direct-OS tool that
+/// participates in the CwdScopedTool guard (bash/exec/ls/grep/find), not just ls.
+#[tokio::test]
+async fn explicit_cwd_authoritative_for_all_direct_os_tools() {
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let a_path = a.path().canonicalize().unwrap();
+    let b_path = b.path().canonicalize().unwrap();
+    let b_cwd = b_path.to_string_lossy().into_owned();
+    std::fs::write(a_path.join("unique-a.txt"), "alpha\n").unwrap();
+    let ta = local_tools_for_cwd(local_exec(), a_path.clone());
+    let _tb = local_tools_for_cwd(local_exec(), b_path.clone());
+    std::fs::write(b_path.join("unique-b.txt"), "beta\n").unwrap();
+
+    let bash = call(tool(&ta, "bash"), json!({ "command": "pwd", "cwd": b_cwd.clone() })).await;
+    assert!(bash.contains(&b_cwd), "bash must honor explicit cwd: {bash}");
+
+    let exec = call(tool(&ta, "exec"), json!({ "command": "pwd", "cwd": b_cwd.clone() })).await;
+    assert!(exec.contains(&b_cwd), "exec must honor explicit cwd: {exec}");
+
+    let grep = call(
+        tool(&ta, "grep"),
+        json!({ "pattern": "beta", "cwd": b_cwd.clone() }),
+    )
+    .await;
+    assert!(grep.contains("unique-b.txt"), "grep must honor explicit cwd: {grep}");
+    assert!(!grep.contains("unique-a.txt"), "grep leaked a's file: {grep}");
+
+    let find = call(
+        tool(&ta, "find"),
+        json!({ "glob": "*.txt", "cwd": b_cwd.clone() }),
+    )
+    .await;
+    assert!(find.contains("unique-b.txt"), "find must honor explicit cwd: {find}");
+    assert!(!find.contains("unique-a.txt"), "find leaked a's file: {find}");
+}

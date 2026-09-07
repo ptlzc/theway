@@ -69,3 +69,57 @@ impl ExtensionAuditLog {
         }
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn record_handles_missing_parent_and_unwritable_paths() {
+        // Path without a parent hits the `path.parent()` None branch.
+        let log = ExtensionAuditLog {
+            path: PathBuf::from("audit.jsonl"),
+            events: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            writer: Arc::new(parking_lot::Mutex::new(())),
+        };
+        log.record(
+            "ext",
+            Some("sess".into()),
+            ExtensionAuditOperation::TrustChanged,
+            ExtensionAuditOutcome::Allowed,
+            None,
+            None,
+            std::iter::empty(),
+        );
+
+        // A file where the audit parent directory should be prevents both
+        // create_dir_all and OpenOptions from succeeding.
+        let base = tempfile::tempdir().unwrap();
+        std::fs::write(base.path().join("extensions"), "not a directory").unwrap();
+        let log = ExtensionAuditLog::for_base(base.path());
+        log.record(
+            "ext",
+            Some("sess".into()),
+            ExtensionAuditOperation::TrustChanged,
+            ExtensionAuditOutcome::Allowed,
+            None,
+            None,
+            std::iter::empty(),
+        );
+
+        // Parent directory exists but the audit path is a directory, so open
+        // fails while create_dir_all succeeds.
+        let base = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(base.path().join("extensions/audit.jsonl")).unwrap();
+        let log = ExtensionAuditLog::for_base(base.path());
+        log.record(
+            "ext",
+            Some("sess".into()),
+            ExtensionAuditOperation::TrustChanged,
+            ExtensionAuditOutcome::Allowed,
+            None,
+            None,
+            std::iter::empty(),
+        );
+    }
+}

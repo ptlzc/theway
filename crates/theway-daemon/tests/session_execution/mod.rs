@@ -219,6 +219,15 @@ fn clear_credentials_removes_all_provider_secrets() {
 }
 
 #[test]
+fn credential_helpers_return_false_for_missing_sessions() {
+    let registry = SessionExecutionRegistry::new();
+
+    assert!(registry.get_credential("missing", "provider").is_none());
+    assert!(!registry.clear_credential("missing", "provider"));
+    assert!(!registry.clear_credentials("missing"));
+}
+
+#[test]
 fn clear_all_credentials_zeroizes_every_registered_session() {
     let (_dir, registry) = registered_registry();
     registry

@@ -130,6 +130,35 @@ async fn session_get_snapshot_routes_to_the_shared_service() {
 }
 
 #[test]
+fn arg_str_returns_missing_param_error_when_absent_or_non_string() {
+    assert_eq!(
+        arg_str(&serde_json::json!({}), "name").unwrap_err(),
+        "missing param `name`"
+    );
+    assert_eq!(
+        arg_str(&serde_json::json!({ "name": 123 }), "name").unwrap_err(),
+        "missing param `name`"
+    );
+}
+
+#[test]
+fn arg_str_returns_string_value_when_present() {
+    assert_eq!(
+        arg_str(&serde_json::json!({ "name": "value" }), "name").unwrap(),
+        "value"
+    );
+}
+
+#[test]
+fn tool_json_maps_errors_and_serializes_success() {
+    let err: Result<serde_json::Value, String> = Err("boom".to_string());
+    assert_eq!(tool_json(err).unwrap_err(), "boom");
+
+    let ok: Result<serde_json::Value, String> = Ok(serde_json::json!({ "ok": true }));
+    assert_eq!(tool_json(ok).unwrap(), serde_json::json!({ "ok": true }));
+}
+
+#[test]
 fn get_info_reports_theway_implementation() {
     let dispatcher = dispatcher_with_snapshot("sess-1");
     let info = dispatcher.get_info();

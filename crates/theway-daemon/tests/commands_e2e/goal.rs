@@ -44,6 +44,7 @@ async fn dispatch_goal_sets_and_reports_session_goal() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -114,6 +115,7 @@ async fn dispatch_goal_start_runs_prompt_when_goal_active() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -165,6 +167,7 @@ async fn dispatch_goal_start_shortcut_runs_prompt_when_goal_active() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -212,6 +215,7 @@ async fn dispatch_goal_start_requires_active_goal() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -266,6 +270,7 @@ async fn dispatch_goal_clear_hides_current_goal() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -404,6 +409,7 @@ async fn dispatch_goal_pause_and_resume_round_trip() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -457,6 +463,7 @@ async fn dispatch_goal_status_prints_paused_goal() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -501,6 +508,7 @@ async fn dispatch_goal_start_empty_prompt_is_error() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -546,6 +554,7 @@ async fn dispatch_goal_empty_condition_is_error() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -592,6 +601,7 @@ async fn dispatch_goal_resume_without_paused_goal_errors() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -637,6 +647,7 @@ async fn dispatch_goal_clear_without_goal_still_succeeds() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -648,6 +659,53 @@ async fn dispatch_goal_clear_without_goal_still_succeeds() {
         "{}",
         capture.text()
     );
+}
+
+#[tokio::test]
+async fn dispatch_goal_pause_with_extra_arg_treats_as_condition() {
+    let _guard = COMMAND_OUTPUT_LOCK.lock().unwrap();
+    let _capture = OutputCapture::install();
+    let storage = Arc::new(MemorySessionStorage::new());
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let harness = Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        faux_model(),
+        session,
+    )));
+    let executor = Arc::new(crate::trigger_engine::execution::TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        crate::trigger_engine::runtime::TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ));
+
+    let registry = commands::Registry::with_builtins();
+    let cwd = std::env::current_dir().unwrap();
+    let ctx = commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "test",
+        log_path: None,
+        tool_count: 0,
+        cwd: &cwd,
+        inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        mcp_provision: None,
+        auth_base: None,
+    };
+
+    // The guarded pause arm only fires for exactly one arg; with extra text the
+    // command falls through to the condition-setting arm.
+    let outcome = commands::dispatch("/goal pause later", &registry, &ctx).await;
+    assert!(matches!(outcome, commands::CommandOutcome::Handled));
+
+    let state = goal::current(&harness).await.expect("goal state");
+    assert_eq!(state.condition, "pause later");
+    assert_eq!(state.status, goal::GoalStatus::Pursuing);
 }
 
 #[tokio::test]
@@ -693,6 +751,7 @@ async fn dispatch_goal_status_prints_achieved_goal_with_reason() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };

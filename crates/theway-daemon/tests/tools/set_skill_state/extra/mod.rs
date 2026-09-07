@@ -169,3 +169,36 @@ async fn execute_rejects_invalid_source() {
     };
     assert!(m.contains("invalid `source`"), "got: {m}");
 }
+
+#[tokio::test]
+async fn unknown_skill_with_empty_catalog_has_no_hint() {
+    // Arrange
+    let dir = tempfile::tempdir().unwrap();
+    let (_harness, cell) = build(vec![]);
+    let tool = SetSkillStateTool::with_base_dir(cell, dir.path().into());
+
+    // Act
+    let err = exec(&tool, json!({"name": "ghost", "enabled": false}))
+        .await
+        .expect_err("unknown skill must fail");
+
+    // Assert
+    let AgentToolError::Message(m) = err else {
+        panic!("typed error")
+    };
+    assert!(m.contains("no loaded skill named 'ghost'"), "got: {m}");
+    assert!(!m.contains("Did you mean"), "empty catalog must not suggest: {m}");
+}
+
+#[tokio::test]
+async fn unknown_skill_hint_uses_contains_when_prefix_does_not_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_harness, cell) = build(vec![skill("foobar", SkillSource::User, false)]);
+    let tool = SetSkillStateTool::with_base_dir(cell, dir.path().into());
+
+    let err = exec(&tool, json!({"name": "oba", "enabled": false}))
+        .await
+        .expect_err("unknown skill must fail");
+    let msg = err.to_string();
+    assert!(msg.contains("Did you mean: foobar"), "got: {msg}");
+}

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use theway_core::multiagent::graph::persist::{PersistedNode, PersistedRun};
-use theway_core::multiagent::graph::types::{Direction, NodeStatus, RunKind};
+use theway_core::multiagent::graph::types::{DagNodeDef, DagRunDef, Direction, NodeStatus, RunKind};
 use theway_core::multiagent::jobs::SubagentJobInit;
 
 use super::*;
@@ -234,4 +234,129 @@ fn user_content_text_one_line_and_cap() {
     assert_eq!(one_line("a\nb"), "a ⏎ b");
     assert_eq!(cap("hello", 10), "hello");
     assert_eq!(cap("hello", 2), "he…(截断)");
+}
+
+#[test]
+fn summary_text_adds_attempt_suffix_after_retry() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![DagNodeDef {
+            id: "a".into(),
+            agent: "planner".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            provider: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    run.node_mut("a").unwrap().attempt = 2;
+    run.node_mut("a").unwrap().status = NodeStatus::Running;
+    let text = summary_text(run.node("a").unwrap(), 10, "—");
+    assert!(text.contains("(attempts=2)"), "{text}");
+}
+
+#[test]
+fn transcript_text_falls_back_when_no_registry_job() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![DagNodeDef {
+            id: "a".into(),
+            agent: "planner".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            provider: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    run.node_mut("a").unwrap().status = NodeStatus::Succeeded;
+    run.node_mut("a").unwrap().output = Some("restored output".into());
+    let registry = SubagentJobRegistry::new();
+    let text = transcript_text(run.node("a").unwrap(), "dag-1", &registry, 800);
+    assert!(text.contains("无 registry 记录"), "{text}");
+    assert!(text.contains("restored output"), "{text}");
+}
+
+#[test]
+fn summary_text_omits_attempt_suffix_on_first_attempt() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![DagNodeDef {
+            id: "a".into(),
+            agent: "planner".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            provider: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    run.node_mut("a").unwrap().status = NodeStatus::Pending;
+    let text = summary_text(run.node("a").unwrap(), 10, "—");
+    assert!(!text.contains("attempts="), "{text}");
+}
+
+#[test]
+fn transcript_text_reports_truncated_messages() {
+    let registry = SubagentJobRegistry::new();
+    let job_id = registry.register(SubagentJobInit {
+        agent: "planner".into(),
+        source: "dag".into(),
+        run_id: Some("r1".into()),
+        node_id: Some("n1".into()),
+        session_id: None,
+    });
+    registry.update(&job_id, |job| {
+        job.messages_truncated = true;
+        job.messages.push(json!({"role": "user", "content": "hello"}));
+    });
+
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![DagNodeDef {
+            id: "n1".into(),
+            agent: "planner".into(),
+            task: "t".into(),
+            depends_on: None,
+            timeout: None,
+            cwd: None,
+            provider: None,
+            model: None,
+            thinking: None,
+            max_iterations: None,
+            tools: None,
+        }],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    run.node_mut("n1").unwrap().status = NodeStatus::Running;
+    let text = transcript_text(run.node("n1").unwrap(), "r1", &registry, 800);
+    assert!(text.contains("(messages 已截断, 仅保留尾部)"), "{text}");
 }

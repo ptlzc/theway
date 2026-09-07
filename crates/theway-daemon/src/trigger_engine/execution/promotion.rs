@@ -579,3 +579,145 @@ fn last_assistant_text(state: &AgentState) -> Option<String> {
 // pulled in by path so they keep unit-test semantics (private access).
 // See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("trigger_engine/execution/promotion");
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use crate::trigger_engine::types::{
+        CredentialScope, PayloadVisibility, ReplacementPolicy, SourceKind, TriggerAuthority,
+        TriggerSource,
+    };
+
+    fn trigger() -> Trigger {
+        Trigger {
+            source: TriggerSource::Mcp {
+                server_name: "srv".into(),
+                method: "notify".into(),
+            },
+            source_kind: SourceKind::Mcp,
+            source_label: "mcp:srv".into(),
+            event_label: "notify".into(),
+            payload_visibility: PayloadVisibility::Local,
+            payload_summary: Some("summary".into()),
+            payload: None,
+            idempotency_key: "idem".into(),
+            replacement_policy: ReplacementPolicy::Drop,
+            trace_id: "trace-promo-gap".into(),
+            authority: TriggerAuthority {
+                principal_id: "p".into(),
+                principal_label: "p".into(),
+                credential_scope: CredentialScope::User,
+                allowed_source_actions: vec![],
+                expires_at: None,
+            },
+            received_at: chrono::Utc::now(),
+        }
+    }
+
+    fn session() -> Session {
+        Session::new(
+            std::sync::Arc::new(theway_core::MemorySessionStorage::new())
+                as std::sync::Arc<dyn theway_core::SessionStorage>,
+        )
+    }
+
+    fn listeners(
+        events: &std::sync::Arc<std::sync::Mutex<Vec<TriggerEvent>>>,
+    ) -> std::sync::Arc<parking_lot::Mutex<Vec<TriggerListener>>> {
+        let sink = events.clone();
+        std::sync::Arc::new(parking_lot::Mutex::new(vec![std::sync::Arc::new(
+            move |ev| {
+                sink.lock().unwrap().push(ev);
+            },
+        )]))
+    }
+
+    #[tokio::test]
+    async fn apply_promotion_streaming_enqueues_follow_up_without_direct_message() {
+        let session = session();
+        let parent_agent = std::sync::Arc::new(Agent::new(theway_core::AgentOptions::default()));
+        parent_agent.state().is_streaming = true;
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listeners = listeners(&events);
+        let trigger = trigger();
+
+        apply_promotion(
+            &listeners,
+            &session,
+            &parent_agent,
+            "trace-promo-gap",
+            &trigger,
+            true,
+            &Some("done".into()),
+            1,
+            None,
+            &PromoteAction::PromoteSummaryNow {
+                template_body: None,
+            },
+            false,
+            &serde_json::Value::Null,
+        )
+        .await;
+
+        let entries = session.entries().await.unwrap();
+        assert!(
+            !entries
+                .iter()
+                .any(|e| matches!(e, theway_core::SessionTreeEntry::Message { .. })),
+            "streaming promotion must not write directly to the session"
+        );
+        let evs = events.lock().unwrap().clone();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                TriggerEvent::TriggerPromoted { trace_id, .. }
+                    if trace_id == "trace-promo-gap"
+            )),
+            "streaming promotion must still emit TriggerPromoted"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_promotion_pending_without_append_failure_emits_pending() {
+        let session = session();
+        let parent_agent = std::sync::Arc::new(Agent::new(theway_core::AgentOptions::default()));
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listeners = listeners(&events);
+        let trigger = trigger();
+
+        apply_promotion(
+            &listeners,
+            &session,
+            &parent_agent,
+            "trace-promo-gap",
+            &trigger,
+            true,
+            &Some("done".into()),
+            1,
+            None,
+            &PromoteAction::PromoteSummaryNow {
+                template_body: None,
+            },
+            true,
+            &serde_json::Value::Null,
+        )
+        .await;
+
+        let entries = session.entries().await.unwrap();
+        assert!(
+            !entries
+                .iter()
+                .any(|e| matches!(e, theway_core::SessionTreeEntry::Message { .. })),
+            "pending promotion must not insert a message"
+        );
+        let evs = events.lock().unwrap().clone();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                TriggerEvent::PromotionPending { trace_id, .. }
+                    if trace_id == "trace-promo-gap"
+            )),
+            "pending promotion must emit PromotionPending"
+        );
+    }
+}

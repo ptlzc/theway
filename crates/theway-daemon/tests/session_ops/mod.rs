@@ -22,8 +22,11 @@ use crate::session_ops::{
 };
 
 mod collapse;
+mod graph;
 mod lifecycle;
+mod metadata;
 mod summary;
+mod wire;
 
 fn ops(repo: Arc<dyn SessionRepository>, _current_id: &str) -> AppSessionOps {
     let engine = Arc::new(DagEngine::new());

@@ -14,7 +14,7 @@ impl TurnHost {
                         .await;
                 }
             }
-            WireCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn),
+            WireCommand::TriggerRuleNow { id } => self.trigger_web_rule_now(id, turn).await,
             WireCommand::Abort { session_id } => {
                 if session_id.is_empty() || session_id == self.session.id {
                     self.request_abort(turn);
@@ -745,7 +745,7 @@ impl TurnHost {
         }
     }
 
-    fn trigger_web_rule_now(&mut self, id: String, turn: &mut TurnState) {
+    async fn trigger_web_rule_now(&mut self, id: String, turn: &mut TurnState) {
         let id = id.trim();
         if id.is_empty() {
             self.error_line("trigger: missing rule id");
@@ -765,7 +765,8 @@ impl TurnHost {
             wire_preview(&rule.action)
         );
         if turn.fut.is_some() {
-            self.queue_user_prompt(display, rule.action, Vec::new());
+            self.queue_user_prompt(display, rule.action, Vec::new())
+                .await;
         } else {
             self.projection.feed.push_user(display);
             self.start_user_prompt_turn(rule.action, Vec::new(), turn);

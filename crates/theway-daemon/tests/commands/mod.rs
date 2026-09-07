@@ -4,6 +4,16 @@ use super::*;
 use crate::test_env::{EnvGuard, ENV_LOCK};
 use theway_core::SkillSource;
 
+use std::path::Path;
+use std::sync::Arc;
+use theway_core::{AgentHarness, AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage};
+use theway_transport::commands::CommandCtx;
+
+use crate::commands::DaemonCtx;
+use crate::trigger_engine::execution::TriggerExecutor;
+use crate::trigger_engine::runtime::TriggerRuntimeConfig;
+use theway_daemon::runtime_storage::local_runtime_storage;
+
 fn custom_test_model(provider: &str, id: &str) -> Model {
     Model {
         id: id.into(),
@@ -393,4 +403,384 @@ fn skill_source_parse_error_is_fixed_and_bounded() {
     let err = parse_skill_source("user-secret-token").unwrap_err();
     assert!(err.contains("expected one of"), "{err}");
     assert!(!err.contains("user-secret-token"), "{err}");
+}
+
+#[test]
+fn preview_text_caps_and_preserves_short_text() {
+    assert_eq!(preview_text("abc", 10), "abc");
+    let capped = preview_text("abcdef", 3);
+    assert_eq!(capped, "abc…");
+    assert_eq!(preview_text("a\nb", 10), "a b");
+}
+
+#[test]
+fn resolve_skill_shortcut_covers_registry_and_ambiguity_cases() {
+    let registry = Registry::with_builtins();
+    let disabled = Skill {
+        name: "foo".into(),
+        description: String::new(),
+        file_path: "/tmp/foo/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: true,
+        source: SkillSource::User,
+    };
+    let enabled_foo = Skill {
+        name: "foo".into(),
+        description: String::new(),
+        file_path: "/tmp/foo/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+    let enabled_bar = Skill {
+        name: "bar".into(),
+        description: String::new(),
+        file_path: "/tmp/bar/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+
+    // Registry command takes precedence over a same-named skill.
+    let skills = vec![Skill {
+        name: "model".into(),
+        description: String::new(),
+        file_path: "/tmp/model/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    }];
+    assert!(resolve_skill_shortcut(&skills, &registry, "model").unwrap().is_none());
+
+    assert!(resolve_skill_shortcut(&[], &registry, "nope").unwrap().is_none());
+
+    assert!(resolve_skill_shortcut(&[disabled], &registry, "foo").is_err());
+
+    let dup_foo_a = Skill {
+        name: "foo".into(),
+        description: String::new(),
+        file_path: "/tmp/foo-a/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+    let dup_foo_b = Skill {
+        name: "foo".into(),
+        description: String::new(),
+        file_path: "/tmp/foo-b/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+    assert!(resolve_skill_shortcut(&[dup_foo_a, dup_foo_b], &registry, "foo").is_err());
+
+    let skills = vec![enabled_foo, enabled_bar];
+    let resolved = resolve_skill_shortcut(&skills, &registry, "foo").unwrap().unwrap();
+    assert_eq!(resolved.name, "foo");
+}
+
+#[test]
+fn skill_shortcuts_filters_duplicate_names() {
+    let registry = Registry::with_builtins();
+    let skill_a = Skill {
+        name: "dup".into(),
+        description: "a".into(),
+        file_path: "/tmp/a/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::User,
+    };
+    let skill_b = Skill {
+        name: "dup".into(),
+        description: "b".into(),
+        file_path: "/tmp/b/SKILL.md".into(),
+        content: String::new(),
+        disable_model_invocation: false,
+        source: SkillSource::Project,
+    };
+    let shortcuts = skill_shortcuts(&[skill_a, skill_b], &registry);
+    assert!(shortcuts.is_empty(), "{shortcuts:?}");
+}
+
+#[test]
+fn args_tail_of_handles_short_input() {
+    assert_eq!(args_tail_of("/name", "name"), "");
+    assert_eq!(args_tail_of("/name ", "name"), "");
+    assert_eq!(args_tail_of("/name hi there", "name"), "hi there");
+}
+
+fn command_test_model() -> Model {
+    Model {
+        id: "faux".into(),
+        name: "Faux".into(),
+        api: theway_llm_provider::Api::from("faux"),
+        provider: Provider::from("faux"),
+        base_url: String::new(),
+        reasoning: false,
+        thinking_level_map: None,
+        input: vec![],
+        cost: theway_llm_provider::ModelCost::default(),
+        context_window: 0,
+        max_tokens: 0,
+        headers: None,
+        compat: None,
+    }
+}
+
+fn command_test_session() -> Session {
+    Session::new(Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>)
+}
+
+fn command_test_harness(session: Session) -> Arc<AgentHarness> {
+    Arc::new(AgentHarness::new(AgentHarnessOptions::new(
+        command_test_model(),
+        session,
+    )))
+}
+
+fn command_test_executor(harness: &Arc<AgentHarness>) -> Arc<TriggerExecutor> {
+    Arc::new(TriggerExecutor::new(
+        harness.agent_arc(),
+        harness.session().clone(),
+        TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ))
+}
+
+fn command_test_ctx<'a>(
+    extra: &'a DaemonCtx,
+    cwd: &'a Path,
+) -> CommandCtx<'a, DaemonCtx> {
+    CommandCtx {
+        session_id: "test-session",
+        log_path: None,
+        tool_count: 0,
+        cwd,
+        extra,
+    }
+}
+
+fn command_test_daemon_ctx(
+    harness: &Arc<AgentHarness>,
+    executor: Arc<TriggerExecutor>,
+) -> DaemonCtx {
+    DaemonCtx {
+        harness: harness.clone(),
+        trigger_executor: executor,
+        storage: local_runtime_storage(),
+        dynamic_triggers: crate::triggers::global_registry().clone(),
+        cron: crate::triggers::global_cron_registry().clone(),
+        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+    }
+}
+
+#[tokio::test]
+async fn model_command_without_args_opens_picker() {
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::ModelCommand.run(&[], &ctx).await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::OpenModelPicker
+    ));
+}
+
+#[tokio::test]
+async fn model_command_list_known_and_unknown_provider() {
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::ModelCommand
+        .run(&["list".into(), "openai".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Handled
+    ));
+
+    let outcome = crate::commands::model::ModelCommand
+        .run(&["list".into(), "definitely-not-a-provider".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Error(ref msg) if msg.contains("unknown provider")
+    ));
+}
+
+#[tokio::test]
+async fn model_command_unknown_model_and_bad_spec_are_errors() {
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::ModelCommand
+        .run(&["anthropic".into(), "definitely-not-a-model".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Error(ref msg) if msg.contains("unknown model")
+    ));
+
+    let outcome = crate::commands::model::ModelCommand
+        .run(&["not-a-spec".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Error(ref msg) if msg.contains("expected provider:model-id")
+    ));
+}
+
+#[tokio::test]
+async fn model_command_switches_to_custom_model_without_credential_hint() {
+    let provider_name = "command-test-provider";
+    let provider = Provider::from(provider_name);
+    let id = "command-test-model";
+    theway_llm_provider::register_custom_model(custom_test_model(provider_name, id));
+
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::ModelCommand
+        .run(&[format!("{provider_name}:{id}")], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Handled
+    ));
+
+    theway_llm_provider::unregister_custom_model(&provider, id);
+}
+
+#[tokio::test]
+async fn thinking_command_show_set_and_invalid_level() {
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::ThinkingCommand.run(&[], &ctx).await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Handled
+    ));
+
+    let outcome = crate::commands::model::ThinkingCommand
+        .run(&["high".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Handled
+    ));
+
+    let outcome = crate::commands::model::ThinkingCommand
+        .run(&["bogus".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Error(ref msg) if msg.contains("invalid level")
+    ));
+}
+
+#[tokio::test]
+async fn cost_command_show_and_reset_are_handled() {
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::CostCommand.run(&[], &ctx).await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Handled
+    ));
+
+    let outcome = crate::commands::model::CostCommand
+        .run(&["reset".into()], &ctx)
+        .await;
+    assert!(matches!(
+        outcome,
+        theway_transport::commands::CommandOutcome::Handled
+    ));
+}
+
+#[test]
+fn model_catalog_text_handles_model_name_equal_to_id() {
+    let provider_name = "command-test-catalog-provider-2";
+    let provider = Provider::from(provider_name);
+    let mut model = custom_test_model(provider_name, "same-name-model");
+    model.name = model.id.clone();
+    theway_llm_provider::register_custom_model(model);
+
+    let text = crate::commands::model::model_catalog_text(Some(provider_name)).unwrap();
+    assert!(text.contains("same-name-model"), "{text}");
+
+    theway_llm_provider::unregister_custom_model(&provider, "same-name-model");
+}
+
+#[tokio::test]
+async fn model_command_list_without_provider_is_handled() {
+    let session = command_test_session();
+    let harness = command_test_harness(session);
+    let executor = command_test_executor(&harness);
+    let extra = command_test_daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_test_ctx(&extra, tmp.path());
+
+    let outcome = crate::commands::model::ModelCommand
+        .run(&["list".into()], &ctx)
+        .await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[test]
+fn model_catalog_text_known_provider_and_empty_model_name() {
+    let provider_name = "command-test-catalog-provider";
+    let provider = Provider::from(provider_name);
+    let mut model = custom_test_model(provider_name, "empty-name-model");
+    model.name.clear();
+    theway_llm_provider::register_custom_model(model);
+
+    let text = crate::commands::model::model_catalog_text(Some(provider_name)).unwrap();
+    assert!(text.contains("empty-name-model"), "{text}");
+
+    theway_llm_provider::unregister_custom_model(&provider, "empty-name-model");
+}
+
+#[test]
+fn unknown_model_error_for_unknown_provider_falls_back_to_provider_error() {
+    let message = unknown_model_error("definitely-not-a-provider", "some-id");
+    assert!(message.contains("unknown provider"), "{message}");
+}
+
+#[test]
+fn unknown_model_error_lists_more_hint_for_large_catalog() {
+    let message = crate::commands::model::unknown_model_error("openai", "definitely-not-a-model");
+    assert!(message.contains("unknown model in catalog"), "{message}");
+    assert!(message.contains("run /model list openai for all"), "{message}");
 }

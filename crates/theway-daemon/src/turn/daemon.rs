@@ -349,6 +349,10 @@ struct RuntimeConfiguration {
     /// child-session settings here; `dispatch_web_slash` consumes the slot
     /// right after dispatch.
     inherit_slot: Arc<std::sync::Mutex<Option<crate::commands::InheritedSessionSettings>>>,
+    /// Collapse-unload slot: the collapse command writes the source/child ids
+    /// here; the dispatch path consumes the slot right after dispatch and
+    /// releases the source session's runtime from memory.
+    collapse_unload_slot: Arc<std::sync::Mutex<Option<crate::commands::CollapseUnloadRequest>>>,
     /// Controller tool endpoint forwarder (issue #76): routes `ToolOps`
     /// calls to the connected controller's `ToolService` server.
     tool_ops: Arc<dyn ToolOps>,
@@ -710,4 +714,10 @@ mod daemon_final_coverage_tests {
     //! `tests/turn/daemon/final_coverage/`; separate bridge to keep the other
     //! mirrored suites untouched.
     tests_bridge_macro::tests_bridge!("turn/daemon/final_coverage");
+}
+
+#[cfg(test)]
+mod daemon_collapse_unload_tests {
+    //! Collapse memory-unload tests live in `tests/turn/daemon/collapse_unload/`.
+    tests_bridge_macro::tests_bridge!("turn/daemon/collapse_unload");
 }

@@ -339,3 +339,86 @@ async fn load_memory_block_sorts_entries_skips_index_and_wraps() {
     assert!(block.ends_with("</memory>"), "got: {block}");
     assert!(block.contains("Persistent cross-session memory."), "{block}");
 }
+
+#[tokio::test]
+async fn list_existing_empty_dir_returns_no_memories() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let tool = tool_with(dir.path());
+    let result = tool.list().await.expect("list on an empty dir should succeed");
+    assert_eq!(text_of(&result), "[no memories]");
+    assert_eq!(result.details["memories"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn list_read_dir_error_when_dir_is_a_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("not-a-dir");
+    std::fs::write(&file, "x").unwrap();
+    let tool = tool_with(&file);
+    let err = tool
+        .list()
+        .await
+        .expect_err("read_dir on a file must fail");
+    assert!(
+        err.to_string().contains("list memories:"),
+        "got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn load_memory_block_skips_unreadable_md_entries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // A directory named `*.md` is not a regular file, so the block builder must
+    // skip it and still include the readable entry that follows.
+    std::fs::create_dir(dir.path().join("bad.md")).unwrap();
+    tokio::fs::write(dir.path().join("good.md"), "good body").await.unwrap();
+
+    let block = load_memory_block(dir.path()).await;
+    assert!(block.contains("--- good.md ---"), "got: {block}");
+    assert!(!block.contains("--- bad.md ---"), "got: {block}");
+}
+
+#[tokio::test]
+async fn save_defaults_type_to_user() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let tool = tool_with(dir.path());
+
+    let saved = execute(
+        &tool,
+        json!({
+            "action": "save",
+            "name": "default-type",
+            "description": "d",
+            "content": "body",
+        }),
+    )
+    .await
+    .expect("save should succeed");
+    assert_eq!(saved.details["name"], "default-type");
+
+    let body = tokio::fs::read_to_string(dir.path().join("default-type.md"))
+        .await
+        .expect("file written");
+    assert!(body.contains("metadata:\n  type: user"), "got: {body}");
+}
+
+#[tokio::test]
+async fn forget_missing_file_is_idempotent_and_clears_index() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    tokio::fs::write(dir.path().join("MEMORY.md"), "- [ghost](ghost.md) — d\n")
+        .await
+        .unwrap();
+    let tool = tool_with(dir.path());
+
+    execute(
+        &tool,
+        json!({ "action": "forget", "name": "ghost" }),
+    )
+    .await
+    .expect("forget with no file on disk should still succeed");
+
+    let index = tokio::fs::read_to_string(dir.path().join("MEMORY.md"))
+        .await
+        .unwrap_or_default();
+    assert!(!index.contains("ghost"), "index must be cleared: {index}");
+}

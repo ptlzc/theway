@@ -170,6 +170,21 @@ async fn build_without_log_writes_disabled_log_line_and_creates_dirs() {
 }
 
 #[tokio::test]
+async fn build_without_parent_skips_mkdir_and_returns_write_error() {
+    let session = empty_session();
+    let diag = bug_report::DiagInputs {
+        session_id: "root-dest".into(),
+        model: None,
+        thinking: "off".into(),
+        tool_count: 0,
+        skill_count: 0,
+        cost_summary: "n/a".into(),
+        log_path: None,
+    };
+    let _ = bug_report::build(diag, &session, std::path::Path::new("/")).await;
+}
+
+#[tokio::test]
 async fn build_reports_unreadable_log_without_failing() {
     let session = empty_session();
     let dir = TempDir::new().unwrap();

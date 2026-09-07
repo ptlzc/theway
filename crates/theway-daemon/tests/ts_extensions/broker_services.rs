@@ -80,3 +80,22 @@ fn block_on_without_runtime_builds_current_thread_runtime() {
         .unwrap_err();
     assert_eq!(err, "nope");
 }
+
+#[test]
+fn block_on_uses_current_tokio_runtime_when_available() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let services = runtime.block_on(async {
+        ExtensionBrokerServices::new(std::path::Path::new("/tmp/way-test"), crate::executor::default_executor())
+    });
+    let result = std::thread::spawn(move || {
+        services
+            .block_on(async { Ok::<_, String>(42) })
+            .unwrap()
+    })
+    .join()
+    .unwrap();
+    assert_eq!(result, 42);
+}

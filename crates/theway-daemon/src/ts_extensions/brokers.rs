@@ -790,3 +790,88 @@ fn truncate_bytes(mut value: String, limit: usize) -> String {
     value.truncate(boundary);
     value
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::super::broker_services::ExtensionBrokerServices;
+    use super::super::catalog::ExtensionPackage;
+    use super::*;
+    use std::path::Path;
+    use theway_contract::extension::{
+        ExtensionPackageManifest, ExtensionScope, ExtensionSourceLayer,
+    };
+
+    fn package(id: &str) -> ExtensionPackage {
+        ExtensionPackage::synthetic_package(
+            ExtensionPackageManifest {
+                id: id.into(),
+                version: "1.0.0".into(),
+                entry: "index.js".into(),
+                priority: 0,
+                scope: ExtensionScope::Session,
+                state_schema: None,
+                config_schema: None,
+                permissions: Vec::new(),
+                optional_permissions: Vec::new(),
+            },
+            ExtensionSourceLayer::Project,
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/index.js"),
+            "export const kind='compaction';",
+        )
+    }
+
+    fn runtime(id: &str) -> BrokerRuntime {
+        let package = package(id);
+        let services = ExtensionBrokerServices::new(
+            Path::new("/tmp/way-test"),
+            crate::executor::default_executor(),
+        );
+        BrokerRuntime::new(&EngineInstanceKey::new("sess", id), &package, services)
+    }
+
+    fn active(cancelled: bool, deadline: Instant) -> ActiveBrokerInvocation {
+        ActiveBrokerInvocation {
+            cancellation: Arc::new(AtomicBool::new(cancelled)),
+            deadline,
+            event: ExtensionLifecycleEvent::Input,
+            raw_payload: Value::Null,
+        }
+    }
+
+    #[test]
+    fn truncate_bytes_handles_short_multibyte_and_long_values() {
+        assert_eq!(truncate_bytes("abc".into(), 10), "abc");
+        assert_eq!(truncate_bytes("abcdef".into(), 3), "abc");
+        assert_eq!(truncate_bytes("éé".into(), 1), "");
+    }
+
+    #[tokio::test]
+    async fn cancelled_returns_when_cancelled_or_deadline_passed() {
+        cancelled(
+            Arc::new(AtomicBool::new(true)),
+            Instant::now() + Duration::from_secs(60),
+        )
+        .await;
+        cancelled(
+            Arc::new(AtomicBool::new(false)),
+            Instant::now() - Duration::from_secs(1),
+        )
+        .await;
+    }
+
+    #[test]
+    fn ensure_active_rejects_cancelled_and_timed_out_invocations() {
+        let runtime = runtime("ext");
+        let cancelled = active(true, Instant::now() + Duration::from_secs(60));
+        let err = runtime.ensure_active(&cancelled).unwrap_err();
+        assert_eq!(err.code, "cancelled");
+
+        let timed_out = active(false, Instant::now() - Duration::from_secs(1));
+        let err = runtime.ensure_active(&timed_out).unwrap_err();
+        assert_eq!(err.code, "timeout");
+
+        let ok = active(false, Instant::now() + Duration::from_secs(60));
+        assert!(runtime.ensure_active(&ok).is_ok());
+    }
+}

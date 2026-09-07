@@ -175,6 +175,7 @@ impl TurnHost {
                 mcp_provision: config.mcp_provision,
                 trigger_executor: config.trigger_executor.clone(),
                 inherit_slot: Arc::new(std::sync::Mutex::new(None)),
+                collapse_unload_slot: Arc::new(std::sync::Mutex::new(None)),
                 tool_ops,
                 model_catalog: model_catalog(),
                 feed_history_limit: config.startup.tui_max_feed_lines,

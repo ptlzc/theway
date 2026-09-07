@@ -336,6 +336,316 @@ async fn abort_all_triggers_cancels_every_in_flight_sub_agent() {
 }
 
 #[tokio::test]
+async fn promotion_message_append_failure_emits_persistence_error() {
+    use theway_daemon::trigger_engine::execution::{
+        BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, TriggerAction,
+        TriggerDelivery,
+    };
+
+    struct FailingAppendStorage {
+        inner: Arc<MemorySessionStorage>,
+    }
+    #[async_trait]
+    impl SessionStorage for FailingAppendStorage {
+        async fn get_metadata_json(&self) -> Result<serde_json::Value, SessionError> {
+            self.inner.get_metadata_json().await
+        }
+        async fn append_entry(&self, _entry: SessionTreeEntry) -> Result<(), SessionError> {
+            Err(SessionError {
+                code: SessionErrorCode::StorageFailure,
+                message: "synthetic write failure".into(),
+            })
+        }
+        async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+            self.inner.get_entry(id).await
+        }
+        async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.get_entries().await
+        }
+        async fn get_path_to_root(
+            &self,
+            entry_id: Option<&str>,
+        ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.get_path_to_root(entry_id).await
+        }
+        async fn find_entries(
+            &self,
+            entry_type: &str,
+        ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.find_entries(entry_type).await
+        }
+        async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {
+            self.inner.get_leaf_id().await
+        }
+        async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+            self.inner.set_leaf_id(id).await
+        }
+        async fn create_entry_id(&self) -> Result<String, SessionError> {
+            self.inner.create_entry_id().await
+        }
+        async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
+            self.inner.get_label(id).await
+        }
+    }
+
+    let storage = Arc::new(FailingAppendStorage {
+        inner: Arc::new(MemorySessionStorage::new()),
+    });
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let stream_fn = Some(faux_stream_fn("ok"));
+    let before_trigger_action: Option<BeforeTriggerActionHook> =
+        Some(Arc::new(|_ctx: BeforeTriggerActionContext, _cancel| {
+            Box::pin(async move {
+                TriggerAction {
+                    prompt: "sub-agent".into(),
+                    promote: PromoteAction::PromoteSummaryNow {
+                        template_body: None,
+                    },
+                    promote_requires_approval: false,
+                    delivery: TriggerDelivery::SubAgent,
+                }
+            })
+        }));
+    let harness = AgentHarness::new(AgentHarnessOptions::new(faux_model(), session.clone()));
+    let executor = Arc::new(TriggerExecutor::new(
+        harness.agent_arc(),
+        session.clone(),
+        TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::<TriggerEvent>::new()));
+    let sink = events.clone();
+    let _unsub = executor.subscribe(Arc::new(move |ev| {
+        sink.lock().unwrap().push(ev);
+    }));
+
+    let _ = executor
+        .handle_trigger(sample_trigger(
+            "k-promote-append-fail",
+            "trace-promote-append-fail",
+        ))
+        .await;
+    wait_for_event(&events, 5, |evs| {
+        evs.iter().find_map(|e| match e {
+            TriggerEvent::PersistenceError {
+                context, message, ..
+            } if context == "trigger_promotion" && message.contains("append failed") => Some(()),
+            _ => None,
+        })
+    })
+    .await
+    .expect("promotion append failure must be refluxed");
+}
+
+#[tokio::test]
+async fn promotion_pending_audit_append_failure_emits_persistence_error() {
+    use theway_daemon::trigger_engine::execution::{
+        BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, TriggerAction,
+        TriggerDelivery,
+    };
+
+    struct FailingAppendStorage {
+        inner: Arc<MemorySessionStorage>,
+    }
+    #[async_trait]
+    impl SessionStorage for FailingAppendStorage {
+        async fn get_metadata_json(&self) -> Result<serde_json::Value, SessionError> {
+            self.inner.get_metadata_json().await
+        }
+        async fn append_entry(&self, _entry: SessionTreeEntry) -> Result<(), SessionError> {
+            Err(SessionError {
+                code: SessionErrorCode::StorageFailure,
+                message: "synthetic write failure".into(),
+            })
+        }
+        async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+            self.inner.get_entry(id).await
+        }
+        async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.get_entries().await
+        }
+        async fn get_path_to_root(
+            &self,
+            entry_id: Option<&str>,
+        ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.get_path_to_root(entry_id).await
+        }
+        async fn find_entries(
+            &self,
+            entry_type: &str,
+        ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.find_entries(entry_type).await
+        }
+        async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {
+            self.inner.get_leaf_id().await
+        }
+        async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+            self.inner.set_leaf_id(id).await
+        }
+        async fn create_entry_id(&self) -> Result<String, SessionError> {
+            self.inner.create_entry_id().await
+        }
+        async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
+            self.inner.get_label(id).await
+        }
+    }
+
+    let storage = Arc::new(FailingAppendStorage {
+        inner: Arc::new(MemorySessionStorage::new()),
+    });
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let stream_fn = Some(faux_stream_fn("ok"));
+    let before_trigger_action: Option<BeforeTriggerActionHook> =
+        Some(Arc::new(|_ctx: BeforeTriggerActionContext, _cancel| {
+            Box::pin(async move {
+                TriggerAction {
+                    prompt: "sub-agent".into(),
+                    promote: PromoteAction::PromoteSummaryNow {
+                        template_body: None,
+                    },
+                    promote_requires_approval: true,
+                    delivery: TriggerDelivery::SubAgent,
+                }
+            })
+        }));
+    let harness = AgentHarness::new(AgentHarnessOptions::new(faux_model(), session.clone()));
+    let executor = Arc::new(TriggerExecutor::new(
+        harness.agent_arc(),
+        session.clone(),
+        TriggerRuntimeConfig::default(),
+        None,
+        None,
+        before_trigger_action,
+        stream_fn,
+        None,
+        None,
+    ));
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::<TriggerEvent>::new()));
+    let sink = events.clone();
+    let _unsub = executor.subscribe(Arc::new(move |ev| {
+        sink.lock().unwrap().push(ev);
+    }));
+
+    let _ = executor
+        .handle_trigger(sample_trigger(
+            "k-pending-append-fail",
+            "trace-pending-append-fail",
+        ))
+        .await;
+    wait_for_event(&events, 5, |evs| {
+        evs.iter().find_map(|e| match e {
+            TriggerEvent::PersistenceError {
+                context, message, ..
+            } if context == "trigger_promotion" && message.contains("pending") => Some(()),
+            _ => None,
+        })
+    })
+    .await
+    .expect("pending promotion audit append failure must be refluxed");
+}
+
+#[tokio::test]
+async fn sub_agent_result_audit_append_failure_emits_persistence_error() {
+    struct FailingAppendStorage {
+        inner: Arc<MemorySessionStorage>,
+    }
+    #[async_trait]
+    impl SessionStorage for FailingAppendStorage {
+        async fn get_metadata_json(&self) -> Result<serde_json::Value, SessionError> {
+            self.inner.get_metadata_json().await
+        }
+        async fn append_entry(&self, _entry: SessionTreeEntry) -> Result<(), SessionError> {
+            Err(SessionError {
+                code: SessionErrorCode::StorageFailure,
+                message: "synthetic write failure".into(),
+            })
+        }
+        async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+            self.inner.get_entry(id).await
+        }
+        async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.get_entries().await
+        }
+        async fn get_path_to_root(
+            &self,
+            entry_id: Option<&str>,
+        ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.get_path_to_root(entry_id).await
+        }
+        async fn find_entries(
+            &self,
+            entry_type: &str,
+        ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+            self.inner.find_entries(entry_type).await
+        }
+        async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {
+            self.inner.get_leaf_id().await
+        }
+        async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+            self.inner.set_leaf_id(id).await
+        }
+        async fn create_entry_id(&self) -> Result<String, SessionError> {
+            self.inner.create_entry_id().await
+        }
+        async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
+            self.inner.get_label(id).await
+        }
+    }
+
+    let storage = Arc::new(FailingAppendStorage {
+        inner: Arc::new(MemorySessionStorage::new()),
+    });
+    let session = Session::new(storage as Arc<dyn SessionStorage>);
+    let stream_fn = Some(faux_stream_fn("ok"));
+    let harness = AgentHarness::new(AgentHarnessOptions::new(faux_model(), session.clone()));
+    let executor = Arc::new(TriggerExecutor::new(
+        harness.agent_arc(),
+        session.clone(),
+        TriggerRuntimeConfig::default(),
+        None,
+        None,
+        None,
+        stream_fn,
+        None,
+        None,
+    ));
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::<TriggerEvent>::new()));
+    let sink = events.clone();
+    let _unsub = executor.subscribe(Arc::new(move |ev| {
+        sink.lock().unwrap().push(ev);
+    }));
+
+    let _ = executor
+        .handle_trigger(sample_trigger(
+            "k-result-append-fail",
+            "trace-result-append-fail",
+        ))
+        .await;
+    wait_for_event(&events, 5, |evs| {
+        evs.iter().find_map(|e| match e {
+            TriggerEvent::PersistenceError {
+                context, message, ..
+            } if context == "trigger_result"
+                && message.contains("trigger_result append failed") =>
+            {
+                Some(())
+            }
+            _ => None,
+        })
+    })
+    .await
+    .expect("sub-agent trigger_result append failure must be refluxed");
+}
+
+#[tokio::test]
 async fn running_snapshot_truncates_long_prompt_preview() {
     use theway_daemon::trigger_engine::execution::{
         BeforeTriggerActionContext, BeforeTriggerActionHook, PromoteAction, TriggerAction,

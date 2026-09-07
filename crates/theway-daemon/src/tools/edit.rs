@@ -570,3 +570,125 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "local"))]
+mod coverage_gap {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn local_exec() -> Arc<dyn ToolExecutor> {
+        Arc::new(crate::executor::local::LocalExecutor::new())
+    }
+
+    #[tokio::test]
+    async fn rejects_same_old_and_new_string() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        std::fs::write(&p, "hello").unwrap();
+        let tool = EditTool::new(local_exec());
+        let err = tool
+            .execute(
+                "e",
+                json!({ "path": p.to_str().unwrap(), "old_string": "hello", "new_string": "hello" }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("old == new must fail");
+        assert!(err.to_string().contains("must differ"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_old_string() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        std::fs::write(&p, "hello").unwrap();
+        let tool = EditTool::new(local_exec());
+        let err = tool
+            .execute(
+                "e",
+                json!({ "path": p.to_str().unwrap(), "old_string": "", "new_string": "x" }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("empty old_string must fail");
+        assert!(err.to_string().contains("must not be empty"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn missing_file_fails_at_read() {
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("missing.txt");
+        let tool = EditTool::new(local_exec());
+        let err = tool
+            .execute(
+                "e",
+                json!({ "path": missing.to_str().unwrap(), "old_string": "x", "new_string": "y" }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("missing file must fail");
+        assert!(err.to_string().contains("read "), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn invalid_range_shape_is_rejected() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        std::fs::write(&p, "foo\n").unwrap();
+        let tool = EditTool::new(local_exec());
+        for range in [
+            json!("not-an-array"),
+            json!([1]),
+            json!([1, 2, 3]),
+            json!(["1", 2]),
+        ] {
+            let err = tool
+                .execute(
+                    "e",
+                    json!({
+                        "path": p.to_str().unwrap(),
+                        "old_string": "foo",
+                        "new_string": "bar",
+                        "range": range,
+                    }),
+                    CancellationToken::new(),
+                    None,
+                )
+                .await
+                .expect_err("invalid range shape must fail");
+            let msg = err.to_string();
+            assert!(msg.contains("range"), "got: {msg}");
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_diagnostic_truncates_to_ten_occurrences() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        let mut body = String::new();
+        for _ in 0..12 {
+            body.push_str("dup\n");
+        }
+        std::fs::write(&p, &body).unwrap();
+        let tool = EditTool::new(local_exec());
+
+        let err = tool
+            .execute(
+                "e",
+                json!({
+                    "path": p.to_str().unwrap(),
+                    "old_string": "dup",
+                    "new_string": "x",
+                }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("ambiguous match must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("... and 2 more occurrences"), "got: {msg}");
+    }
+}

@@ -18,6 +18,17 @@ fn decode_bytes_input_maps_markers() {
     assert_eq!(decode_bytes_input("x < y"), "x < y");
     assert_eq!(decode_bytes_input(""), "");
     assert_eq!(decode_bytes_input("plain"), "plain");
+    assert_eq!(decode_bytes_input("trailing <"), "trailing <");
+    assert_eq!(decode_bytes_input("trailing <C-"), "trailing <C-");
+    assert_eq!(decode_bytes_input("mid <C- no close"), "mid <C- no close");
+}
+
+#[test]
+fn decode_marker_rejects_invalid_control_bodies() {
+    assert_eq!(decode_marker("C-"), None);
+    assert_eq!(decode_marker("C-1"), None);
+    assert_eq!(decode_marker("C-ab"), None);
+    assert_eq!(decode_marker("X"), None);
 }
 
 /// A control byte written via `bytes_input` reaches the process as data, not as a

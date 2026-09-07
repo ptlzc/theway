@@ -189,7 +189,7 @@ async fn trigger_web_rule_now_queues_when_turn_is_running() {
         .unwrap();
     let mut turn = sample_turn_with_future();
 
-    host.trigger_web_rule_now(rule.id.clone(), &mut turn);
+    host.trigger_web_rule_now(rule.id.clone(), &mut turn).await;
 
     assert!(turn.fut.is_some(), "existing turn stays in flight");
     assert_eq!(host.session.queue.len(), 1);

@@ -354,3 +354,137 @@ pub(super) fn extract_dynamic_rule_ids(text: &str) -> Vec<String> {
 // Test files live in `tests/triggers/dynamic/hooks/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("triggers/dynamic/hooks");
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn extract_dynamic_rule_ids_dedupes_repeated_ids() {
+        let id = "dyn-1234567890abcdef1234567890abcdef";
+        let text = format!("matched {id} and again {id}");
+        assert_eq!(extract_dynamic_rule_ids(&text), vec![id]);
+    }
+
+    #[test]
+    fn extract_dynamic_rule_ids_ignores_short_hex_tails() {
+        let text = "dyn-1234 not-a-match dyn-zzzz1234567890abcdef1234567890abcdef";
+        assert!(
+            extract_dynamic_rule_ids(text).is_empty(),
+            "short dyn- token is not a rule id"
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_check_hook_run_reports_sink_closed() {
+        let registry = DynamicTriggerRegistry::new();
+        registry
+            .add_rule("a periodic check arrives", "echo fired")
+            .unwrap();
+        let hook = DynamicTriggerCheckHook::with_interval(registry, Duration::from_millis(5));
+        let (sink, rx) = tokio::sync::mpsc::unbounded_channel::<Trigger>();
+        drop(rx);
+
+        let err = hook.run(sink).await.unwrap_err();
+        assert!(matches!(err, HookError::SinkClosed));
+        assert!(matches!(
+            hook.status().state,
+            HookState::Disconnected { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn dynamic_check_hook_run_without_enabled_rules_continues() {
+        let registry = DynamicTriggerRegistry::new();
+        let hook = DynamicTriggerCheckHook::with_interval(registry, Duration::from_millis(2));
+        let (sink, mut rx) = tokio::sync::mpsc::unbounded_channel::<Trigger>();
+        let task = tokio::spawn(async move { hook.run(sink).await });
+
+        // No rules → the hook should stay connected and keep waiting. Give it a
+        // few ticks then abort.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "no trigger should be emitted without rules"
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn action_hook_with_enabled_non_promoting_rules_uses_no_promotion() {
+        let registry = DynamicTriggerRegistry::new();
+        registry
+            .add_rule_with_flags("a periodic check arrives", "echo fired", true, false)
+            .unwrap();
+        let hook = before_trigger_action_hook(registry);
+        let trigger = Trigger {
+            source: TriggerSource::Local {
+                subkind: "dynamic".into(),
+            },
+            source_kind: SourceKind::Local,
+            source_label: "local:dynamic".into(),
+            event_label: "dynamic periodic check".into(),
+            payload_visibility: PayloadVisibility::Local,
+            payload_summary: Some("summary".into()),
+            payload: None,
+            idempotency_key: "k".into(),
+            replacement_policy: ReplacementPolicy::Drop,
+            trace_id: "trace".into(),
+            authority: TriggerAuthority {
+                principal_id: "local".into(),
+                principal_label: "local".into(),
+                credential_scope: CredentialScope::User,
+                allowed_source_actions: vec![],
+                expires_at: None,
+            },
+            received_at: chrono::Utc::now(),
+        };
+        let action = hook(
+            BeforeTriggerActionContext {
+                trigger,
+                runtime: crate::trigger_engine::runtime::TriggerRuntimeSnapshot {
+                    dedup_entries: 0,
+                    active_traces: 0,
+                    accepted_total: 0,
+                    deduped_total: 0,
+                    cycle_suppressed_total: 0,
+                },
+            },
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(matches!(action.promote, PromoteAction::None));
+    }
+
+    #[test]
+    fn render_dynamic_trigger_prompt_includes_shared_payload() {
+        let mut trigger = Trigger {
+            source: TriggerSource::Mcp {
+                server_name: "srv".into(),
+                method: "notify".into(),
+            },
+            source_kind: SourceKind::Mcp,
+            source_label: "mcp:srv".into(),
+            event_label: "notify".into(),
+            payload_visibility: PayloadVisibility::Shared,
+            payload_summary: Some("summary".into()),
+            payload: Some(serde_json::json!({"secret": "visible"})),
+            idempotency_key: "k".into(),
+            replacement_policy: ReplacementPolicy::Drop,
+            trace_id: "trace".into(),
+            authority: TriggerAuthority {
+                principal_id: "p".into(),
+                principal_label: "p".into(),
+                credential_scope: CredentialScope::User,
+                allowed_source_actions: vec![],
+                expires_at: None,
+            },
+            received_at: chrono::Utc::now(),
+        };
+        let prompt = render_dynamic_trigger_prompt(&trigger, &[]);
+        assert!(prompt.contains("\"payload\": {"), "{prompt}");
+        trigger.payload_visibility = PayloadVisibility::Redacted;
+        let prompt = render_dynamic_trigger_prompt(&trigger, &[]);
+        assert!(prompt.contains("\"payload\": null"), "{prompt}");
+    }
+}

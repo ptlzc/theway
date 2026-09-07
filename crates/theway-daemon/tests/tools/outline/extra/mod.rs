@@ -233,3 +233,79 @@ async fn execute_read_error_maps_with_context() {
         "got: {msg}"
     );
 }
+
+#[test]
+fn ts_kind_covers_export_statement_variable_and_uppercase_function() {
+    let (parser, lang) = get_parser(Path::new("sample.tsx")).unwrap();
+    let source = "\
+export const Exported = () => {};
+export function App() { return null; }
+function lower() {}
+";
+    let outline = outline_from_source("sample.tsx".into(), parser, lang, source.into()).unwrap();
+    let text = outline.render();
+    assert!(text.contains("component Exported ["), "got: {text}");
+    assert!(text.contains("component App ["), "got: {text}");
+    assert!(text.contains("function lower ["), "got: {text}");
+}
+
+#[test]
+fn ts_kind_covers_var_function_expression_and_nested_const_skipped() {
+    let (parser, lang) = get_parser(Path::new("sample.js")).unwrap();
+    let source = "\
+var old = function oldStyle() {};
+function outer() {
+  const hidden = () => {};
+}
+";
+    let outline = outline_from_source("sample.js".into(), parser, lang, source.into()).unwrap();
+    let text = outline.render();
+    assert!(text.contains("const old ["), "got: {text}");
+    assert!(text.contains("function outer ["), "got: {text}");
+    assert!(!text.contains("hidden"), "nested const must be skipped: {text}");
+}
+
+#[test]
+fn walk_node_unknown_language_is_a_noop() {
+    let mut entries = Vec::new();
+    let (mut parser, _lang) = get_parser(Path::new("sample.rs")).unwrap();
+    let tree = parser.parse("fn f() {}", None).expect("parse");
+    walk_node(tree.root_node(), "fn f() {}", "cobol", 0, &mut entries);
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn go_type_spec_interface_and_non_struct_types_are_distinguished() {
+    let (parser, lang) = get_parser(Path::new("sample.go")).unwrap();
+    let source = "\
+package main
+type A string
+type B struct { X int }
+type C interface { M() }
+";
+    let outline = outline_from_source("sample.go".into(), parser, lang, source.into()).unwrap();
+    let text = outline.render();
+    assert!(text.contains("type A ["), "got: {text}");
+    assert!(text.contains("struct B ["), "got: {text}");
+    assert!(text.contains("interface C ["), "got: {text}");
+}
+
+#[test]
+fn plain_const_without_function_init_is_not_outlined() {
+    let (parser, lang) = get_parser(Path::new("sample.js")).unwrap();
+    let source = "const plain = 1;\n";
+    let outline = outline_from_source("sample.js".into(), parser, lang, source.into()).unwrap();
+    let text = outline.render();
+    assert!(!text.contains("plain"), "got: {text}");
+}
+
+#[test]
+fn function_expression_not_in_variable_declarator_is_skipped() {
+    let (parser, lang) = get_parser(Path::new("sample.js")).unwrap();
+    // `bar` appears as a function expression argument, not as a top-level variable
+    // initializer, so ts_kind must reject it before it can be outlined.
+    let source = "foo(function bar() { return 1; });\n";
+    let outline = outline_from_source("sample.js".into(), parser, lang, source.into()).unwrap();
+    let text = outline.render();
+    assert!(!text.contains("bar"), "got: {text}");
+}

@@ -337,3 +337,77 @@ fn preview(input: &str, max_chars: usize) -> String {
 // Test files live in `tests/triggers/cron/errors/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("triggers/cron/errors");
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn normalize_schedule_covers_remaining_aliases() {
+        assert_eq!(normalize_schedule("每個小時").unwrap(), "0 * * * *");
+        assert_eq!(normalize_schedule("每日").unwrap(), "0 9 * * *");
+        assert_eq!(normalize_schedule("每週").unwrap(), "0 9 * * 1");
+    }
+
+    #[test]
+    fn next_after_returns_none_when_no_match_within_five_years() {
+        let expr = CronExpression::parse("0 0 30 2 *").unwrap();
+        let base = Utc.with_ymd_and_hms(2026, 5, 26, 22, 5, 0).unwrap();
+        assert_eq!(expr.next_after(base), None);
+    }
+
+    #[test]
+    fn cron_control_plane_audit_handles_no_job_and_render_tool_empty_optional_fields() {
+        let audit = cron_control_plane_audit("unknown", "tool", None, None);
+        assert!(audit["job_id"].is_null());
+        assert!(!audit["removed"].as_bool().unwrap());
+        assert!(audit["next_run"].is_null());
+
+        let job = CronJob {
+            id: "cron-plain".into(),
+            schedule: "* * * * *".into(),
+            action: "echo plain".into(),
+            enabled: true,
+            running_trace_id: None,
+            last_due_at: None,
+            last_fired_at: None,
+            last_completed_at: None,
+            last_error: None,
+            skipped_overlap_count: 0,
+            stateful: false,
+            created_at: Utc.with_ymd_and_hms(2026, 5, 26, 22, 0, 0).unwrap(),
+        };
+        let rendered = render_cron_jobs_for_tool(std::slice::from_ref(&job));
+        assert!(rendered.contains("cron-plain"), "{rendered}");
+        assert!(!rendered.contains("running_trace_id"), "{rendered}");
+        assert!(!rendered.contains("last_error"), "{rendered}");
+        assert!(!rendered.contains("skipped_overlap_count"), "{rendered}");
+    }
+
+    #[test]
+    fn cron_job_details_for_model_renders_optional_runtime_fields() {
+        let job = CronJob {
+            id: "cron-full".into(),
+            schedule: "*/5 * * * *".into(),
+            action: "run cargo test".into(),
+            enabled: false,
+            running_trace_id: Some("trace-running".into()),
+            last_due_at: Some(Utc.with_ymd_and_hms(2026, 5, 26, 22, 0, 0).unwrap()),
+            last_fired_at: Some(Utc.with_ymd_and_hms(2026, 5, 26, 22, 1, 0).unwrap()),
+            last_completed_at: Some(Utc.with_ymd_and_hms(2026, 5, 26, 22, 2, 0).unwrap()),
+            last_error: Some("boom".into()),
+            skipped_overlap_count: 2,
+            stateful: true,
+            created_at: Utc.with_ymd_and_hms(2026, 5, 26, 22, 0, 0).unwrap(),
+        };
+        let details = cron_job_details_for_model(&job);
+        assert_eq!(details["running_trace_id"], "trace-running");
+        assert_eq!(details["last_error"], "boom");
+        assert_eq!(details["skipped_overlap_count"], 2);
+        assert!(details["last_due_at"].is_string());
+        assert!(details["last_fired_at"].is_string());
+        assert!(details["last_completed_at"].is_string());
+        assert!(details["next_run"].is_null(), "{details}");
+    }
+}

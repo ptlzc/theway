@@ -557,6 +557,27 @@ impl SlashCommand<DaemonCtx> for CollapseCommand {
             cprintln!("--adopt: ownership migration requested");
         }
         cprintln!("resume with: theway --resume-id {}", child_id);
+        // Memory unload: release the collapsed source session's runtime so
+        // only its persisted record remains. The host consumes the slot right
+        // after dispatch (the command layer has no &mut TurnHost); `note`
+        // carries the confirmation because the source feed is dropped with
+        // its runtime.
+        if !child_id.is_empty() {
+            let note = format!(
+                "collapsed {source} into node {node} — active session switched to child \
+                 {child} (source runtime unloaded)",
+                source = ctx.session_id,
+                node = node_id,
+                child = child_id,
+            );
+            if let Ok(mut slot) = ctx.extra.collapse_unload_slot.lock() {
+                *slot = Some(crate::commands::CollapseUnloadRequest {
+                    source_id: ctx.session_id.to_string(),
+                    child_id,
+                    note,
+                });
+            }
+        }
         CommandOutcome::Handled
     }
 }

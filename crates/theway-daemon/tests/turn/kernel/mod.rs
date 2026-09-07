@@ -98,7 +98,8 @@ fn queued_turn_display_reports_each_variant() {
             display: "user".into(),
             prompt: "p".into(),
             images: Vec::<ImageContent>::new(),
-        }
+
+        persisted: false,}
         .display(),
         "user"
     );
@@ -147,6 +148,14 @@ fn kernel_current_model_accepts_images_detects_vision_input() {
     let (kernel, _harness) = kernel_with_input(vec![InputModality::Image]);
 
     assert!(kernel.current_model_accepts_images());
+}
+
+#[test]
+fn kernel_without_model_rejects_images() {
+    let (kernel, harness) = kernel_with_input(Vec::new());
+    harness.agent().state().model = None;
+
+    assert!(!kernel.current_model_accepts_images());
 }
 
 #[test]

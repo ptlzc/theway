@@ -275,3 +275,51 @@ async fn execute_maps_not_initialized_error() {
         "got: {msg}"
     );
 }
+
+#[tokio::test]
+async fn missing_description_falls_back_to_empty() {
+    let client = Arc::new(theway_mcp::McpClient::new(Arc::new(EofTransport)));
+    let tool = McpAgentTool::new(
+        client,
+        &McpTool {
+            name: "no_desc".into(),
+            description: None,
+            input_schema: serde_json::json!({ "type": "object" }),
+        },
+    );
+    assert_eq!(tool.definition().name, "no_desc");
+    assert_eq!(tool.definition().description, "");
+}
+
+#[tokio::test]
+async fn execute_maps_is_error_with_images_to_text_error_only() {
+    let (client_side, server_side) = pair();
+    tokio::spawn(run_server(
+        server_side,
+        ToolsCallResponse::Result(serde_json::json!({
+            "content": [
+                { "type": "text", "text": "boom" },
+                { "type": "image", "data": "aW1n", "mimeType": "image/png" }
+            ],
+            "isError": true
+        })),
+    ));
+
+    let client = Arc::new(theway_mcp::McpClient::new(client_side));
+    client.initialize("theway-test").await.unwrap();
+    let tool = tool_for(client);
+
+    let err = tool
+        .execute(
+            "call-1",
+            serde_json::json!({}),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("isError must surface as an AgentToolError");
+    match err {
+        theway_core::AgentToolError::Message(m) => assert_eq!(m, "boom"),
+        other => panic!("expected Message error, got {other}"),
+    }
+}

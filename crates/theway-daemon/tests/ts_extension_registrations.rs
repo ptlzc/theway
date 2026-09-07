@@ -658,6 +658,53 @@ export default defineExtension((api) => {
 }
 
 #[tokio::test]
+async fn prompt_section_appends_when_system_instructions_are_missing() {
+    let project = tempdir().unwrap();
+    let base = tempdir().unwrap();
+    write_package(
+        project.path(),
+        "empty-system-instructions",
+        &[],
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
+export default defineExtension((api) => {
+  api.registerPromptSection({
+    sectionId: "empty-base", text: "appended-section", priority: 5,
+    predicate: { providers: ["openai"], models: ["target-model"] },
+  });
+});"#,
+    );
+    let host = start_host(project.path(), base.path(), &[], None).await;
+    let mut context = RuntimeExtensionContext::new("registration-session", "/workspace", 1);
+    context.model = Some(ExtensionModelRef {
+        provider: "openai".into(),
+        model: "target-model".into(),
+    });
+    let invocation = RuntimeExtensionInvocation::new(
+        ExtensionLifecycleEvent::BeforeModelRequest,
+        ExtensionHookClass::Transform,
+        context,
+        json!({"request": {
+            "provider": "openai", "model": "target-model",
+            "generationOptions": {}, "tools": [],
+        }}),
+    )
+    .unwrap();
+    let result = RuntimeRequestExtensionPort::invoke_request(&*host, invocation)
+        .await
+        .unwrap();
+    let replacement = result
+        .actions
+        .iter()
+        .find(|action| action.kind == ExtensionActionKind::ReplaceModelRequest)
+        .unwrap();
+    assert_eq!(
+        replacement.payload["request"]["systemInstructions"],
+        "appended-section"
+    );
+    host.shutdown().await;
+}
+
+#[tokio::test]
 async fn runtime_handle_disposal_is_idempotent_and_stops_future_dispatch() {
     let project = tempdir().unwrap();
     let base = tempdir().unwrap();

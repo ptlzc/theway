@@ -159,3 +159,90 @@ fn evaluate_global_require_record_and_deny_policies() {
     assert!(evaluation.blocked.is_none());
     assert_eq!(evaluation.granted_permissions.len(), 1);
 }
+
+#[test]
+fn load_handles_unreadable_trust_file_as_invalid() {
+    let base = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(base.path().join("extensions/trust.json")).unwrap();
+    let store = ExtensionTrustStore::load(base.path());
+    assert!(store.load_error().unwrap().contains("unreadable"));
+}
+
+#[test]
+fn revoke_project_retains_package_decisions() {
+    let project = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    write_package(base.path(), "pkg", &["workspace.read"]);
+    let catalog = PackageCatalog::discover(Path::new("/nonexistent"), base.path());
+    let package = catalog.selected_packages().into_iter().next().unwrap();
+
+    let mut store = ExtensionTrustStore::load(base.path());
+    store
+        .decide_package(&package, permissions(&["workspace.read"]), permissions(&["workspace.read"]), ExtensionTrustDecision::Trusted)
+        .unwrap();
+    store
+        .decide_project(project.path(), permissions(&["workspace.read"]), permissions(&["workspace.read"]), ExtensionTrustDecision::Trusted)
+        .unwrap();
+    store.save().unwrap();
+
+    let mut store = ExtensionTrustStore::load(base.path());
+    assert!(store.revoke_project(project.path()).unwrap());
+    // The package decision is retained, so evaluation still succeeds.
+    let evaluation = store.evaluate(&package);
+    assert!(evaluation.blocked.is_none());
+}
+
+#[test]
+fn evaluate_trusted_decision_with_partial_grant_blocks() {
+    let base = tempfile::tempdir().unwrap();
+    write_package(base.path(), "pkg", &["workspace.read", "workspace.write"]);
+    let catalog = PackageCatalog::discover(Path::new("/nonexistent"), base.path());
+    let package = catalog.selected_packages().into_iter().next().unwrap();
+
+    let mut store = ExtensionTrustStore::load(base.path());
+    store
+        .decide_package(
+            &package,
+            permissions(&["workspace.read", "workspace.write"]),
+            permissions(&["workspace.read"]),
+            ExtensionTrustDecision::Trusted,
+        )
+        .unwrap();
+    let evaluation = store.evaluate(&package);
+    assert_eq!(
+        evaluation.blocked,
+        Some(theway_contract::extension::ExtensionDiagnosticCode::PermissionDenied)
+    );
+}
+
+#[test]
+fn evaluate_uses_matching_package_decision_only() {
+    let base = tempfile::tempdir().unwrap();
+    write_package(base.path(), "pkg-a", &["workspace.read"]);
+    write_package(base.path(), "pkg-b", &["workspace.read"]);
+    let catalog = PackageCatalog::discover(Path::new("/nonexistent"), base.path());
+    let package_a = catalog
+        .selected_packages()
+        .into_iter()
+        .find(|package| package.manifest().id == "pkg-a")
+        .unwrap();
+    let package_b = catalog
+        .selected_packages()
+        .into_iter()
+        .find(|package| package.manifest().id == "pkg-b")
+        .unwrap();
+
+    let mut store = ExtensionTrustStore::load(base.path());
+    store.set_global_policy(GlobalExtensionPolicy::RequireRecord);
+    store
+        .decide_package(&package_a, permissions(&["workspace.read"]), permissions(&["workspace.read"]), ExtensionTrustDecision::Trusted)
+        .unwrap();
+    store.save().unwrap();
+
+    let loaded = ExtensionTrustStore::load(base.path());
+    assert!(loaded.evaluate(&package_a).blocked.is_none());
+    assert_eq!(
+        loaded.evaluate(&package_b).blocked,
+        Some(theway_contract::extension::ExtensionDiagnosticCode::TrustRequired)
+    );
+}

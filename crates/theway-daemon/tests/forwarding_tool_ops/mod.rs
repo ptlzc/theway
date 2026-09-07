@@ -255,6 +255,47 @@ async fn client_errors_when_no_tool_service_addr_configured() {
 }
 
 #[tokio::test]
+async fn client_errors_when_tool_service_addr_is_blank() {
+    let config = Arc::new(std::sync::RwLock::new(WireDaemonConfig {
+        tool_service_addr: Some("   ".into()),
+        ..WireDaemonConfig::default()
+    }));
+    let ops = ForwardingToolOps::new(config);
+    let err = ops
+        .read_file(&WireToolReadRequest {
+            path: "/tmp/main.rs".into(),
+            ..WireToolReadRequest::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("connect to daemon"), "{err}");
+}
+
+#[tokio::test]
+async fn client_reconnects_when_configured_addr_changes() {
+    let (ops, _tools, _server) = start_tool_server(false).await;
+    ops.read_file(&WireToolReadRequest {
+        path: "/tmp/main.rs".into(),
+        ..WireToolReadRequest::default()
+    })
+    .await
+    .unwrap();
+
+    *ops.config.write().unwrap() = WireDaemonConfig {
+        tool_service_addr: Some("127.0.0.1:1".into()),
+        ..WireDaemonConfig::default()
+    };
+    let err = ops
+        .read_file(&WireToolReadRequest {
+            path: "/tmp/main.rs".into(),
+            ..WireToolReadRequest::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("connect tool service"), "{err}");
+}
+
+#[tokio::test]
 async fn all_tool_ops_forward_to_controller_and_reuse_cached_client() {
     // Arrange
     let (ops, tools, _server) = start_tool_server(false).await;

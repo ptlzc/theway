@@ -47,6 +47,23 @@ fn report_export_result_records_and_clears_status() {
     assert!(snapshot.message.is_empty());
 }
 
+#[test]
+fn record_failure_and_success_are_idempotent() {
+    let status = ObservabilityStatus::default();
+
+    status.record_failure("same failure");
+    status.record_failure("same failure");
+    let snapshot = status.snapshot();
+    assert!(snapshot.degraded);
+    assert_eq!(snapshot.message, "same failure");
+
+    status.record_success();
+    status.record_success();
+    let snapshot = status.snapshot();
+    assert!(!snapshot.degraded);
+    assert!(snapshot.message.is_empty());
+}
+
 #[tokio::test]
 async fn observability_status_transitions_notify_subscribers() {
     let status = ObservabilityStatus::default();

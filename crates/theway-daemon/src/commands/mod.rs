@@ -191,6 +191,12 @@ pub struct CommandCtx<'a> {
     pub mcp_provision: Option<&'a Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>>,
     /// Base dir holding `auth.json` for MCP bearer tokens (issue #73).
     pub auth_base: Option<&'a std::path::PathBuf>,
+    /// Collapse-unload slot: the collapse command writes the source/child ids
+    /// here; the host consumes the slot right after dispatch and releases the
+    /// collapsed source session's runtime from memory (kernel + feed
+    /// projection), leaving only its persisted record.
+    pub collapse_unload_slot:
+        &'a Arc<std::sync::Mutex<Option<crate::commands::CollapseUnloadRequest>>>,
 }
 
 /// Daemon-only context extras handed to command implementations through the shared
@@ -213,6 +219,26 @@ pub struct DaemonCtx {
     /// host consumes the slot right after dispatch and applies them to the
     /// child runtime (model + thinking level).
     pub inherit_slot: Arc<std::sync::Mutex<Option<crate::commands::InheritedSessionSettings>>>,
+    /// Collapse-unload slot: the collapse command writes the source/child ids
+    /// here; the host consumes the slot right after dispatch and drops the
+    /// source session's runtime so only its persisted record remains.
+    pub collapse_unload_slot: Arc<std::sync::Mutex<Option<crate::commands::CollapseUnloadRequest>>>,
+}
+
+/// Request to release a collapsed source session's runtime from memory:
+/// written by the collapse command, consumed by the host right after
+/// dispatch. A parked source is dropped outright; an active source is
+/// replaced by `child_id` (which becomes the active session) and its runtime
+/// is dropped instead of parked. Either way the source's persisted record is
+/// untouched and the runtime is rebuilt lazily if a client addresses it
+/// again. `note` carries the user-facing collapse confirmation (node id,
+/// resume hint) so the host can re-emit it into the surviving feed — the
+/// source feed is dropped along with its runtime.
+#[derive(Clone, Debug)]
+pub struct CollapseUnloadRequest {
+    pub source_id: String,
+    pub child_id: String,
+    pub note: String,
 }
 
 /// Settings a newly created child session should inherit from its parent
@@ -580,6 +606,7 @@ async fn dispatch_impl(input: &str, registry: &Registry, ctx: &CommandCtx<'_>) -
         dynamic_triggers: registry.dynamic_triggers.clone(),
         cron: registry.cron.clone(),
         inherit_slot: ctx.inherit_slot.clone(),
+        collapse_unload_slot: ctx.collapse_unload_slot.clone(),
     };
     let sdk_ctx = theway_transport::commands::CommandCtx {
         session_id: ctx.session_id,

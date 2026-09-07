@@ -181,3 +181,21 @@ fn subagent_tool_sets_uses_kernel_assembly_resolver() {
         "subagent tool set must not include orchestration tools: {names:?}"
     );
 }
+
+#[cfg(feature = "local")]
+#[test]
+fn cwd_scoped_tool_scope_args_handles_non_object_and_non_direct_os_tools() {
+    let read_tool: Arc<dyn AgentTool> = Arc::new(theway_daemon::tools::read::ReadTool::new(local_exec()));
+    let scoped = CwdScopedTool::new(read_tool, PathBuf::from("/tmp/base"));
+
+    // A non-object payload is passed through unchanged (no panic, no insert).
+    assert_eq!(
+        scoped.scope_args(serde_json::json!("not-an-object")),
+        serde_json::json!("not-an-object")
+    );
+
+    // Tools outside the direct-OS whitelist are never scoped.
+    let obj = serde_json::json!({ "path": "x" });
+    let scoped_obj = scoped.scope_args(obj.clone());
+    assert_eq!(scoped_obj, obj);
+}

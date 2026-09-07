@@ -338,6 +338,47 @@ command = "echo hi"
 }
 
 #[tokio::test]
+async fn load_with_user_file_flag_allows_project_hooks() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir_guard = EnvGuard::set("THEWAY_DIR", base.path());
+    std::fs::write(
+        base.path().join("hooks.toml"),
+        "allow_project_hooks = true\n\n[[hook]]\nevent = \"turn_end\"\ncommand = \"echo user\"\n",
+    )
+    .unwrap();
+    let _allow_guard = EnvGuard::remove("THEWAY_ALLOW_PROJECT_HOOKS");
+    let cwd = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(cwd.path().join(".theway")).unwrap();
+    std::fs::write(
+        cwd.path().join(".theway").join("hooks.toml"),
+        r#"
+[[hook]]
+event = "turn_end"
+command = "echo project"
+"#,
+    )
+    .unwrap();
+
+    let loaded = load_with(
+        &daemon_paths(base.path(), cwd.path()),
+        "session-1",
+        None::<&theway_llm_provider::Model>,
+        None::<ThinkingLevel>,
+        HookExecutors::default(),
+        true,
+    )
+    .await;
+
+    assert_eq!(loaded.runner.len(), 2);
+    assert!(
+        loaded.diagnostics.iter().all(|d| !d.contains("ignored")),
+        "{:?}",
+        loaded.diagnostics
+    );
+}
+
+#[tokio::test]
 async fn load_with_env_var_allows_project_hooks() {
     // Arrange
     let _env_lock = ENV_LOCK.lock().unwrap();

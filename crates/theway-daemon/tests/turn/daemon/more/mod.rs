@@ -174,7 +174,8 @@ fn user_prompt_turn(display: &str, prompt: &str) -> QueuedTurn {
         display: display.to_string(),
         prompt: prompt.to_string(),
         images: Vec::new(),
-    }
+
+        persisted: false,}
 }
 
 fn png_wire_image(data: &str, name: Option<&str>) -> WirePromptImage {
@@ -512,11 +513,11 @@ async fn trigger_web_rule_now_rejects_missing_or_unknown_rule() {
     let host = fixture.host();
     let mut turn = TurnState::default();
 
-    host.trigger_web_rule_now("".into(), &mut turn);
+    host.trigger_web_rule_now("".into(), &mut turn).await;
     assert!(turn.fut.is_none());
     assert!(host.session.queue.is_empty());
 
-    host.trigger_web_rule_now("__definitely_missing_rule__".into(), &mut turn);
+    host.trigger_web_rule_now("__definitely_missing_rule__".into(), &mut turn).await;
     assert!(turn.fut.is_none());
     assert!(host.session.queue.is_empty());
 }

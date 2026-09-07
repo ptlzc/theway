@@ -436,6 +436,133 @@ pub(crate) fn write_rules_file(
 tests_bridge_macro::tests_bridge!("triggers/dynamic");
 
 #[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn poll_interval_clamps_zero_to_one_second() {
+        let registry = DynamicTriggerRegistry::new();
+        registry.set_poll_interval_secs(0);
+        assert_eq!(registry.poll_interval_secs(), 1);
+    }
+
+    #[test]
+    fn add_rule_with_flags_rejects_empty_condition_or_action() {
+        let registry = DynamicTriggerRegistry::new();
+        let err = registry
+            .add_rule_with_flags("  ", "echo ok", true, false)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AddTriggerRuleError::Parse(ParseTriggerRuleError::EmptyPart)
+        ));
+        let err = registry
+            .add_rule_with_flags("always", "  ", true, false)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AddTriggerRuleError::Parse(ParseTriggerRuleError::EmptyPart)
+        ));
+    }
+
+    #[test]
+    fn clear_rules_noop_and_removal_are_counted() {
+        let registry = DynamicTriggerRegistry::new();
+        assert_eq!(registry.clear_rules().unwrap(), 0);
+        registry.add_rule("a", "b").unwrap();
+        assert_eq!(registry.clear_rules().unwrap(), 1);
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn mark_rules_fired_ignores_empty_id_list() {
+        let registry = DynamicTriggerRegistry::new();
+        registry.add_rule("a", "b").unwrap();
+        let changed = registry.mark_rules_fired(&[]).unwrap();
+        assert!(changed.is_empty());
+        assert!(registry.list()[0].enabled);
+    }
+
+    #[test]
+    fn read_rules_file_treats_empty_file_as_no_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rules.json");
+        std::fs::write(&path, "   \n").unwrap();
+        assert!(read_rules_file(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_rules_file_rejects_malformed_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rules.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(matches!(
+            read_rules_file(&path),
+            Err(DynamicTriggerStorageError::Parse(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn persist_rules_covers_runtime_and_none_storage_variants() {
+        let rules = vec![];
+        let none = DynamicTriggerPersistence::None;
+        assert!(persist_rules(&none, &rules).is_ok());
+
+        let runtime = DynamicTriggerPersistence::Runtime {
+            storage: theway_daemon::runtime_storage::local_runtime_storage(),
+            cwd: std::path::PathBuf::from("."),
+            session_id: "sess".into(),
+        };
+        // Fire-and-forget spawn: must return Ok immediately.
+        assert!(persist_rules(&runtime, &rules).is_ok());
+    }
+
+    #[test]
+    fn registry_remove_set_enable_and_mark_fired_cover_both_found_paths() {
+        let registry = DynamicTriggerRegistry::new();
+        assert!(registry.remove_rule("missing").unwrap().is_none());
+        let rule = registry.add_rule("a", "b").unwrap();
+
+        let enabled = registry.set_rule_enabled(&rule.id, false).unwrap().unwrap();
+        assert!(!enabled.enabled);
+        let enabled = registry.set_rule_enabled(&rule.id, true).unwrap().unwrap();
+        assert!(enabled.enabled);
+
+        // fire-once enabled rule with matching id is disabled by mark_rules_fired;
+        // non-fire-once and non-matching rules are ignored.
+        let repeat = registry.add_rule_with_options("c", "d", false).unwrap();
+        let changed = registry
+            .mark_rules_fired(&[rule.id.clone(), repeat.id.clone(), "missing".into()])
+            .unwrap();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].id, rule.id);
+        assert!(
+            !registry
+                .list()
+                .iter()
+                .find(|r| r.id == rule.id)
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            registry
+                .list()
+                .iter()
+                .find(|r| r.id == repeat.id)
+                .unwrap()
+                .enabled
+        );
+    }
+
+    #[test]
+    fn read_rules_file_missing_path_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.json");
+        assert!(read_rules_file(&path).unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
 mod extra_tests {
     tests_bridge_macro::tests_bridge!("triggers/dynamic/extra");
 }

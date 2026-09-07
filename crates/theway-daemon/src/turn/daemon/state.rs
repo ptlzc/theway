@@ -255,6 +255,107 @@ impl TurnHost {
         std::mem::replace(&mut self.projection, next)
     }
 
+    /// Release a collapsed source session's runtime from memory: a parked
+    /// source is dropped outright (any in-flight turn is aborted first); the
+    /// ACTIVE source is replaced by the child, which becomes the active
+    /// session, and the old runtime is dropped instead of parked. Either way
+    /// only the source's persisted record remains — its runtime is rebuilt
+    /// lazily if a client addresses it again. `note` (the collapse
+    /// confirmation) is re-emitted into the surviving feed, because the
+    /// source feed is dropped with its runtime.
+    async fn handle_collapse_unload(
+        &mut self,
+        request: crate::commands::CollapseUnloadRequest,
+        turn: &mut TurnState,
+    ) {
+        let crate::commands::CollapseUnloadRequest {
+            source_id,
+            child_id,
+            note,
+        } = request;
+        // Drop session-scoped execution state (credentials + work-dir
+        // context) for the collapsed source.
+        self.automation.services.session_execution.remove(&source_id);
+
+        if source_id != self.session.id {
+            // Parked source: abort any in-flight turn and drop the runtime
+            // (kernel + projection + queue) outright.
+            if let Some(state) = self.sessions.get_mut(&source_id) {
+                state.kernel.abort();
+                state.aborted = true;
+                state.queue.clear();
+            }
+            self.sessions.remove(&source_id);
+            if let Some(session_states) = &self.runtime.session_states {
+                session_states.lock().remove(&source_id);
+            }
+            self.system_line(note);
+            return;
+        }
+
+        // Active source: promote the child to the active slot, dropping the
+        // source runtime entirely (it is NOT parked). If the child runtime
+        // cannot be built, keep the source active.
+        if self.ensure_session_runtime(&child_id).await.is_err() {
+            self.error_line(format!(
+                "collapse unload: cannot build child runtime {child_id}; \
+                 source session kept active"
+            ));
+            return;
+        }
+        if turn.fut.is_some() {
+            self.request_abort(turn);
+            if let Some(future) = turn.fut.take() {
+                let _ = future.await;
+            }
+        }
+        let previous = self.session.kernel.harness().clone();
+        previous.shutdown_runtime_extensions().await;
+        drop(self.take_active_projection());
+        let Some(mut incoming) = self.sessions.remove(&child_id) else {
+            self.error_line(format!(
+                "collapse unload: child runtime {child_id} vanished"
+            ));
+            return;
+        };
+        let child_cwd = incoming.cwd.clone();
+        // The active session's projection lives on `TurnHost::projection`;
+        // the dormant per-state projection is reset like `apply_activation`.
+        incoming.projection = FeedProjectionState::new(
+            self.projection.capabilities.clone(),
+            self.projection.thinking_summary.clone(),
+        );
+        drop(std::mem::replace(&mut self.session, incoming));
+        if self.runtime.cwd != child_cwd {
+            self.runtime.cwd = child_cwd;
+        }
+        self.session
+            .kernel
+            .harness()
+            .session_switched(&self.session.id)
+            .await;
+        self.automation
+            .reload
+            .set_trigger_executor(self.session.kernel.trigger_executor().clone());
+        self.clear_feed();
+        // Resume replay: the child runtime rehydrated its transcript (the
+        // compact summary), so rebuild the feed from history.
+        crate::feed_replay::replay_transcript(
+            &mut self.projection.feed,
+            &self.session.kernel.harness().agent().state().messages,
+            self.runtime.feed_history_limit,
+        );
+        self.system_line(note);
+        self.session.busy = false;
+        self.session.queue.clear();
+        self.session.cumulative_usage = WireContextUsage::default();
+        self.projection.control_plane_prompt = None;
+        turn.aborted = false;
+        turn.prefix = "";
+        self.refresh_goal_state().await;
+        self.publish_current_snapshot().await;
+    }
+
     async fn apply_activation(
         &mut self,
         activation: crate::session_activation::SessionActivation,

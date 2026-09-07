@@ -82,6 +82,7 @@ fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> Da
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
         inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 
@@ -426,6 +427,7 @@ async fn session_import_maps_open_repo_error() {
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
        inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+       collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
 };
     let ctx = command_ctx(&extra, tmp.path());
 

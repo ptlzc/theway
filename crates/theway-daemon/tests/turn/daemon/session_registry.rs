@@ -183,7 +183,8 @@ fn session_registry_get_mut_allows_updating_queue_and_busy() {
         display: "hello".into(),
         prompt: "hello".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     assert!(registry.get("sess-a").unwrap().busy);
     assert_eq!(registry.get("sess-a").unwrap().queue.len(), 1);
@@ -383,12 +384,14 @@ async fn cancel_routes_to_parked_session() {
         display: "one".into(),
         prompt: "one".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
     other_queue.push_back(crate::turn::kernel::QueuedTurn::UserPrompt {
         display: "two".into(),
         prompt: "two".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
 
     let mut turn = TurnState::default();
     host.handle_web_command(
@@ -448,7 +451,8 @@ async fn wire_snapshot_for_parked_session_returns_that_session() {
         display: "queued".into(),
         prompt: "queued".into(),
         images: Vec::new(),
-    });
+
+        persisted: false,});
     host.sessions.insert(parked);
 
     let snapshot = host

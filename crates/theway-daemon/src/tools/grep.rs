@@ -1002,4 +1002,76 @@ mod coverage_gap {
         ingest.match_line("a.txt", 2, "a2", false);
         assert_eq!(format_files_with_matches(&ingest), "a.txt\nb.txt");
     }
+
+    #[test]
+    fn truncate_line_short_line_stays_unchanged() {
+        assert_eq!(truncate_line("short"), "short");
+        assert_eq!(
+            truncate_line(&"x".repeat(MAX_MATCH_LINE_CHARS)),
+            "x".repeat(MAX_MATCH_LINE_CHARS)
+        );
+    }
+
+    #[test]
+    fn ingest_json_record_missing_fields_are_ignored() {
+        let re = Regex::new("m").unwrap();
+        let mut ingest = Ingest::new(10);
+        for record in [
+            r#"{"data":{}}"#,
+            r#"{"type":"match","data":{}}"#,
+            r#"{"type":"match","data":{"path":{"text":"a"} }}"#,
+            r#"{"type":"match","data":{"path":{"text":"a"},"lines":{"text":"m\n"}}}"#,
+        ] {
+            let v: serde_json::Value = serde_json::from_str(record).unwrap();
+            ingest_json_record(&mut ingest, &v, &re);
+        }
+        assert_eq!(ingest.match_count(), 0);
+    }
+
+    #[test]
+    fn ingest_json_record_without_submatches_uses_regex_find() {
+        let re = Regex::new("needle").unwrap();
+        let mut ingest = Ingest::new(10);
+        let record = serde_json::json!({
+            "type": "match",
+            "data": {
+                "path": {"text": "a.txt"},
+                "lines": {"text": "a needle here\n"},
+                "line_number": 3
+            }
+        });
+        ingest_json_record(&mut ingest, &record, &re);
+        assert_eq!(ingest.match_count(), 1);
+        assert_eq!(ingest.by_file["a.txt"][&3].0, "a needle here");
+    }
+
+    #[test]
+    fn walk_tree_cancelled_returns_immediately() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "needle\n").unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let re = Regex::new("needle").unwrap();
+        let ingest = walk_tree(dir.path().to_str().unwrap(), &re, 0, None, 10, &cancel).unwrap();
+        assert_eq!(ingest.match_count(), 0);
+    }
+
+    #[test]
+    fn walk_tree_invalid_glob_returns_error() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "needle\n").unwrap();
+        let re = Regex::new("needle").unwrap();
+        let err = match walk_tree(
+            dir.path().to_str().unwrap(),
+            &re,
+            0,
+            Some("["),
+            10,
+            &CancellationToken::new(),
+        ) {
+            Ok(_) => panic!("invalid glob should error"),
+            Err(e) => e,
+        };
+        assert!(!err.is_empty(), "invalid glob should surface an error");
+    }
 }

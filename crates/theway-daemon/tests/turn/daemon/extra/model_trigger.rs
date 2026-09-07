@@ -60,7 +60,7 @@ async fn trigger_web_rule_now_starts_turn_for_known_rule() {
         .unwrap();
 
     let mut turn = TurnState::default();
-    host.trigger_web_rule_now(rule.id.clone(), &mut turn);
+    host.trigger_web_rule_now(rule.id.clone(), &mut turn).await;
 
     assert!(turn.fut.is_some());
     assert!(host.session.busy);
@@ -92,4 +92,3 @@ async fn submit_web_text_slash_input_dispatches_without_starting_turn() {
 
     assert!(turn.fut.is_none());
 }
-

@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentToolResult, LoadSkillsOutput, MemorySessionStorage,
-    ReloadSkillsFn, Session, SessionStorage, Skill, SkillSource,
+    ReloadSkillsFn, Session, SessionError, SessionErrorCode, SessionStorage, SessionTreeEntry, Skill,
+    SkillSource,
 };
 use theway_llm_provider::{Api, Model, Provider, UserContentBlock};
 use theway_transport::commands::{CommandCtx, CommandOutcome};
@@ -93,6 +94,7 @@ fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> Da
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
         inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 
@@ -117,6 +119,53 @@ fn setup_with_skills(
     let executor = executor_for(&harness);
     let tmp = tempfile::tempdir().unwrap();
     (tmp, harness, executor)
+}
+
+struct FailingAppendSkillSession {
+    inner: Arc<MemorySessionStorage>,
+}
+
+#[async_trait::async_trait]
+impl SessionStorage for FailingAppendSkillSession {
+    async fn get_metadata_json(&self) -> Result<serde_json::Value, SessionError> {
+        self.inner.get_metadata_json().await
+    }
+    async fn append_entry(&self, _entry: SessionTreeEntry) -> Result<(), SessionError> {
+        Err(SessionError {
+            code: SessionErrorCode::StorageFailure,
+            message: "synthetic append failure".into(),
+        })
+    }
+    async fn get_entry(&self, id: &str) -> Result<Option<SessionTreeEntry>, SessionError> {
+        self.inner.get_entry(id).await
+    }
+    async fn get_entries(&self) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.get_entries().await
+    }
+    async fn get_path_to_root(
+        &self,
+        entry_id: Option<&str>,
+    ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.get_path_to_root(entry_id).await
+    }
+    async fn find_entries(
+        &self,
+        entry_type: &str,
+    ) -> Result<Vec<SessionTreeEntry>, SessionError> {
+        self.inner.find_entries(entry_type).await
+    }
+    async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {
+        self.inner.get_leaf_id().await
+    }
+    async fn set_leaf_id(&self, id: Option<String>) -> Result<(), SessionError> {
+        self.inner.set_leaf_id(id).await
+    }
+    async fn create_entry_id(&self) -> Result<String, SessionError> {
+        self.inner.create_entry_id().await
+    }
+    async fn get_label(&self, id: &str) -> Result<Option<String>, SessionError> {
+        self.inner.get_label(id).await
+    }
 }
 
 fn install_args(target: &str, confirm: bool, overwrite: bool) -> Vec<String> {
@@ -516,4 +565,172 @@ async fn skills_unknown_subcommand_returns_usage_error() {
 
     let outcome = SkillsCommand.run(&["bogus".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills")));
+}
+
+#[test]
+fn skill_install_source_classifies_http_url() {
+    let cwd = Path::new("/work/project");
+    let http = skill_install_source("http://example.com/skill.md", cwd);
+    assert_eq!(http["type"], "url");
+    assert_eq!(http["url"], "http://example.com/skill.md");
+}
+
+#[test]
+fn print_skills_list_skips_empty_description() {
+    let mut skill = sample_skill("no-desc", SkillSource::User);
+    skill.description.clear();
+    print_skills_list(&[skill]);
+}
+
+#[test]
+fn show_skill_renders_disabled_and_missing_description() {
+    let mut disabled = sample_skill("disabled", SkillSource::User);
+    disabled.disable_model_invocation = true;
+    disabled.description.clear();
+    let session = new_session();
+    let harness = harness_with_skills(session, vec![disabled]);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+    let outcome = show_skill(&["disabled".into()], &ctx);
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[tokio::test]
+async fn skills_remove_with_source_sets_source_before_tool_call() {
+    let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
+    // Even if the tool reports an error for a non-installed file, the source
+    // branch inside remove_skill has been exercised.
+    let _ = SkillsCommand
+        .run(&["remove".into(), "--confirm".into(), "foo".into(), "user".into()], &ctx)
+        .await;
+}
+
+#[test]
+fn print_install_skill_result_overwrite_hint_and_missing_fields() {
+    let result = AgentToolResult {
+        content: vec![],
+        details: serde_json::json!({
+            "phase": "preview",
+            "existing": true,
+            "overwrite_required": true,
+        }),
+        terminate: None,
+    };
+    let args = InstallSkillArgs {
+        target: "https://x/skill.md",
+        confirm: false,
+        overwrite: false,
+    };
+    print_install_skill_result(&result, &args);
+
+    let args = InstallSkillArgs {
+        target: "https://x/skill.md",
+        confirm: false,
+        overwrite: true,
+    };
+    print_install_skill_result(&result, &args);
+}
+
+#[tokio::test]
+async fn skills_disable_missing_name_is_error() {
+    let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SkillsCommand.run(&["disable".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("usage: /skills disable")));
+}
+
+#[tokio::test]
+async fn skills_enable_disable_unknown_skill_is_error() {
+    let (tmp, harness, executor) = setup_with_skills(vec![sample_skill("foo", SkillSource::User)]);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SkillsCommand.run(&["enable".into(), "nope".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("no active skill named 'nope'")));
+
+    let outcome = SkillsCommand.run(&["disable".into(), "nope".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("no active skill named 'nope'")));
+}
+
+#[tokio::test]
+async fn skills_disable_already_disabled_is_handled() {
+    let mut disabled = sample_skill("foo", SkillSource::User);
+    disabled.disable_model_invocation = true;
+    let (tmp, harness, executor) = setup_with_skills(vec![disabled]);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SkillsCommand.run(&["disable".into(), "foo".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[tokio::test]
+async fn skills_enable_reload_success_with_diagnostics() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+
+    let session = new_session();
+    let reload: ReloadSkillsFn = Arc::new(|| {
+        Box::pin(async {
+            LoadSkillsOutput {
+                skills: vec![sample_skill("foo", SkillSource::User)],
+                diagnostics: vec![theway_core::SkillDiagnostic {
+                    code: theway_core::SkillDiagnosticCode::ParseFailed,
+                    message: "one diagnostic".into(),
+                    path: String::new(),
+                }],
+            }
+        })
+    });
+    let mut disabled = sample_skill("foo", SkillSource::User);
+    disabled.disable_model_invocation = true;
+    let harness = harness_with_reload_fn(session, vec![disabled], Some(reload));
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SkillsCommand.run(&["enable".into(), "foo".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn write_skill_state_audit_swallows_append_failure() {
+    let session = Session::new(
+        Arc::new(FailingAppendSkillSession {
+            inner: Arc::new(MemorySessionStorage::new()),
+        }) as Arc<dyn SessionStorage>,
+    );
+    let harness = harness_with_skills(session, vec![]);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+    write_skill_state_audit(&ctx, "foo", SkillSource::User, false, true).await;
+}
+
+#[tokio::test]
+async fn skills_disable_persist_error_is_mapped() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let file_as_base = base.path().join("not-a-dir");
+    std::fs::write(&file_as_base, "x").unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", &file_as_base);
+
+    let session = new_session();
+    let harness = harness_with_reload_fn(session, vec![sample_skill("foo", SkillSource::User)], None);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SkillsCommand.run(&["disable".into(), "foo".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("persist skill state failed:")));
 }

@@ -125,3 +125,27 @@ mod tests {
         assert_eq!(merged, json!({"server": {"port": 8080}}));
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn fill_defaults_handles_non_object_schema_and_config() {
+        let mut config = json!({});
+        assert!(fill_defaults(&json!(true), &mut config).is_ok());
+
+        let mut config = json!({});
+        assert!(fill_defaults(&json!({"type": "object"}), &mut config).is_ok());
+
+        let mut config = json!(42);
+        assert!(fill_defaults(&json!({"type": "object", "properties": {}}), &mut config).is_ok());
+    }
+
+    #[test]
+    fn validate_and_default_rejects_non_object_schema_and_value() {
+        assert!(validate_and_default(&json!(true), json!({})).is_err());
+        assert!(validate_and_default(&json!({"type": "object"}), json!(42)).is_err());
+    }
+}

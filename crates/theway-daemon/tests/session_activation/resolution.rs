@@ -201,6 +201,27 @@ fn resolved_base_url_falls_back_to_persisted_when_request_absent() {
 }
 
 #[test]
+fn resolved_base_url_returns_none_when_neither_source_has_url() {
+    let persisted = runtime_context(Path::new("/tmp"));
+    assert_eq!(resolved_base_url(&persisted, None), None);
+}
+
+#[test]
+fn resolve_thinking_explicit_off_wins_over_startup_and_persisted() {
+    let persisted = SessionRuntimeContext {
+        work_dir: "/tmp".into(),
+        provider: None,
+        model: None,
+        base_url: None,
+        thinking: Some(true),
+    };
+    assert_eq!(
+        resolve_thinking(&ThinkingLevel::High, &persisted, Some(false)),
+        ThinkingLevel::Off
+    );
+}
+
+#[test]
 fn resolve_thinking_prefers_request_over_persisted_and_startup() {
     // Arrange
     let persisted = SessionRuntimeContext {

@@ -291,3 +291,67 @@ mod tests {
         assert!(msg.contains("missing required arg: name"));
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use once_cell::sync::OnceCell as SyncOnceCell;
+    use std::sync::Arc;
+    use theway_core::{AgentHarnessOptions, MemorySessionStorage, Session, SessionStorage};
+
+    #[test]
+    fn definition_label_and_execution_mode_are_registered() {
+        let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
+        let tool = SkillTool::new(cell);
+
+        assert_eq!(tool.definition().name, "skill");
+        assert_eq!(tool.label(), "skill");
+        assert_eq!(tool.execution_mode(), Some(ToolExecutionMode::Parallel));
+        assert_eq!(tool.definition().parameters["required"][0], "name");
+    }
+
+    #[tokio::test]
+    async fn hit_with_empty_skills_catalog_misses() {
+        // Exercise the miss path when the harness is set but the catalog is empty.
+        let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;
+        let session = Session::new(storage);
+        let mut opts = AgentHarnessOptions::new(None, session);
+        opts.skills = Vec::new();
+        let harness = Arc::new(AgentHarness::new(opts));
+
+        let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
+        assert!(cell.set(harness).is_ok(), "set once");
+
+        let tool = SkillTool::new(cell);
+        let err = tool
+            .execute(
+                "call-1",
+                json!({ "name": "ghost" }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("empty catalog must miss");
+        let msg = err.to_string();
+        assert!(msg.contains("no skill named 'ghost'"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn non_string_name_is_rejected() {
+        let cell: SkillHarnessCell = Arc::new(SyncOnceCell::new());
+        let tool = SkillTool::new(cell);
+        let err = tool
+            .execute(
+                "call-1",
+                json!({ "name": 42 }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("non-string name should be rejected");
+        assert!(
+            err.to_string().contains("missing required arg: name"),
+            "got: {err}"
+        );
+    }
+}

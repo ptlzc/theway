@@ -235,3 +235,89 @@ mod tests {
         assert_eq!(r.details["paths"].as_array().unwrap().len(), DEFAULT_LIMIT);
     }
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn missing_glob_is_rejected() {
+        let tool = FindTool;
+        let err = tool
+            .execute("f", json!({}), CancellationToken::new(), None)
+            .await
+            .expect_err("missing glob must fail");
+        assert!(err.to_string().contains("missing `glob`"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn relative_path_resolves_against_cwd() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("a.rs"), "").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "").unwrap();
+
+        let tool = FindTool;
+        let r = tool
+            .execute(
+                "f",
+                json!({
+                    "glob": "*.rs",
+                    "cwd": dir.path().to_str().unwrap(),
+                    "path": "sub",
+                }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        let text = match &r.content[0] {
+            theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+            _ => panic!("expected text"),
+        };
+        assert!(text.contains("a.rs"), "got: {text}");
+        assert!(!text.contains("b.rs"), "got: {text}");
+    }
+
+    #[tokio::test]
+    async fn invalid_glob_is_rejected() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "").unwrap();
+        let tool = FindTool;
+        let err = tool
+            .execute(
+                "f",
+                json!({ "glob": "[", "path": dir.path().to_str().unwrap() }),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .expect_err("invalid glob must fail");
+        assert!(!err.to_string().is_empty(), "got empty error");
+    }
+
+    #[tokio::test]
+    async fn cancelled_search_returns_empty_results() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "").unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let tool = FindTool;
+        let r = tool
+            .execute(
+                "f",
+                json!({ "glob": "*.rs", "path": dir.path().to_str().unwrap() }),
+                cancel,
+                None,
+            )
+            .await
+            .expect("cancelled find returns an empty successful result");
+        let text = match &r.content[0] {
+            theway_llm_provider::UserContentBlock::Text(t) => t.text.clone(),
+            _ => panic!("expected text"),
+        };
+        assert!(text.contains("0 hits"), "got: {text}");
+    }
+}

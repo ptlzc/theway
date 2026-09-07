@@ -383,3 +383,103 @@ fn render_summary(method: &str, params: &serde_json::Value) -> Option<String> {
 // Test files live in `tests/triggers/mcp_notification_hook/` (mirror of src), pulled in by
 // path so they keep unit-test semantics (private access). See docs/rust-test-files.md.
 tests_bridge_macro::tests_bridge!("triggers/mcp_notification_hook");
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn map_notification_handles_prompts_and_resources_list_changed() {
+        let n = McpServerNotification {
+            method: "notifications/prompts/listChanged".into(),
+            params: serde_json::json!({}),
+        };
+        let trigger = map_notification("filesystem", &n).unwrap();
+        assert_eq!(trigger.idempotency_key, "mcp:filesystem:prompts");
+        assert_eq!(
+            trigger.replacement_policy,
+            ReplacementPolicy::LatestReplaces
+        );
+
+        let n = McpServerNotification {
+            method: "notifications/resources/listChanged".into(),
+            params: serde_json::json!({}),
+        };
+        let trigger = map_notification("filesystem", &n).unwrap();
+        assert_eq!(trigger.idempotency_key, "mcp:filesystem:resources");
+    }
+
+    #[test]
+    fn redact_notification_text_covers_all_sensitive_prefixes() {
+        let text = "hub_agent_x hub_hs_y hub_ep_z sk-abc Bearer-token contains-token";
+        let redacted = redact_notification_text(text);
+        assert!(!redacted.contains("hub_agent_x"));
+        assert!(!redacted.contains("hub_hs_y"));
+        assert!(!redacted.contains("hub_ep_z"));
+        assert!(!redacted.contains("sk-abc"));
+        assert!(redacted.contains("[redacted]"));
+        assert!(!redacted.contains("Bearer-token"));
+    }
+
+    #[test]
+    fn safe_display_truncates_long_redacted_text() {
+        let long = "x".repeat(250);
+        let out = safe_display(&long, 200);
+        assert_eq!(out.chars().count(), 200);
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn safe_idempotency_segment_hashes_unbounded_and_control_chars() {
+        let long = "y".repeat(201);
+        let segment = safe_idempotency_segment(&long);
+        assert!(segment.starts_with("hash:"), "{segment}");
+        assert!(!segment.contains(&long[..10]));
+
+        let control = "file\u{0000}.md";
+        let segment = safe_idempotency_segment(control);
+        assert!(segment.starts_with("hash:"), "{segment}");
+
+        // Sensitive-looking but bounded values are also hashed.
+        let sensitive = "hub_agent_secret_value";
+        let segment = safe_idempotency_segment(sensitive);
+        assert!(segment.starts_with("hash:"), "{segment}");
+        assert_eq!(
+            safe_idempotency_segment("plain-safe-value"),
+            "plain-safe-value"
+        );
+    }
+
+    #[test]
+    fn safe_display_redacts_and_replaces_newlines() {
+        assert_eq!(
+            safe_display("hub_agent_secret\nsecond", 100),
+            "[redacted] second"
+        );
+    }
+
+    #[test]
+    fn truncate_chars_preserves_short_values() {
+        assert_eq!(truncate_chars("short", 10), "short");
+        let out = truncate_chars("abcdef", 5);
+        assert_eq!(out, "abcd…");
+    }
+
+    #[test]
+    fn render_summary_for_unknown_method_without_opt_in_is_bare_method_name() {
+        let params = serde_json::json!({"secret": "do-not-leak"});
+        assert_eq!(
+            render_summary("notifications/custom/secret", &params),
+            Some("notifications/custom/secret".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_dedup_key_missing_meta_or_non_string_returns_none() {
+        assert_eq!(extract_dedup_key(&serde_json::json!({})), None);
+        assert_eq!(
+            extract_dedup_key(&serde_json::json!({"_meta": {"theway_dedup_key": 5}})),
+            None
+        );
+    }
+}

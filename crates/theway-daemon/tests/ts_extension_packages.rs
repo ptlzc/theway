@@ -588,3 +588,57 @@ export default defineExtension((api) => {
     }));
     host.shutdown().await;
 }
+
+#[tokio::test]
+async fn setup_timeout_faults_package_without_hanging_startup() {
+    let project = tempdir().unwrap();
+    let base = tempdir().unwrap();
+    write_package(
+        &project_root(project.path()),
+        "setup-timeout",
+        "setup-timeout",
+        0,
+        false,
+        "index.js",
+        r#"import { defineExtension } from "@theway-ai/plugin-sdk";
+export default defineExtension(() => { while (true) {} });"#,
+    );
+    let catalog = discover(project.path(), base.path());
+    let engine = QuickJsEnginePool::new(1);
+    let host = SessionPluginHost::start(catalog, engine, "session", project.path()).await;
+    assert!(host.active_extension_ids().await.is_empty());
+    assert!(host.diagnostics().iter().any(|diagnostic| {
+        diagnostic.extension_id == "setup-timeout"
+            && diagnostic.code == ExtensionDiagnosticCode::LoadFailed
+    }));
+    host.shutdown().await;
+}
+
+#[tokio::test]
+async fn invoke_skips_extensions_without_matching_registration() {
+    let project = tempdir().unwrap();
+    let base = tempdir().unwrap();
+    write_package(
+        &project_root(project.path()),
+        "input-only",
+        "input-only",
+        0,
+        false,
+        "index.js",
+        COUNTER_EXTENSION,
+    );
+    let catalog = discover(project.path(), base.path());
+    let engine = QuickJsEnginePool::new(1);
+    let host = SessionPluginHost::start(catalog, engine, "session", project.path()).await;
+    assert_eq!(host.active_extension_ids().await, ["input-only"]);
+
+    let output = host
+        .invoke(ExtensionLifecycleEvent::SessionStart, json!({}))
+        .await;
+    assert!(output.is_empty());
+
+    let output = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].extension_id, "input-only");
+    host.shutdown().await;
+}

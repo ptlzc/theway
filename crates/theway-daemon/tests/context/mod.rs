@@ -31,6 +31,36 @@ fn render_lineage_records_collapse_event_ids_only() {
 }
 
 #[test]
+fn render_lineage_with_only_collapse_node_id() {
+    let block = render_lineage(None, Some("node-only")).expect("lineage");
+    assert!(block.contains("node id: node-only"));
+    assert!(!block.contains("source session id"));
+}
+
+#[test]
+fn render_lineage_with_only_compact_context() {
+    let compact = CompactContext {
+        source_session_id: "old-only".into(),
+        compact_text: "summary".into(),
+        raw_text_ref: "old-only".into(),
+    };
+    let block = render_lineage(Some(&compact), None).expect("lineage");
+    assert!(block.contains("source session id: old-only"));
+    assert!(!block.contains("node id:"));
+}
+
+#[test]
+fn render_lineage_omits_empty_source_session_id() {
+    let compact = CompactContext {
+        source_session_id: String::new(),
+        compact_text: "summary".into(),
+        raw_text_ref: String::new(),
+    };
+    let block = render_lineage(Some(&compact), None).expect("lineage");
+    assert!(!block.contains("source session id"));
+}
+
+#[test]
 fn render_lineage_uses_node_id_when_compact_text_is_empty() {
     let compact = CompactContext {
         source_session_id: "old-session".into(),

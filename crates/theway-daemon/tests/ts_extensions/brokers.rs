@@ -229,3 +229,43 @@ fn broker_error_contract_uses_invalid_arguments() {
     assert_eq!(err.code, "invalid_arguments");
     assert_eq!(err.message, "bad");
 }
+
+#[test]
+fn native_call_log_and_notify_are_audit_only() {
+    let project = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let runtime = broker(project.path(), base.path(), "ext", &[]);
+
+    let log = runtime.call("native.call", r#"{"name":"log","args":{"k":"v"}}"#);
+    assert!(log.contains("\"ok\":true"), "{log}");
+    let notify = runtime.call("native.call", r#"{"name":"notify","args":{"k":"v"}}"#);
+    assert!(notify.contains("\"ok\":true"), "{notify}");
+    let denied = runtime.call("native.call", r#"{"name":"other","args":{}}"#);
+    assert!(denied.contains("capability_denied"), "{denied}");
+}
+
+#[test]
+fn workspace_read_rejects_oversized_content() {
+    let project = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let runtime = broker(project.path(), base.path(), "ext", &["workspace.read"]);
+    begin(&runtime, 10);
+
+    let file = project.path().join("big.txt");
+    std::fs::write(&file, "x".repeat(1024 * 1024 + 1)).unwrap();
+    let result = runtime.call("workspace.readText", r#"{"path":"big.txt"}"#);
+    assert!(result.contains("resource_limit"), "{result}");
+}
+
+#[test]
+fn process_run_rejects_too_many_argv_items() {
+    let project = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let runtime = broker(project.path(), base.path(), "ext", &["process.spawn"]);
+    begin(&runtime, 10);
+
+    let argv: Vec<String> = (0..129).map(|i| format!("arg{i}")).collect();
+    let args = serde_json::to_string(&json!({"argv": argv})).unwrap();
+    let result = runtime.call("process.run", &format!(r#"{{"argv":{args}}}"#));
+    assert!(result.contains("invalid_arguments"), "{result}");
+}

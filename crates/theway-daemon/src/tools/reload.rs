@@ -158,6 +158,7 @@ impl AgentTool for ReloadTool {
         // The `/reload` path never writes the inheritance slot; a local empty
         // slot satisfies the dispatch context (issue #100).
         let inherit_slot = Arc::new(std::sync::Mutex::new(None));
+        let collapse_unload_slot = Arc::new(std::sync::Mutex::new(None));
         let ctx = CommandCtx {
             harness,
             trigger_executor: &trigger_executor,
@@ -168,6 +169,7 @@ impl AgentTool for ReloadTool {
             inherit_slot: &inherit_slot,
             mcp_provision: runtime.mcp_provision.as_ref(),
             auth_base: runtime.auth_base.as_ref(),
+            collapse_unload_slot: &collapse_unload_slot,
         };
         match commands::dispatch("/reload", &runtime.registry, &ctx).await {
             CommandOutcome::Handled => {

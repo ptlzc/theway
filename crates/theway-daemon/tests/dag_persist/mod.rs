@@ -352,6 +352,18 @@ async fn flush_removes_terminal_runs_from_the_session_snapshot() {
 }
 
 #[tokio::test]
+async fn load_session_runs_returns_empty_when_store_cannot_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let session_path = dir
+        .path()
+        .join(".pi/graph-engineering-state-sess-1.db");
+    std::fs::create_dir_all(&session_path).unwrap();
+
+    let runs = load_session_runs(dir.path(), "sess-1").await;
+    assert!(runs.is_empty());
+}
+
+#[tokio::test]
 async fn load_session_runs_returns_empty_for_missing_state() {
     // Arrange
     let dir = tempfile::tempdir().unwrap();

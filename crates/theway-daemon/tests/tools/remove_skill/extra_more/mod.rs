@@ -152,6 +152,28 @@ async fn execute_unknown_skill_suggests_closest_loaded_names() {
 }
 
 #[tokio::test]
+async fn execute_unknown_skill_hint_uses_contains_when_prefix_does_not_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_harness, cell) = build(
+        vec![skill("foobar", SkillSource::User, "/tmp/skills/foobar/SKILL.md")],
+        None,
+    );
+    let tool = tool_with(dir.path().into(), cell);
+
+    let err = tool
+        .execute(
+            "c1",
+            serde_json::json!({ "name": "oba", "confirm": true }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("unknown skill must fail");
+    let msg = err.to_string();
+    assert!(msg.contains("Did you mean: foobar"), "got: {msg}");
+}
+
+#[tokio::test]
 async fn execute_source_pin_user_previews_without_deleting() {
     let dir = tempfile::tempdir().unwrap();
     let fp = write_user_skill(dir.path(), "foo");

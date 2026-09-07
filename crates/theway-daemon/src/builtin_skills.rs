@@ -497,6 +497,39 @@ key = "value"
     }
 
     #[test]
+    fn strip_frontmatter_preserves_content_without_frontmatter() {
+        let raw = "# Just a body\n";
+        assert_eq!(strip_frontmatter(raw), raw);
+    }
+
+    #[test]
+    fn strip_frontmatter_returns_original_when_opening_has_no_newline() {
+        let raw = "--- not frontmatter";
+        assert_eq!(strip_frontmatter(raw), raw);
+    }
+
+    #[test]
+    fn strip_frontmatter_returns_original_when_no_closing_marker() {
+        let raw = "---\nname: x\nbody without close";
+        assert_eq!(strip_frontmatter(raw), raw);
+    }
+
+    #[test]
+    fn strip_frontmatter_handles_closing_line_with_trailing_text_and_eof() {
+        let raw = "---\nname: x\n--- trailing\nbody";
+        assert_eq!(strip_frontmatter(raw), raw);
+
+        let raw_eof = "---\nname: x\n---";
+        assert_eq!(strip_frontmatter(raw_eof), "");
+    }
+
+    #[test]
+    fn strip_frontmatter_skips_bom() {
+        let raw = "\u{feff}---\nname: x\n---\nbody";
+        assert_eq!(strip_frontmatter(raw), "body");
+    }
+
+    #[test]
     fn vendored_skill_md_frontmatter_matches_hardcoded_metadata() {
         // Self-check: if someone updates the vendored SKILL.md and forgets to update the
         // hardcoded BuiltinSpec, this test catches the drift. Match against the description

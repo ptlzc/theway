@@ -304,3 +304,87 @@ fn merge_batch_extends_for_observe() {
     ));
     assert_eq!(aggregate.actions.len(), 1);
 }
+
+#[test]
+fn accept_transform_batch_before_run_partial_patches() {
+    // Only messages: systemPrompt branch is skipped.
+    let mut payload = json!({"systemPrompt": "base", "messages": [{"m": 1}]});
+    let mut aggregate = empty_batch();
+    let next = ExtensionActionBatch {
+        decision: None,
+        actions: vec![action(
+            ExtensionActionKind::PatchRunContext,
+            json!({"messages": [{"m": 2}]}),
+        )],
+    };
+    accept_transform_batch(
+        ExtensionLifecycleEvent::BeforeRun,
+        &mut payload,
+        &mut aggregate,
+        next,
+    )
+    .unwrap();
+    assert_eq!(payload["systemPrompt"], "base");
+    assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
+
+    // Only systemPrompt: messages branch is skipped.
+    let mut payload = json!({"systemPrompt": "base", "messages": [{"m": 1}]});
+    let mut aggregate = empty_batch();
+    let next = ExtensionActionBatch {
+        decision: None,
+        actions: vec![action(
+            ExtensionActionKind::PatchRunContext,
+            json!({"systemPrompt": "extra"}),
+        )],
+    };
+    accept_transform_batch(
+        ExtensionLifecycleEvent::BeforeRun,
+        &mut payload,
+        &mut aggregate,
+        next,
+    )
+    .unwrap();
+    assert_eq!(payload["systemPrompt"], "extra");
+    assert_eq!(payload["messages"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn accept_transform_batch_tool_result_without_is_error() {
+    let mut payload = json!({"result": {"ok": false}});
+    let mut aggregate = empty_batch();
+    let next = ExtensionActionBatch {
+        decision: None,
+        actions: vec![action(
+            ExtensionActionKind::ReplaceToolResult,
+            json!({"result": {"ok": true}}),
+        )],
+    };
+    accept_transform_batch(
+        ExtensionLifecycleEvent::ToolResult,
+        &mut payload,
+        &mut aggregate,
+        next,
+    )
+    .unwrap();
+    assert_eq!(payload["result"]["ok"], true);
+    assert_eq!(aggregate.actions[0].payload["isError"], Value::Null);
+
+    // isError null is valid and copied through.
+    let mut payload = json!({"result": {"ok": false}, "isError": true});
+    let mut aggregate = empty_batch();
+    let next = ExtensionActionBatch {
+        decision: None,
+        actions: vec![action(
+            ExtensionActionKind::ReplaceToolResult,
+            json!({"result": {"ok": true}, "isError": null}),
+        )],
+    };
+    accept_transform_batch(
+        ExtensionLifecycleEvent::ToolResult,
+        &mut payload,
+        &mut aggregate,
+        next,
+    )
+    .unwrap();
+    assert_eq!(payload["isError"], Value::Null);
+}

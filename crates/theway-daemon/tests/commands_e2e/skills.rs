@@ -44,6 +44,7 @@ async fn dynamic_skill_slash_command_attaches_skill_without_body_echo() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -92,6 +93,7 @@ async fn dynamic_skill_slash_command_with_prompt_runs_skill_wrapped_turn() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -150,6 +152,7 @@ async fn dynamic_skill_slash_command_hides_disabled_and_builtin_conflicts() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -196,6 +199,7 @@ async fn help_lists_dynamic_skill_commands_without_body() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -238,6 +242,7 @@ async fn dispatch_skill_attaches_loaded_skill_without_exposing_body() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -287,6 +292,7 @@ async fn dispatch_skill_refuses_disabled_skill() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -334,6 +340,7 @@ async fn dispatch_skills_disable_persists_overlay_and_reloads() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -403,6 +410,7 @@ async fn dispatch_skills_enable_is_user_mediated_and_reuses_overlay() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -482,6 +490,7 @@ async fn dispatch_skills_show_prints_metadata_without_body() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -536,6 +545,7 @@ async fn dispatch_skills_reload_uses_harness_reload_and_prints_summary() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -591,6 +601,7 @@ async fn dispatch_skills_install_previews_then_confirms_without_body_echo() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -667,6 +678,7 @@ async fn dispatch_skills_remove_previews_then_confirms_user_skill() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -743,6 +755,7 @@ async fn dispatch_skills_remove_project_skill_points_to_disable() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -787,6 +800,7 @@ async fn dispatch_skill_unknown_name_suggests_prefix_matches() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };

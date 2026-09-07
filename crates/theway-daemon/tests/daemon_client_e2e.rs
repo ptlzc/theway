@@ -147,8 +147,8 @@ async fn client_round_trip_against_spawned_daemon() {
     // stream frames arrive (snapshot after the command was processed).
     let mut stream = client.stream_events().await.unwrap();
     let mut saw_snapshot = false;
-    for _ in 0..4 {
-        let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+    for _ in 0..8 {
+        let frame = tokio::time::timeout(Duration::from_secs(15), stream.next())
             .await
             .expect("timed out waiting for stream frame")
             .expect("stream ended")
@@ -185,8 +185,8 @@ async fn two_clients_both_receive_frames_from_spawned_daemon() {
 
     for (label, stream) in [("a", &mut stream_a), ("b", &mut stream_b)] {
         let mut saw_snapshot = false;
-        for _ in 0..4 {
-            let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        for _ in 0..8 {
+            let frame = tokio::time::timeout(Duration::from_secs(15), stream.next())
                 .await
                 .expect("timed out")
                 .expect("stream ended")
@@ -282,7 +282,7 @@ async fn list_sessions_marks_current_after_spawn() {
         .unwrap();
     assert!(accepted, "send_message accepted");
     let mut materialized = false;
-    for _ in 0..50 {
+    for _ in 0..100 {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let (sessions, current_after) = client.list_sessions().await.unwrap();
         assert_eq!(

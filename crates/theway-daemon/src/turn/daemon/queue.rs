@@ -1,9 +1,23 @@
 impl TurnHost {
-    fn queue_user_prompt(&mut self, display: String, prompt: String, images: Vec<ImageContent>) {
+    async fn queue_user_prompt(&mut self, display: String, prompt: String, images: Vec<ImageContent>) {
+        let persisted = match self
+            .session
+            .kernel
+            .harness()
+            .record_user_prompt(prompt.clone(), images.clone())
+            .await
+        {
+            Ok(()) => true,
+            Err(error) => {
+                self.error_line(format!("persist queued message: {error}"));
+                false
+            }
+        };
         self.enqueue_turn(QueuedTurn::UserPrompt {
             display,
             prompt,
             images,
+            persisted,
         });
     }
 
@@ -47,9 +61,14 @@ impl TurnHost {
                 display,
                 prompt,
                 images,
+                persisted,
             } => {
                 self.projection.feed.push_user(display);
-                self.start_user_prompt_turn(prompt, images, turn);
+                if persisted {
+                    self.start_continued_turn(turn);
+                } else {
+                    self.start_user_prompt_turn(prompt, images, turn);
+                }
             }
             QueuedTurn::AgentPrompt {
                 display,
@@ -140,9 +159,14 @@ impl TurnHost {
                 display,
                 prompt,
                 images,
+                persisted,
             } => {
                 session.projection.feed.push_user(display);
-                session.kernel.user_prompt_turn(prompt, images)
+                if persisted {
+                    session.kernel.continue_turn()
+                } else {
+                    session.kernel.user_prompt_turn(prompt, images)
+                }
             }
             QueuedTurn::AgentPrompt {
                 display,
@@ -194,6 +218,15 @@ impl TurnHost {
         turn: &mut TurnState,
     ) {
         turn.fut = Some(self.session.kernel.user_prompt_turn(prompt_text, loaded_images));
+        turn.aborted = false;
+        turn.prefix = "";
+        self.session.busy = true;
+    }
+
+    /// Run the transcript as-is (used after a queued user prompt has already
+    /// been persisted into agent state while the session waited for a model).
+    fn start_continued_turn(&mut self, turn: &mut TurnState) {
+        turn.fut = Some(self.session.kernel.continue_turn());
         turn.aborted = false;
         turn.prefix = "";
         self.session.busy = true;

@@ -129,3 +129,117 @@ fn clean_action(raw: &str) -> String {
     }
     s.to_string()
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn parse_trigger_rule_empty_and_missing_action() {
+        assert_eq!(parse_trigger_rule(""), Err(ParseTriggerRuleError::Empty));
+        assert_eq!(parse_trigger_rule("   "), Err(ParseTriggerRuleError::Empty));
+        assert_eq!(
+            parse_trigger_rule("when a build finishes but no action"),
+            Err(ParseTriggerRuleError::MissingAction)
+        );
+    }
+
+    #[test]
+    fn parse_trigger_rule_empty_parts_are_rejected() {
+        assert_eq!(
+            parse_trigger_rule(", run cargo test"),
+            Err(ParseTriggerRuleError::EmptyPart)
+        );
+        assert_eq!(
+            parse_trigger_rule("\u{5f53}, run cargo test"),
+            Err(ParseTriggerRuleError::EmptyPart)
+        );
+        // A trailing marker space is trimmed away before marker lookup, so
+        // these specs no longer contain a recognized condition/action marker
+        // at all — the parser reports the missing marker.
+        assert_eq!(
+            parse_trigger_rule("when a build finishes, run "),
+            Err(ParseTriggerRuleError::MissingAction)
+        );
+        assert_eq!(
+            parse_trigger_rule("if a build finishes, then "),
+            Err(ParseTriggerRuleError::MissingAction)
+        );
+    }
+
+    #[test]
+    fn clean_condition_strips_when_if_and_chinese_time_suffixes() {
+        assert_eq!(clean_condition("when a build finishes"), "a build finishes");
+        assert_eq!(clean_condition("if a build finishes"), "a build finishes");
+        assert_eq!(
+            clean_condition(
+                "\u{5f53}\u{5728} github \u{4e0a}\u{6709}\u{65b0} issue\u{7684}\u{65f6}\u{5019}"
+            ),
+            "\u{5728} github \u{4e0a}\u{6709}\u{65b0} issue"
+        );
+        assert_eq!(
+            clean_condition("\u{5982}\u{679c}\u{73b0}\u{5728}\u{662f} 11pm\u{65f6}"),
+            "\u{73b0}\u{5728}\u{662f} 11pm"
+        );
+        assert_eq!(clean_condition("  plain condition  "), "plain condition");
+    }
+
+    #[test]
+    fn clean_action_strips_run_execute_and_chinese_execute() {
+        assert_eq!(clean_action("run cargo test"), "cargo test");
+        assert_eq!(clean_action("execute cargo test"), "cargo test");
+        assert_eq!(clean_action("\u{6267}\u{884c}./notify.sh"), "./notify.sh");
+        assert_eq!(clean_action("  cargo test  "), "cargo test");
+    }
+
+    #[test]
+    fn parse_trigger_rule_accepts_marker_variants() {
+        let cases = [
+            (
+                "when a build finishes, then run cargo test",
+                "a build finishes,",
+                "cargo test",
+            ),
+            (
+                "when a build finishes, run cargo test",
+                "a build finishes",
+                "cargo test",
+            ),
+            (
+                "when a build finishes, execute cargo test",
+                "a build finishes",
+                "cargo test",
+            ),
+            (
+                "when a build finishes then run cargo test",
+                "a build finishes",
+                "cargo test",
+            ),
+            (
+                "if a build finishes, then cargo test",
+                "a build finishes,",
+                "cargo test",
+            ),
+            (
+                "a build finishes, run cargo test",
+                "a build finishes",
+                "cargo test",
+            ),
+            (
+                "a build finishes run cargo test",
+                "a build finishes",
+                "cargo test",
+            ),
+            (
+                "\u{5f53}a build finishes\u{65f6},\u{6267}\u{884c}./run.sh",
+                "a build finishes",
+                "./run.sh",
+            ),
+        ];
+        for (spec, condition, action) in cases {
+            let parsed = parse_trigger_rule(spec).unwrap_or_else(|e| panic!("{spec}: {e:?}"));
+            assert_eq!(parsed.condition, condition, "{spec}");
+            assert_eq!(parsed.action, action, "{spec}");
+        }
+    }
+}

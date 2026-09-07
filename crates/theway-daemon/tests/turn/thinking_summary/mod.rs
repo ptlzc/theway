@@ -228,6 +228,30 @@ async fn summarizer_error_sends_fallback_text() {
 }
 
 #[tokio::test]
+async fn closing_update_without_thinking_block_does_not_spawn() {
+    let mut feed = Feed::new();
+    let mut burst = ThinkingBurst {
+        open: true,
+        in_flight: 0,
+    };
+    let (feed_tx, mut feed_rx) = mpsc::unbounded_channel();
+    let cfg = settings(1, ok_summarizer("sum"));
+
+    apply(
+        "sess-think",
+        &mut feed,
+        &mut burst,
+        Some(&cfg),
+        &feed_tx,
+        FeedUpdate::TextDelta("next block".into()),
+    );
+
+    assert!(!burst.open);
+    assert_eq!(burst.in_flight, 0);
+    assert!(feed_rx.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn max_in_flight_skips_spawn_until_slot_frees() {
     // Arrange
     let mut feed = Feed::new();

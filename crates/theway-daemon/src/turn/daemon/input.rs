@@ -43,13 +43,13 @@ impl TurnHost {
             self.session.queue.clear();
             self.system_line("interrupt: stopping current turn for new message");
             if turn.fut.is_some() {
-                self.queue_user_prompt(display, prompt_text, loaded_images);
+                self.queue_user_prompt(display, prompt_text, loaded_images).await;
             } else if self.session.kernel.has_model() {
                 self.projection.feed.push_user(display);
                 self.start_user_prompt_turn(prompt_text, loaded_images, turn);
             } else {
                 self.projection.feed.push_user(display.clone());
-                self.queue_user_prompt(display, prompt_text, loaded_images);
+                self.queue_user_prompt(display, prompt_text, loaded_images).await;
                 self.system_line("no model selected — queued until a model is set");
             }
         } else if !self.session.kernel.has_model() {
@@ -57,7 +57,7 @@ impl TurnHost {
             // call. Keep the message queued; SetModel/Configure start it once
             // a model exists.
             self.projection.feed.push_user(display.clone());
-            self.queue_user_prompt(display, prompt_text, loaded_images);
+            self.queue_user_prompt(display, prompt_text, loaded_images).await;
             self.system_line("no model selected — queued until a model is set");
         } else if turn.fut.is_some() {
             // Issue #102: a busy tool-calling turn must see the new user
@@ -134,13 +134,30 @@ impl TurnHost {
         }
         if !session.kernel.has_model() {
             // Keep model-less sessions from consuming messages they cannot run.
-            // The queued job is held by `start_parked_turn` until SetModel lands;
-            // the transport loop re-checks parked queues after every command.
+            // Persist the prompt first (materializes the lazy session db), then
+            // hold the job until SetModel lands; the transport loop re-checks
+            // parked queues after every command.
+            let persisted = match session
+                .kernel
+                .harness()
+                .record_user_prompt(prompt_text.clone(), loaded_images.clone())
+                .await
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    session
+                        .projection
+                        .feed
+                        .push_error(format!("persist queued message: {error}"), None, false);
+                    false
+                }
+            };
             session.projection.feed.push_user(display.clone());
             session.queue.push_back(QueuedTurn::UserPrompt {
                 display,
                 prompt: prompt_text,
                 images: loaded_images,
+                persisted,
             });
             session.projection.feed.push_plain_untimed(
                 "no model selected — queued until a model is set",
@@ -160,10 +177,26 @@ impl TurnHost {
                 .feed
                 .push_plain_untimed("interleaved new message into the running turn", Level::System);
         } else {
+            let persisted = match session
+                .kernel
+                .harness()
+                .record_user_prompt(prompt_text.clone(), loaded_images.clone())
+                .await
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    session
+                        .projection
+                        .feed
+                        .push_error(format!("persist queued message: {error}"), None, false);
+                    false
+                }
+            };
             session.queue.push_back(QueuedTurn::UserPrompt {
                 display,
                 prompt: prompt_text,
                 images: loaded_images,
+                persisted,
             });
         }
     }
@@ -180,6 +213,7 @@ impl TurnHost {
                 inherit_slot: &self.runtime.inherit_slot,
                 mcp_provision: Some(&self.runtime.mcp_provision),
                 auth_base: Some(&self.runtime.paths.base),
+                collapse_unload_slot: &self.runtime.collapse_unload_slot,
             };
             commands::dispatch(input, &self.runtime.registry, &ctx).await
         };
@@ -202,6 +236,13 @@ impl TurnHost {
                 self.set_thinking_for_session(&inherit.session_id, &level)
                     .await;
             }
+        }
+        // Collapse unload: release the collapsed source session's runtime
+        // from memory (the command layer has no &mut TurnHost, so the host
+        // consumes the slot).
+        let unload = self.runtime.collapse_unload_slot.lock().unwrap().take();
+        if let Some(unload) = unload {
+            self.handle_collapse_unload(unload, turn).await;
         }
         match outcome {
             CommandOutcome::Quit => {
@@ -341,9 +382,29 @@ impl TurnHost {
                 inherit_slot: &self.runtime.inherit_slot,
                 mcp_provision: Some(&self.runtime.mcp_provision),
                 auth_base: Some(&self.runtime.paths.base),
+                collapse_unload_slot: &self.runtime.collapse_unload_slot,
             };
             commands::dispatch_with_output(input, &self.runtime.registry, &ctx, output).await
         };
+        // Issue #100: consume the inheritance slot here as well — a parked
+        // collapse writes it too, and a stale slot must never leak into a
+        // later active-session dispatch.
+        let inherit = self.runtime.inherit_slot.lock().unwrap().take();
+        if let Some(inherit) = inherit {
+            let _ = self
+                .set_model_for_session(&inherit.session_id, &inherit.model_spec)
+                .await;
+            if let Some(level) = inherit.thinking_level {
+                let _ = self.set_thinking_for_session(&inherit.session_id, &level).await;
+            }
+        }
+        // Collapse unload: a parked session collapsing itself is dropped from
+        // the registry outright; the host consumes the slot here too.
+        let unload = self.runtime.collapse_unload_slot.lock().unwrap().take();
+        if let Some(unload) = unload {
+            let mut turn = TurnState::default();
+            self.handle_collapse_unload(unload, &mut turn).await;
+        }
         self.handle_parked_command_outcome(session_id, input, outcome);
     }
 

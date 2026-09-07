@@ -42,6 +42,7 @@ async fn dispatch_thinking_command_updates_state_and_session() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -112,6 +113,7 @@ async fn dispatch_session_export_writes_archive_with_bounded_output() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -155,6 +157,7 @@ async fn dispatch_unknown_command_runs_it_as_agent_prompt() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -197,6 +200,7 @@ async fn dispatch_template_returns_repl_owned_agent_work() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -242,6 +246,7 @@ async fn dispatch_compact_returns_repl_owned_agent_work() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -328,6 +333,7 @@ async fn dispatch_undo_removes_last_turn_from_active_branch() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -369,6 +375,7 @@ async fn dispatch_name_sets_session_name() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -408,6 +415,7 @@ async fn dispatch_quit_returns_quit_outcome() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -452,6 +460,7 @@ async fn dispatch_login_prompts_for_secret_instead_of_accepting_inline_key() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -500,6 +509,7 @@ async fn dispatch_login_rejects_inline_secret_material() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -572,6 +582,7 @@ async fn dispatch_share_default_uses_gh_private_default_without_secret_flag() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -627,6 +638,7 @@ async fn dispatch_share_public_passes_public_flag() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };
@@ -674,6 +686,7 @@ async fn dispatch_share_preserves_gh_stderr_on_failure() {
         tool_count: 0,
         cwd: &cwd,
         inherit_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: None,
         auth_base: None,
     };

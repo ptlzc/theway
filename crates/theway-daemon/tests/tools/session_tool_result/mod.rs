@@ -408,3 +408,287 @@ async fn grep_unknown_call_id_errors() {
         .expect_err("unknown id must fail");
     assert!(err.to_string().contains("not found"), "got: {err}");
 }
+
+#[test]
+fn chunk_text_past_end_and_boundary_helpers() {
+    let text = "a\nb\n";
+    let (chunk, kept, has_more) = chunk_text(text, 10, 10, MAX_READ_BYTES);
+    assert_eq!(chunk, "");
+    assert_eq!(kept, 0);
+    assert!(!has_more);
+
+    assert_eq!(count_lines("a\nb"), 2);
+    assert_eq!(count_lines("a"), 1);
+    assert_eq!(char_boundary_before("héllo", 3), 3);
+    assert_eq!(char_boundary_before("héllo", 2), 1);
+}
+
+#[tokio::test]
+async fn read_offset_past_end_returns_empty_chunk() {
+    let store = Arc::new(FakeStore::default());
+    store
+        .append_entries(vec![stored_tool_result(
+            "e1",
+            "call_1",
+            "bash",
+            "line1\nline2\n",
+        )])
+        .await
+        .unwrap();
+    let tool = read_tool(store);
+    let result = tool
+        .execute(
+            "r",
+            json!({ "tool_call_id": "call_1", "offset": 10, "max_lines": 2 }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert_eq!(text, "", "empty chunk should produce empty body");
+    assert_eq!(result.details["has_more"], false);
+}
+
+#[tokio::test]
+async fn grep_invalid_regex_is_rejected() {
+    let store = Arc::new(FakeStore::default());
+    let tool = grep_tool(store);
+    let err = tool
+        .execute(
+            "g",
+            json!({ "tool_call_id": "call_1", "pattern": "[" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("invalid regex must fail");
+    assert!(err.to_string().contains("regex"), "got: {err}");
+}
+
+#[tokio::test]
+async fn grep_no_matches_reports_empty() {
+    let store = Arc::new(FakeStore::default());
+    store
+        .append_entries(vec![stored_tool_result(
+            "e1",
+            "call_1",
+            "bash",
+            "alpha\n",
+        )])
+        .await
+        .unwrap();
+    let tool = grep_tool(store);
+    let result = tool
+        .execute(
+            "g",
+            json!({ "tool_call_id": "call_1", "pattern": "zzz" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let text = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("No matches"), "got: {text}");
+    assert_eq!(result.details["matches"].as_array().unwrap().len(), 0);
+}
+
+struct ErrorRepo;
+
+#[async_trait]
+impl crate::runtime_storage::SessionRepository for ErrorRepo {
+    async fn create(&self, _cwd: &Path) -> anyhow::Result<Arc<dyn SessionStore>> {
+        unreachable!("not used")
+    }
+    async fn resume(&self, _explicit_id: Option<&str>) -> anyhow::Result<Arc<dyn SessionStore>> {
+        unreachable!("not used")
+    }
+    async fn contains(&self, _id: &str) -> anyhow::Result<bool> {
+        Ok(true)
+    }
+    async fn open(&self, _id: &str) -> anyhow::Result<Option<Arc<dyn SessionStore>>> {
+        Err(anyhow::anyhow!("disk exploded"))
+    }
+    async fn list(&self) -> anyhow::Result<Vec<crate::runtime_storage::SessionRecord>> {
+        Ok(Vec::new())
+    }
+    async fn delete(&self, _id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn fork(
+        &self,
+        _cwd: &Path,
+        _parent: &theway_core::Session,
+        _entries: Vec<StoredSessionEntry>,
+    ) -> anyhow::Result<Arc<dyn SessionStore>> {
+        unreachable!("not used")
+    }
+    async fn import(
+        &self,
+        _archive_path: &Path,
+        _cwd: &Path,
+    ) -> anyhow::Result<crate::runtime_storage::SessionImport> {
+        unreachable!("not used")
+    }
+}
+
+#[tokio::test]
+async fn read_repo_open_error_is_reported() {
+    let repo: Arc<dyn crate::runtime_storage::SessionRepository> = Arc::new(ErrorRepo);
+    let tool = SessionToolResultReadTool {
+        ctx: Arc::new(SessionToolResultContext {
+            repo,
+            session_id: "session-test".into(),
+        }),
+    };
+    let err = tool
+        .execute(
+            "r",
+            json!({ "tool_call_id": "call_1" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("repo open error must surface");
+    let msg = err.to_string();
+    assert!(msg.contains("open session"), "got: {msg}");
+}
+
+#[tokio::test]
+async fn read_missing_tool_call_id_is_rejected() {
+    let store = Arc::new(FakeStore::default());
+    let tool = read_tool(store);
+    let err = tool
+        .execute("r", json!({}), CancellationToken::new(), None)
+        .await
+        .expect_err("missing tool_call_id must fail");
+    assert!(err.to_string().contains("tool_call_id"), "got: {err}");
+}
+
+#[tokio::test]
+async fn grep_missing_required_args_are_rejected() {
+    let store = Arc::new(FakeStore::default());
+    let tool = grep_tool(store);
+
+    let no_id = tool
+        .execute("g", json!({ "pattern": "x" }), CancellationToken::new(), None)
+        .await
+        .expect_err("missing tool_call_id must fail");
+    assert!(no_id.to_string().contains("tool_call_id"), "got: {no_id}");
+
+    let no_pattern = tool
+        .execute("g", json!({ "tool_call_id": "call_1" }), CancellationToken::new(), None)
+        .await
+        .expect_err("missing pattern must fail");
+    assert!(no_pattern.to_string().contains("pattern"), "got: {no_pattern}");
+}
+
+#[test]
+fn tool_result_text_prefers_full_text_and_concatenates_blocks() {
+    let regular = tool_result_message("c1", "bash", "alpha\nbeta");
+    assert_eq!(tool_result_text(&regular), "alpha\nbeta");
+
+    let mut with_full = tool_result_message("c2", "bash", "truncated");
+    with_full.details = Some(json!({ "full_text": "alpha\nbeta\ngamma" }));
+    assert_eq!(tool_result_text(&with_full), "alpha\nbeta\ngamma");
+}
+
+struct OpenNoneRepo;
+
+#[async_trait]
+impl crate::runtime_storage::SessionRepository for OpenNoneRepo {
+    async fn create(&self, _cwd: &Path) -> anyhow::Result<Arc<dyn SessionStore>> {
+        unreachable!("not used")
+    }
+    async fn resume(&self, _explicit_id: Option<&str>) -> anyhow::Result<Arc<dyn SessionStore>> {
+        unreachable!("not used")
+    }
+    async fn contains(&self, _id: &str) -> anyhow::Result<bool> {
+        Ok(true)
+    }
+    async fn open(&self, _id: &str) -> anyhow::Result<Option<Arc<dyn SessionStore>>> {
+        Ok(None)
+    }
+    async fn list(&self) -> anyhow::Result<Vec<crate::runtime_storage::SessionRecord>> {
+        Ok(Vec::new())
+    }
+    async fn delete(&self, _id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn fork(
+        &self,
+        _cwd: &Path,
+        _parent: &theway_core::Session,
+        _entries: Vec<StoredSessionEntry>,
+    ) -> anyhow::Result<Arc<dyn SessionStore>> {
+        unreachable!("not used")
+    }
+    async fn import(
+        &self,
+        _archive_path: &Path,
+        _cwd: &Path,
+    ) -> anyhow::Result<crate::runtime_storage::SessionImport> {
+        unreachable!("not used")
+    }
+}
+
+#[tokio::test]
+async fn read_session_not_found_is_reported() {
+    let repo: Arc<dyn crate::runtime_storage::SessionRepository> = Arc::new(OpenNoneRepo);
+    let tool = SessionToolResultReadTool {
+        ctx: Arc::new(SessionToolResultContext {
+            repo,
+            session_id: "session-missing".into(),
+        }),
+    };
+    let err = tool
+        .execute(
+            "r",
+            json!({ "tool_call_id": "call_1" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("missing session must fail");
+    assert!(err.to_string().contains("not found"), "got: {err}");
+}
+
+#[tokio::test]
+async fn read_skips_extension_entries() {
+    let store = Arc::new(FakeStore::default());
+    store
+        .append_entries(vec![
+            StoredSessionEntry {
+                id: "ext1".into(),
+                parent_id: None,
+                entry_type: "extension".into(),
+                timestamp: "2026-01-01T00:00:00Z".into(),
+                payload: json!({ "custom_type": "x" }),
+            },
+            stored_tool_result("e2", "call_2", "bash", "real result\n"),
+        ])
+        .await
+        .unwrap();
+    let tool = read_tool(store);
+
+    let result = tool
+        .execute(
+            "r",
+            json!({ "tool_call_id": "call_2" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("extension entries must be skipped, real result found");
+    let text = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text"),
+    };
+    assert!(text.contains("real result"), "got: {text}");
+}

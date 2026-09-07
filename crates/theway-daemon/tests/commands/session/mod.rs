@@ -74,6 +74,7 @@ fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> Da
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
         inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 
@@ -130,6 +131,40 @@ async fn save_command_writes_default_export_under_base_dir() {
     let outcome = SaveCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
     assert!(base.path().join("exports/test-session.md").exists());
+}
+
+#[tokio::test]
+async fn save_command_writes_explicit_relative_path() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let base = tempfile::tempdir().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
+
+    let session = new_session();
+    let (tmp, harness, executor) = setup(session);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SaveCommand.run(&["explicit.md".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+    assert!(tmp.path().join("explicit.md").exists());
+}
+
+#[tokio::test]
+async fn session_export_command_parses_explicit_path() {
+    let session = new_session();
+    let (tmp, harness, executor) = setup(session);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    // A path + flag parse cleanly; the memory-backed session then fails at the
+    // actual export step, which is fine — we only pin the flag/path parser.
+    let outcome = SessionCommand
+        .run(
+            &["export".into(), "archive.zip".into(), "--exclude-triggers".into()],
+            &ctx,
+        )
+        .await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("session export failed:")));
 }
 
 #[tokio::test]
@@ -231,6 +266,28 @@ async fn share_command_maps_nonzero_exit_and_stderr() {
 
     let outcome = ShareCommand.run(&[], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("exited 7") && msg.contains("gist exploded")));
+}
+
+#[tokio::test]
+async fn undo_command_returns_error_when_no_user_message_exists() {
+    let session = new_session();
+    let (tmp, harness, executor) = setup(session);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = UndoCommand.run(&[], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("no user message to undo")));
+}
+
+#[tokio::test]
+async fn session_unknown_subcommand_returns_error() {
+    let session = new_session();
+    let (tmp, harness, executor) = setup(session);
+    let extra = daemon_ctx(&harness, executor.clone());
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = SessionCommand.run(&["frobnicate".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Error(ref msg) if msg.contains("unknown /session subcommand")));
 }
 
 #[tokio::test]

@@ -95,6 +95,20 @@ fn auto_detect_model_explicit_override_unknown_provider_lists_providers() {
 }
 
 #[test]
+fn explicit_model_not_found_message_omits_more_hint_for_small_catalog() {
+    let provider = "coverage-small";
+    for id in ["a", "b", "c"] {
+        theway_llm_provider::register_custom_model(local_model(provider, id));
+    }
+    let message = explicit_model_not_found_message(provider, "missing", false);
+    assert!(message.contains("Candidates: a, b, c"), "{message}");
+    assert!(!message.contains("for all"), "{message}");
+    for id in ["a", "b", "c"] {
+        theway_llm_provider::unregister_custom_model(&Provider::from(provider), id);
+    }
+}
+
+#[test]
 fn auto_detect_model_explicit_override_resolves_catalog_model() {
     let provider = "openai";
     let err = auto_detect_model(Some(provider), Some("definitely-not-a-model"))

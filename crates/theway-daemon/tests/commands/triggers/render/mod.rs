@@ -351,3 +351,198 @@ fn string_field_and_number_field_parse_scalar_json_values() {
     assert_eq!(number_field(&data, "n"), Some(7));
     assert_eq!(number_field(&data, "n_text"), None);
 }
+
+#[test]
+fn render_triggers_status_renders_rules_storage_and_dynamic_checker() {
+    let registry = crate::triggers::dynamic::DynamicTriggerRegistry::new();
+    let dir = tempfile::tempdir().unwrap();
+    registry
+        .load_from_path(dir.path().join("triggers.json"))
+        .unwrap();
+    registry
+        .add_rule_with_flags("event says build finished", "echo done", true, true)
+        .unwrap();
+    let repeat_rule = registry
+        .add_rule_with_options("event says deploy finished", "echo deployed", false)
+        .unwrap();
+    registry.set_rule_enabled(&repeat_rule.id, false).unwrap();
+
+    let snapshot = NotificationStatusSnapshot {
+        hooks: vec![
+            NotificationHookStatus {
+                state: HookState::Connected,
+                last_event_at: None,
+                last_ack_at: None,
+                last_error: None,
+                queued_count: 0,
+                dropped_count: 0,
+                deduped_count: 0,
+                subscription_labels: vec!["dynamic trigger periodic check".into()],
+                requires_attention: None,
+            },
+            NotificationHookStatus {
+                state: HookState::Connected,
+                last_event_at: None,
+                last_ack_at: None,
+                last_error: None,
+                queued_count: 0,
+                dropped_count: 0,
+                deduped_count: 0,
+                subscription_labels: vec!["mcp:github".into()],
+                requires_attention: Some("upgrade hub".into()),
+            },
+        ],
+        runtime: TriggerRuntimeSnapshot {
+            dedup_entries: 0,
+            active_traces: 0,
+            accepted_total: 0,
+            deduped_total: 0,
+            cycle_suppressed_total: 0,
+        },
+        running: vec![],
+    };
+
+    let lines = render_triggers_status(&snapshot, &registry);
+    let text = lines.join("\n");
+    assert!(text.contains("dynamic rules: 2 total, 1 enabled, 1 disabled"), "{text}");
+    assert!(text.contains("local dynamic checker: 1 registered"), "{text}");
+    assert!(text.contains("push trigger sources: 1 configured source(s)"), "{text}");
+    assert!(text.contains(&format!("storage: {}", dir.path().join("triggers.json").display())), "{text}");
+    assert!(text.contains("dyn-"), "{text}");
+}
+
+#[test]
+fn render_dynamic_trigger_rules_with_limit_equal_to_len_has_no_more_line() {
+    let rules = vec![
+        DynamicTriggerRule {
+            id: "dyn-1".into(),
+            condition: "cond 1".into(),
+            action: "act 1".into(),
+            enabled: true,
+            fire_once: false,
+            fired_at: None,
+            promote_to_chat: false,
+            created_at: dt("2026-05-22T19:00:00Z"),
+        },
+        DynamicTriggerRule {
+            id: "dyn-2".into(),
+            condition: "cond 2".into(),
+            action: "act 2".into(),
+            enabled: false,
+            fire_once: false,
+            fired_at: None,
+            promote_to_chat: true,
+            created_at: dt("2026-05-22T19:00:00Z"),
+        },
+    ];
+    let lines = render_dynamic_trigger_rules(&rules, 2);
+    let text = lines.join("\n");
+    assert!(text.contains("dyn-1 [enabled, repeat, audit_only]"), "{text}");
+    assert!(text.contains("dyn-2 [disabled, repeat, promote_to_chat]"), "{text}");
+    assert!(!text.contains("more"), "{text}");
+}
+
+#[test]
+fn trigger_audit_row_handles_trigger_with_data_none_and_unknown_states() {
+    let none_data = SessionTreeEntry::Custom {
+        id: "t0".into(),
+        parent_id: None,
+        timestamp: "2026-05-22T19:00:00Z".into(),
+        custom_type: "trigger".into(),
+        data: None,
+    };
+    assert_eq!(collect_trigger_audit_rows(&[none_data], 10).len(), 0);
+
+    let entries = vec![
+        SessionTreeEntry::Custom {
+            id: "t1".into(),
+            parent_id: None,
+            timestamp: "2026-05-22T19:00:00Z".into(),
+            custom_type: "trigger".into(),
+            data: Some(serde_json::json!({"evaluator_decision": {}})),
+        },
+        SessionTreeEntry::Custom {
+            id: "t2".into(),
+            parent_id: None,
+            timestamp: "2026-05-22T19:01:00Z".into(),
+            custom_type: "trigger_result".into(),
+            data: Some(serde_json::json!({"success": true, "summary": "ok summary"})),
+        },
+        SessionTreeEntry::Custom {
+            id: "t3".into(),
+            parent_id: None,
+            timestamp: "2026-05-22T19:02:00Z".into(),
+            custom_type: "trigger_result".into(),
+            data: Some(serde_json::json!({})),
+        },
+        SessionTreeEntry::Custom {
+            id: "t4".into(),
+            parent_id: None,
+            timestamp: "2026-05-22T19:03:00Z".into(),
+            custom_type: "trigger_promotion".into(),
+            data: Some(serde_json::json!({})),
+        },
+    ];
+    let rows = collect_trigger_audit_rows(&entries, 10);
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0].custom_type, "trigger_promotion");
+    assert_eq!(rows[0].state, "unknown");
+    assert_eq!(rows[0].summary, None);
+    assert_eq!(rows[1].custom_type, "trigger_result");
+    assert_eq!(rows[1].state, "unknown");
+    assert_eq!(rows[2].custom_type, "trigger_result");
+    assert_eq!(rows[2].state, "completed");
+    assert_eq!(rows[2].summary.as_deref(), Some("ok summary"));
+    assert_eq!(rows[3].custom_type, "trigger");
+    assert_eq!(rows[3].state, "unknown");
+    assert_eq!(rows[3].summary, None);
+    assert_eq!(rows[3].details.len(), 1);
+    assert_eq!(rows[3].details[0], "decision: present");
+}
+
+#[test]
+fn render_trigger_audit_uses_fallback_labels() {
+    let rows = vec![TriggerAuditRow {
+        custom_type: "trigger".into(),
+        timestamp: "2026-05-22T19:00:00Z".into(),
+        trace_id: None,
+        state: "accepted".into(),
+        source_label: None,
+        event_label: None,
+        summary: None,
+        details: vec![],
+    }];
+    let lines = render_trigger_audit(&rows);
+    let text = lines.join("\n");
+    assert!(text.contains("unknown-trace"), "{text}");
+    assert!(text.contains("- / -"), "{text}");
+}
+
+#[test]
+fn trigger_decision_details_handles_partial_fields() {
+    let accept = trigger_decision_details(&serde_json::json!({
+        "evaluator_decision": {"outcome": "accept"}
+    }))
+    .join("\n");
+    assert_eq!(accept, "decision: accept");
+
+    let dedup = trigger_decision_details(&serde_json::json!({
+        "evaluator_decision": {"outcome": "deduped"}
+    }))
+    .join("\n");
+    assert_eq!(dedup, "decision: deduped");
+
+    let cycle = trigger_decision_details(&serde_json::json!({
+        "evaluator_decision": {"outcome": "cycle_suppressed"}
+    }))
+    .join("\n");
+    assert_eq!(cycle, "decision: cycle_suppressed");
+}
+
+#[test]
+fn trigger_result_details_handles_missing_fields() {
+    let lines = trigger_result_details(&serde_json::json!({}));
+    assert!(lines.is_empty());
+    let lines = trigger_promotion_details(&serde_json::json!({}));
+    assert!(lines.is_empty());
+}

@@ -229,6 +229,7 @@ mod broker_paths;
 mod broker_services;
 mod brokers;
 mod catalog;
+mod coverage_gap;
 mod diagnostics;
 mod dispatcher;
 mod dispatch_result;

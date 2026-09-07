@@ -644,3 +644,95 @@ async fn atomic_write_leaves_no_temp_artifact_on_success() {
         "atomic write must not leave a tempfile sibling, got: {entries:?}"
     );
 }
+
+// ── parse_and_validate_skill_md branch coverage ────────────────────────────
+
+fn parse_err(content: &str) -> AgentToolError {
+    match parse_and_validate_skill_md(content) {
+        Ok(_) => panic!("expected parse error for: {content:?}"),
+        Err(e) => e,
+    }
+}
+
+#[test]
+fn parse_rejects_empty_name() {
+    let err = parse_err("---\nname: ''\ndescription: d\n---\nbody");
+    assert!(err.to_string().contains("must not be empty"), "got: {err}");
+}
+
+#[test]
+fn parse_rejects_name_over_max_length() {
+    let long_name = "a".repeat(MAX_NAME_LEN + 1);
+    let md = format!("---\nname: {long_name}\ndescription: d\n---\nbody");
+    let err = parse_err(&md);
+    assert!(
+        err.to_string().contains(&format!("exceeds {MAX_NAME_LEN}")),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn parse_rejects_invalid_name_characters() {
+    let err = parse_err("---\nname: Bad_Name\ndescription: d\n---\nbody");
+    assert!(
+        err.to_string().contains("must contain only"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn parse_rejects_leading_trailing_and_double_hyphens() {
+    for name in ["-lead", "trail-", "double--hyphen"] {
+        let md = format!("---\nname: {name}\ndescription: d\n---\nbody");
+        let err = parse_err(&md);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("hyphen") || msg.contains("hyphens"),
+            "name {name}: got {msg}"
+        );
+    }
+}
+
+#[test]
+fn parse_normalizes_crlf_and_cr_line_endings() {
+    let parsed = parse_and_validate_skill_md(
+        "---\r\nname: crlf\ndescription: d\r\n---\r\nbody\r\n",
+    )
+    .expect("CRLF/CR should normalize to LF");
+    assert_eq!(parsed.name, "crlf");
+    assert_eq!(parsed.normalized_content, "---\nname: crlf\ndescription: d\n---\nbody\n");
+}
+
+#[test]
+fn parse_keeps_valid_description_unchanged() {
+    let parsed = parse_and_validate_skill_md("---\nname: ok\ndescription:  useful  \n---\nbody")
+        .expect("valid description parses");
+    assert_eq!(parsed.description, "useful");
+    assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+}
+
+#[test]
+fn parse_rejects_invalid_yaml_frontmatter() {
+    assert!(
+        parse_and_validate_skill_md("---\nname: [\ndescription: d\n---\nbody").is_err(),
+        "invalid YAML frontmatter must be rejected"
+    );
+}
+
+#[test]
+fn parse_rejects_non_mapping_frontmatter_when_rewriting_description() {
+    // A sequence frontmatter is not a YAML mapping; when normalize_skill_content
+    // needs to rewrite the fallback description it must refuse instead of exploding.
+    assert!(
+        parse_and_validate_skill_md("---\n- a\n- b\n---\nbody").is_err(),
+        "non-mapping frontmatter must be rejected"
+    );
+}
+
+#[test]
+fn parse_rejects_missing_closing_frontmatter() {
+    assert!(
+        parse_and_validate_skill_md("---\nname: foo\ndescription: d\nbody").is_err(),
+        "missing closing frontmatter must be rejected"
+    );
+}

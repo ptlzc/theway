@@ -1,4 +1,6 @@
-use super::super::utils::node_def_from_json;
+use super::super::utils::{
+    current_time_ms, foreign_session, mine, node_def_from_json, resolve_dag,
+};
 use super::*;
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -76,6 +78,122 @@ fn node_result_text_pieces() {
     assert!(text.contains("  output (tail 800):\nout"), "{text}");
     // node_summary_line comes from graph.rs — sanity that it stays in sync.
     assert!(node_summary_line(run.node("a").unwrap()).starts_with("[done] a [x]"));
+}
+
+#[test]
+fn node_result_text_running_node_includes_live_preview() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![node_def("a")],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    let node = run.node_mut("a").unwrap();
+    node.status = NodeStatus::Running;
+    node.started_at = Some(0);
+    node.last_active_at = Some(current_time_ms());
+    node.live_preview = Some("live tail".into());
+    let text = node_result_text(run.node("a").unwrap(), 800);
+    assert!(text.contains("a [x] — running"), "{text}");
+    assert!(text.contains("  last-active: "), "{text}");
+    assert!(text.contains("  live preview (实时输出, tail 800):\nlive tail"), "{text}");
+}
+
+#[test]
+fn status_counts_ready_segment() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![node_def("a"), node_def("b")],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    run.node_mut("a").unwrap().status = NodeStatus::Succeeded;
+    run.node_mut("b").unwrap().status = NodeStatus::Ready;
+    assert_eq!(status_counts(&run), "done 1/2 · ready 1");
+}
+
+#[test]
+fn mine_and_foreign_session_matrix() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![node_def("a")],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    run.id = "dag-1".into();
+
+    run.session_id = None;
+    assert!(mine(&run, &None));
+    assert!(mine(&run, &Some("s".into())));
+    run.session_id = Some("s".into());
+    assert!(mine(&run, &None));
+    assert!(mine(&run, &Some("s".into())));
+    assert!(!mine(&run, &Some("other".into())));
+    assert_eq!(foreign_session(&run, &Some("other".into())), Some("dag-1 属于其他会话 (s…), 当前会话是 other…。多 agent 会话的 DAG 相互隔离, 只可操作本会话创建的 DAG。".into()));
+    assert_eq!(foreign_session(&run, &None), None);
+    assert_eq!(foreign_session(&run, &Some("s".into())), None);
+}
+
+#[test]
+fn resolve_dag_empty_engine_reports_no_dags() {
+    let engine = DagEngine::new();
+    assert_eq!(
+        resolve_dag(&engine, &None, None),
+        Err("当前没有 DAG。先用 dag_plan 定义一个。".to_string())
+    );
+}
+
+#[test]
+fn resolve_dag_unknown_explicit_dag_returns_hint() {
+    let engine = DagEngine::new();
+    let err = resolve_dag(&engine, &None, Some("nope")).unwrap_err();
+    assert!(err.contains("未知 DAG: nope"), "got: {err}");
+}
+
+#[test]
+fn node_result_text_minimal_node_omits_optional_sections() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![node_def("a")],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    let node = run.node_mut("a").unwrap();
+    node.status = NodeStatus::Pending;
+    let text = node_result_text(run.node("a").unwrap(), 800);
+    assert!(text.contains("a [x] — pending"), "{text}");
+    assert!(text.contains("  task: task a"), "{text}");
+    assert!(!text.contains("started:"), "{text}");
+    assert!(!text.contains("tokens:"), "{text}");
+    assert!(!text.contains("error:"), "{text}");
+    assert!(!text.contains("output (tail"), "{text}");
+    assert!(!text.contains("live preview"), "{text}");
+}
+
+#[test]
+fn node_result_text_running_without_last_active_or_live_preview_omits_both() {
+    let def = DagRunDef {
+        name: "x".into(),
+        nodes: vec![node_def("a")],
+        max_concurrency: None,
+        fail_fast: None,
+        direction: None,
+    };
+    let mut run = theway_core::multiagent::graph::model::build_run(&def);
+    let node = run.node_mut("a").unwrap();
+    node.status = NodeStatus::Running;
+    let text = node_result_text(run.node("a").unwrap(), 800);
+    assert!(text.contains("a [x] — running"), "{text}");
+    assert!(!text.contains("last-active:"), "{text}");
+    assert!(!text.contains("live preview"), "{text}");
 }
 
 fn node_def(id: &str) -> DagNodeDef {

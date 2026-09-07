@@ -270,6 +270,16 @@ fn tool_start_display_non_skill_previews_args() {
     assert!(args.contains("ls -la"));
 }
 
+#[test]
+fn tool_start_display_skill_renders_name_and_omits_args() {
+    let (name, args) = tool_start_display(
+        "skill",
+        &serde_json::json!({ "name": "review-code", "other": "hidden" }),
+    );
+    assert_eq!(name, "skill(review-code)");
+    assert!(args.is_empty());
+}
+
 // ── map_harness_event ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -438,6 +448,47 @@ fn map_trigger_event_execution_started_renders_non_dynamic_sources() {
     assert_eq!(level, Level::System);
     assert!(text.contains("[trigger running] trace=trace-run"));
     assert!(text.contains("run the cron job"));
+}
+
+#[test]
+fn map_trigger_event_completed_empty_summary_falls_back_to_completed() {
+    let update = map_trigger_event(
+        &TriggerEvent::TriggerCompleted {
+            trace_id: "trace-empty-summary".into(),
+            summary: Some(String::new()),
+            cost_usd: None,
+            details: serde_json::Value::Null,
+        },
+        &parking_lot::Mutex::new(HashSet::new()),
+        false,
+    )
+    .expect("empty summary should fall back to completed");
+
+    let FeedUpdate::Plain { text, .. } = update else {
+        panic!("expected plain update");
+    };
+    assert!(text.ends_with("completed"));
+}
+
+#[test]
+fn map_trigger_event_completed_quiet_dynamic_returns_poll_status() {
+    let mut quiet_set = HashSet::new();
+    quiet_set.insert("trace-dynamic".to_string());
+    let quiet = parking_lot::Mutex::new(quiet_set);
+    let update = map_trigger_event(
+        &TriggerEvent::TriggerCompleted {
+            trace_id: "trace-dynamic".into(),
+            summary: Some("no dynamic trigger rule matched".into()),
+            cost_usd: None,
+            details: serde_json::Value::Null,
+        },
+        &quiet,
+        false,
+    )
+    .expect("quiet dynamic completion should be converted to a poll status");
+
+    assert!(matches!(update, FeedUpdate::TriggerPollStatus(_)));
+    assert!(quiet.lock().is_empty(), "quiet set must be cleared");
 }
 
 #[test]

@@ -422,3 +422,74 @@ fn number_field(data: &serde_json::Value, name: &str) -> Option<u64> {
 
 #[cfg(test)]
 tests_bridge_macro::tests_bridge!("commands/triggers/render");
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    fn dt(s: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    fn cron_job(id: &str) -> crate::triggers::cron::CronJob {
+        crate::triggers::cron::CronJob {
+            id: id.into(),
+            schedule: "* * * * *".into(),
+            action: "echo hi".into(),
+            enabled: true,
+            running_trace_id: None,
+            last_due_at: None,
+            last_fired_at: None,
+            last_completed_at: None,
+            last_error: None,
+            skipped_overlap_count: 0,
+            stateful: false,
+            created_at: dt("2026-05-22T19:00:00Z"),
+        }
+    }
+
+    #[test]
+    fn render_cron_jobs_job_without_error_or_fired_at_omits_both() {
+        let lines = render_cron_jobs(std::slice::from_ref(&cron_job("job-empty-dates")));
+        let text = lines.join("\n");
+        assert!(!text.contains("last:"), "{text}");
+        assert!(!text.contains("last fired:"), "{text}");
+    }
+
+    #[test]
+    fn render_dynamic_trigger_rules_truncates_long_preview_text() {
+        let rule = crate::triggers::dynamic::DynamicTriggerRule {
+            id: "dyn-long".into(),
+            condition: "c".repeat(120),
+            action: "a".repeat(120),
+            enabled: true,
+            fire_once: false,
+            fired_at: None,
+            promote_to_chat: false,
+            created_at: dt("2026-05-22T19:00:00Z"),
+        };
+        let lines = render_dynamic_trigger_rules(std::slice::from_ref(&rule), 1);
+        let text = lines.join("\n");
+        assert!(text.contains("…"), "{text}");
+        assert!(!text.contains("... 1 more"), "{text}");
+    }
+
+    #[test]
+    fn render_trigger_audit_includes_summary_and_details() {
+        let rows = vec![TriggerAuditRow {
+            custom_type: "trigger".into(),
+            timestamp: "2026-05-22T19:00:00Z".into(),
+            trace_id: Some("trace".into()),
+            state: "accepted".into(),
+            source_label: Some("src".into()),
+            event_label: Some("evt".into()),
+            summary: Some("summary text".into()),
+            details: vec!["detail line".into()],
+        }];
+        let lines = render_trigger_audit(&rows);
+        assert!(lines.join("\n").contains("summary text"));
+        assert!(lines.join("\n").contains("detail line"));
+    }
+}

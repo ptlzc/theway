@@ -186,6 +186,61 @@ async fn kill_shell_kills_backgrounded_descendant_processes() {
     );
 }
 
+#[test]
+fn registry_remove_if_exited_keeps_live_and_removes_exited() {
+    let registry = ShellRegistry {
+        shells: std::sync::Mutex::new(std::collections::HashMap::new()),
+        next_id: std::sync::atomic::AtomicU64::new(1),
+    };
+    let handle = Arc::new(ShellHandle {
+        id: "shell-test".into(),
+        pid: 0,
+        stdin: tokio::sync::Mutex::new(None),
+        stdout: std::sync::Mutex::new(OutputBuffer::new()),
+        stderr: std::sync::Mutex::new(OutputBuffer::new()),
+        notify: Notify::new(),
+        exited: std::sync::atomic::AtomicBool::new(false),
+        exit_code: std::sync::Mutex::new(None),
+        killed: std::sync::atomic::AtomicBool::new(false),
+    });
+    registry.insert("shell-test".into(), handle.clone());
+    registry.remove_if_exited("shell-test");
+    assert!(registry.get("shell-test").is_some(), "live shell must stay");
+
+    handle.exited.store(true, std::sync::atomic::Ordering::SeqCst);
+    registry.remove_if_exited("shell-test");
+    assert!(registry.get("shell-test").is_none(), "exited shell must be reaped");
+}
+
+#[tokio::test]
+async fn shell_kill_is_noop_after_exit_or_killed() {
+    let handle = Arc::new(ShellHandle {
+        id: "shell-test".into(),
+        pid: 0,
+        stdin: tokio::sync::Mutex::new(None),
+        stdout: std::sync::Mutex::new(OutputBuffer::new()),
+        stderr: std::sync::Mutex::new(OutputBuffer::new()),
+        notify: Notify::new(),
+        exited: std::sync::atomic::AtomicBool::new(true),
+        exit_code: std::sync::Mutex::new(None),
+        killed: std::sync::atomic::AtomicBool::new(false),
+    });
+    assert!(handle.kill().await.is_ok(), "already-exited shell must be a no-op");
+
+    let handle2 = Arc::new(ShellHandle {
+        id: "shell-test2".into(),
+        pid: 0,
+        stdin: tokio::sync::Mutex::new(None),
+        stdout: std::sync::Mutex::new(OutputBuffer::new()),
+        stderr: std::sync::Mutex::new(OutputBuffer::new()),
+        notify: Notify::new(),
+        exited: std::sync::atomic::AtomicBool::new(false),
+        exit_code: std::sync::Mutex::new(None),
+        killed: std::sync::atomic::AtomicBool::new(true),
+    });
+    assert!(handle2.kill().await.is_ok(), "already-killed shell must be a no-op");
+}
+
 #[tokio::test]
 async fn write_to_process_writes_stdin() {
     let _registry = registry_test_lock();

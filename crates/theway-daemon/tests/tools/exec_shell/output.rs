@@ -37,3 +37,35 @@ fn render_reports_truncation_marker() {
     assert!(text.contains("stdout:\ntail"), "got: {text}");
     assert!(text.contains("…(42 字符, 截断)"), "got: {text}");
 }
+
+#[test]
+fn render_reports_exited_without_exit_code() {
+    let snap = OutputSnapshot {
+        version: 1,
+        stdout: String::new(),
+        stdout_dropped: 0,
+        stderr: String::new(),
+        stderr_dropped: 0,
+        exited: true,
+        exit_code: None,
+    };
+    let text = render_snapshot("shell-1", &snap);
+    assert!(text.contains("[shell-1] exited"), "got: {text}");
+    assert!(!text.contains("code"), "got: {text}");
+}
+
+#[test]
+fn render_reports_stderr_truncation_marker() {
+    let snap = OutputSnapshot {
+        version: 1,
+        stdout: "out".into(),
+        stdout_dropped: 0,
+        stderr: "tail".into(),
+        stderr_dropped: 9,
+        exited: false,
+        exit_code: None,
+    };
+    let text = render_snapshot("shell-1", &snap);
+    assert!(text.contains("[shell-1] running"), "got: {text}");
+    assert!(text.contains("…(9 字符, 截断)"), "got: {text}");
+}

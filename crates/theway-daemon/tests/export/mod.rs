@@ -159,6 +159,20 @@ fn default_export_path_uses_exports_dir_and_session_id() {
 }
 
 #[tokio::test]
+async fn save_without_parent_skips_create_dir_all() {
+    let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;
+    let session = Session::new(storage);
+    session
+        .append_message(user_message("hello export"))
+        .await
+        .expect("append message");
+
+    // A root path has no parent component; the create_dir_all branch is skipped
+    // and the write fails because / is a directory (or permission is denied).
+    let _ = save(&session, std::path::Path::new("/")).await;
+}
+
+#[tokio::test]
 async fn save_writes_rendered_transcript_and_creates_parent_dirs() {
     // Arrange
     let storage = Arc::new(MemorySessionStorage::new()) as Arc<dyn SessionStorage>;

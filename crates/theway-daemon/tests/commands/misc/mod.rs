@@ -103,6 +103,7 @@ fn daemon_ctx(harness: &Arc<AgentHarness>, executor: Arc<TriggerExecutor>) -> Da
         dynamic_triggers: crate::triggers::global_registry().clone(),
         cron: crate::triggers::global_cron_registry().clone(),
         inherit_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        collapse_unload_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 
@@ -640,6 +641,155 @@ fn command_help_for_unknown_topic_suggests_skill_shortcut_prefix() {
 /// Issue #73: `/reload` reconnects the provisioned MCP servers from the
 /// stored configs — a fixed server list (or auth.json) takes effect without
 /// a daemon restart, and failures land in the slot's errors for the panel.
+#[test]
+fn command_help_text_help_topic_shows_examples_line() {
+    let registry = Registry::with_builtins();
+    // The daemon registry doesn't register a `/help` command, so create a
+    // tiny registry that does to cover the command_help_text `help` branch.
+    let mut custom = crate::commands::Registry::new();
+    struct HelpCommand;
+    #[async_trait::async_trait]
+    impl SlashCommand<crate::commands::DaemonCtx> for HelpCommand {
+        fn name(&self) -> &'static str { "help" }
+        fn description(&self) -> &'static str { "show help" }
+        fn usage(&self) -> &'static str { "[topic]" }
+        async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_, crate::commands::DaemonCtx>) -> CommandOutcome {
+            CommandOutcome::Handled
+        }
+    }
+    custom.register(Arc::new(HelpCommand));
+    let help = command_help_text(&custom, "help", &[]);
+    assert!(help.contains("examples: /help model"), "{help}");
+    drop(registry);
+}
+
+#[test]
+fn command_help_text_unknown_topic_without_suggestions_gives_generic_hint() {
+    let registry = Registry::with_builtins();
+    let help = command_help_text(&registry, "zzzz-no-such-topic", &[]);
+    assert!(help.contains("unknown help topic: zzzz-no-such-topic"), "{help}");
+    assert!(help.contains("Run /help to list commands"), "{help}");
+}
+
+#[test]
+fn help_text_with_skills_empty_topic_string_renders_general_help() {
+    let registry = Registry::with_builtins();
+    let help = help_text_with_skills(&registry, Some("   "), &[]);
+    assert!(help.contains("Commands:"), "{help}");
+}
+
+#[test]
+fn general_help_with_skill_shortcut_empty_description() {
+    let registry = Registry::with_builtins();
+    let mut skill = sample_skill("no-desc", "");
+    skill.description.clear();
+    let help = help_text_with_skills(&registry, None, &[skill]);
+    assert!(help.contains("/no-desc [prompt]"), "{help}");
+}
+
+#[test]
+fn skill_shortcuts_skip_disabled_and_duplicate_and_registry_names() {
+    let registry = Registry::with_builtins();
+    let mut disabled = sample_skill("disabled-skill", "desc");
+    disabled.disable_model_invocation = true;
+    let skills = vec![
+        disabled,
+        sample_skill("dup", "first"),
+        sample_skill("dup", "second"),
+        sample_skill("model", "shadow builtin"),
+    ];
+    let shortcuts = skill_shortcuts(&skills, &registry);
+    assert!(
+        !shortcuts.iter().any(|s| s.command == "/disabled-skill"),
+        "{shortcuts:?}"
+    );
+    assert!(
+        !shortcuts.iter().any(|s| s.command == "/dup"),
+        "{shortcuts:?}"
+    );
+    assert!(
+        !shortcuts.iter().any(|s| s.command == "/model"),
+        "{shortcuts:?}"
+    );
+}
+
+#[tokio::test]
+async fn history_with_zero_limit_prints_no_entries() {
+    let _env_guard = crate::test_env::ENV_LOCK.lock().unwrap();
+    let _capture = ConsoleCapture::start();
+    let tmp = tempfile::tempdir().unwrap();
+    let _theway_dir = crate::test_env::EnvGuard::set("THEWAY_DIR", tmp.path());
+
+    let mut store = theway_transport::history::HistoryStore::load();
+    store.append("first prompt");
+
+    let session = new_session();
+    let harness = harness_with(session);
+    let executor = executor_for(&harness);
+    let extra = daemon_ctx(&harness, executor);
+    let ctx = command_ctx(&extra, tmp.path());
+
+    let outcome = HistoryCommand.run(&["0".into()], &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[tokio::test]
+async fn reload_everything_without_mcp_provision_slot_is_handled() {
+    use theway_core::agent::skills::LoadSkillsOutput;
+
+    let session = new_session();
+    let reload_fn: theway_core::agent::assembly::ReloadSkillsFn = Arc::new(|| {
+        Box::pin(async { LoadSkillsOutput::default() })
+    });
+    let options = theway_core::AgentHarnessOptions {
+        reload_skills_fn: Some(reload_fn),
+        ..theway_core::AgentHarnessOptions::new(faux_model(), session)
+    };
+    let harness = Arc::new(AgentHarness::new(options));
+    let executor = executor_for(&harness);
+    let inherit_slot = Arc::new(std::sync::Mutex::new(None));
+    let cwd = tempfile::tempdir().unwrap();
+    let ctx = crate::commands::CommandCtx {
+        harness: &harness,
+        trigger_executor: &executor,
+        session_id: "sess-reload-none",
+        log_path: None,
+        tool_count: 0,
+        cwd: cwd.path(),
+        inherit_slot: &inherit_slot,
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
+        mcp_provision: None,
+        auth_base: None,
+    };
+    let registry = crate::commands::Registry::with_daemon_commands();
+
+    let outcome = crate::commands::reload_everything(&registry, &ctx).await;
+    assert!(matches!(outcome, CommandOutcome::Handled));
+}
+
+#[test]
+fn command_help_text_handles_empty_usage_and_skill_without_description() {
+    let mut registry = crate::commands::Registry::new();
+    struct EmptyUsageCommand;
+    #[async_trait::async_trait]
+    impl SlashCommand<crate::commands::DaemonCtx> for EmptyUsageCommand {
+        fn name(&self) -> &'static str { "emptyusage" }
+        fn description(&self) -> &'static str { "no usage" }
+        fn usage(&self) -> &'static str { "" }
+        async fn run(&self, _argv: &[String], _ctx: &CommandCtx<'_, crate::commands::DaemonCtx>) -> CommandOutcome {
+            CommandOutcome::Handled
+        }
+    }
+    registry.register(Arc::new(EmptyUsageCommand));
+    let help = command_help_text(&registry, "emptyusage", &[]);
+    assert!(help.contains("/emptyusage"), "{help}");
+
+    let mut skill = sample_skill("descript-less", "");
+    skill.description.clear();
+    let help = command_help_text(&registry, "descript-less", &[skill]);
+    assert!(help.contains("/descript-less [prompt]"), "{help}");
+}
+
 #[tokio::test]
 async fn reload_reconnects_provisioned_mcp_servers() {
     use theway_core::agent::skills::LoadSkillsOutput;
@@ -687,6 +837,7 @@ async fn reload_reconnects_provisioned_mcp_servers() {
         tool_count: 0,
         cwd,
         inherit_slot: &inherit_slot,
+        collapse_unload_slot: &std::sync::Arc::new(std::sync::Mutex::new(None)),
         mcp_provision: Some(&slot),
         auth_base: Some(&base_path),
     };

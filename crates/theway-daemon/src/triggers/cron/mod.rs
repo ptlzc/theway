@@ -431,3 +431,177 @@ mod extra_tests {
 mod storage_tests {
     tests_bridge_macro::tests_bridge!("triggers/cron/storage_tests");
 }
+
+#[cfg(test)]
+mod coverage_gap {
+    use super::*;
+
+    #[test]
+    fn storage_path_is_none_for_default_registry() {
+        let registry = CronRegistry::new();
+        assert!(registry.storage_path().is_none());
+    }
+
+    #[test]
+    fn load_from_path_rejects_invalid_schedule_in_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cron.toml");
+        let file = CronJobsFile {
+            jobs: vec![CronJob {
+                id: "cron-bad".into(),
+                schedule: "not a schedule".into(),
+                action: "echo hi".into(),
+                enabled: true,
+                running_trace_id: None,
+                last_due_at: None,
+                last_fired_at: None,
+                last_completed_at: None,
+                last_error: None,
+                skipped_overlap_count: 0,
+                stateful: false,
+                created_at: Utc::now(),
+            }],
+        };
+        std::fs::write(&path, toml::to_string_pretty(&file).unwrap()).unwrap();
+        let registry = CronRegistry::new();
+        assert!(matches!(
+            registry.load_from_path(&path),
+            Err(CronStorageError::Schedule(_))
+        ));
+    }
+
+    #[test]
+    fn read_jobs_file_rejects_malformed_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cron.toml");
+        std::fs::write(&path, "not = valid [ toml").unwrap();
+        assert!(matches!(
+            read_jobs_file(&path),
+            Err(CronStorageError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn due_jobs_skips_disabled_and_invalid_and_exhausted_schedules() {
+        let registry = CronRegistry::new();
+        let job = registry.add_job("* * * * *", "do work").unwrap();
+        registry.set_job_enabled(&job.id, false).unwrap();
+        let since = Utc::now();
+        let now = since + chrono::Duration::minutes(5);
+        assert!(registry.due_jobs(since, now).is_empty());
+
+        // Force an invalid schedule and an exhausted (never-matching) schedule
+        // directly into the registry state.
+        let since = Utc::now();
+        let now = since + chrono::Duration::minutes(5);
+        let mut state = registry.inner.lock();
+        state.storage = CronPersistence::None;
+        state.jobs = vec![
+            CronJob {
+                id: "cron-invalid".into(),
+                schedule: "not a schedule".into(),
+                action: "echo hi".into(),
+                enabled: true,
+                running_trace_id: None,
+                last_due_at: None,
+                last_fired_at: None,
+                last_completed_at: None,
+                last_error: None,
+                skipped_overlap_count: 0,
+                stateful: false,
+                created_at: Utc::now(),
+            },
+            CronJob {
+                id: "cron-exhausted".into(),
+                schedule: "0 0 30 2 *".into(),
+                action: "echo hi".into(),
+                enabled: true,
+                running_trace_id: None,
+                last_due_at: None,
+                last_fired_at: None,
+                last_completed_at: None,
+                last_error: None,
+                skipped_overlap_count: 0,
+                stateful: false,
+                created_at: Utc::now(),
+            },
+        ];
+        drop(state);
+
+        let due = registry.due_jobs(since, now);
+        assert!(due.is_empty());
+        let jobs = registry.list();
+        assert_eq!(
+            jobs.iter()
+                .find(|j| j.id == "cron-invalid")
+                .unwrap()
+                .last_error
+                .as_deref(),
+            Some("invalid schedule")
+        );
+        assert_eq!(
+            jobs.iter()
+                .find(|j| j.id == "cron-exhausted")
+                .unwrap()
+                .last_error
+                .as_deref(),
+            Some("no next run within 5 years")
+        );
+    }
+
+    #[test]
+    fn clear_stale_running_state_returns_false_when_nothing_stale() {
+        let mut jobs = vec![CronJob {
+            id: "cron-clean".into(),
+            schedule: "* * * * *".into(),
+            action: "echo hi".into(),
+            enabled: true,
+            running_trace_id: None,
+            last_due_at: None,
+            last_fired_at: None,
+            last_completed_at: None,
+            last_error: None,
+            skipped_overlap_count: 0,
+            stateful: false,
+            created_at: Utc::now(),
+        }];
+        assert!(!clear_stale_running_state(&mut jobs));
+    }
+
+    #[tokio::test]
+    async fn persist_jobs_covers_none_and_runtime_storage_variants() {
+        let jobs = vec![];
+        assert!(persist_jobs(&CronPersistence::None, &jobs).is_ok());
+        let runtime = CronPersistence::Runtime {
+            storage: theway_daemon::runtime_storage::local_runtime_storage(),
+            cwd: std::path::PathBuf::from("."),
+            session_id: "sess".into(),
+        };
+        assert!(persist_jobs(&runtime, &jobs).is_ok());
+    }
+
+    #[test]
+    fn remove_set_enable_and_mark_completed_edge_cases() {
+        let registry = CronRegistry::new();
+        assert!(registry.remove_job("missing").unwrap().is_none());
+        let job = registry.add_job("* * * * *", "echo hi").unwrap();
+
+        // Disable clears running trace; enable leaves it untouched.
+        let refreshed = registry.set_job_enabled(&job.id, true).unwrap().unwrap();
+        assert!(refreshed.enabled);
+        assert!(registry.set_job_enabled(&job.id, false).unwrap().is_some());
+
+        // mark_completed for an unknown trace is a no-op.
+        registry.mark_completed("no-such-trace", Some("e".into()));
+        assert!(registry.remove_job(&job.id).unwrap().is_some());
+        assert!(registry.remove_job(&job.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn write_jobs_file_without_parent_dir_uses_relative_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("cron.toml");
+        assert!(write_jobs_file(&path, &[]).is_ok());
+        assert!(path.exists());
+    }
+}

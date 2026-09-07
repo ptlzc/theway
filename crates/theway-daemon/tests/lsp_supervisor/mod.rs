@@ -148,6 +148,31 @@ command = "poisoned-pyright"
 }
 
 #[tokio::test]
+async fn load_ignores_missing_and_malformed_config_files() {
+    let base = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let paths = crate::DaemonPaths {
+        base: base.path().to_path_buf(),
+        home: base.path().to_path_buf(),
+        work_dir: cwd.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+
+    let sup = LspSupervisor::load(&paths).await;
+    assert!(sup.is_empty());
+
+    std::fs::write(base.path().join("lsp.toml"), "not [[ valid toml").unwrap();
+    let sup = LspSupervisor::load(&paths).await;
+    assert!(sup.is_empty());
+
+    std::fs::remove_file(base.path().join("lsp.toml")).unwrap();
+    std::fs::create_dir(cwd.path().join(".theway")).unwrap();
+    std::fs::create_dir(cwd.path().join(".theway").join("lsp.toml")).unwrap();
+    let sup = LspSupervisor::load(&paths).await;
+    assert!(sup.is_empty());
+}
+
+#[tokio::test]
 async fn client_for_ext_returns_none_for_unknown_extension() {
     // Arrange
     let sup = LspSupervisor::from_config(
