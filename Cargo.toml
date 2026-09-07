@@ -17,15 +17,18 @@ members = [
     "crates/theway-markdown-core",
     "crates/theway-ratatui-textarea",
     "crates/theway-pager-render",
+    "crates/tgrep-core",
+    "crates/tgrep-cli",
 ]
 
 # Version policy: the runtime crates (theway-core, theway-daemon, theway-tui,
 # theway-transport, theway-storage, theway-contract, theway-extensions,
 # theway-mcp, theway-llm-provider, theway-probe, tests-bridge-macro) release
 # together and inherit this version. Vendored/port crates keep independent
-# versions and licenses: `mermaid-rs-parser` (vendored upstream, MIT) and the
+# versions and licenses: `mermaid-rs-parser` (vendored upstream, MIT), the
 # Grok Build ports (`theway-markdown`, `theway-markdown-core`,
-# `theway-pager-render`, `theway-ratatui-textarea`, Apache-2.0).
+# `theway-pager-render`, `theway-ratatui-textarea`, Apache-2.0), and the
+# microsoft/tgrep vendored pair (`tgrep-core`, `tgrep-cli`, MIT, issue #121).
 [workspace.package]
 version = "0.1.17"
 edition = "2024"

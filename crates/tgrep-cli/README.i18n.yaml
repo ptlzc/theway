@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/tgrep-cli/README.md
+README.md: 1cc6bfaa76094f7423c642a45c20b84ec26445e6
+README.zh.md: 82df4736efca3d2ba2b9fe343961588567385ac3

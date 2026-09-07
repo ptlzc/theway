@@ -1,0 +1,4 @@
+# English-first bilingual documentation record. Update both files, then run:
+#   scripts/verify-doc-i18n.py --write crates/tgrep-core/docs/architecture.md
+architecture.md: 8b166ca8e726d4d281f4c19b3168d6a93973a1b6
+architecture.zh.md: 8e5f031443f604582f85048d788c600d25927ed3
