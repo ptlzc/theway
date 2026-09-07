@@ -330,14 +330,7 @@ pub fn subagent_tool_sets_for_cwd(
     executor: Arc<dyn ToolExecutor>,
     cwd: PathBuf,
 ) -> ToolSetResolver {
-    subagent_tool_sets_for_cwd_with_tgrep(
-        memory_dir,
-        base_dir,
-        skill_harness_cell,
-        executor,
-        cwd,
-        None,
-    )
+    subagent_tool_sets_for_cwd_with_tgrep(memory_dir, base_dir, skill_harness_cell, executor, cwd, None)
 }
 
 /// [`subagent_tool_sets_for_cwd`] with the daemon-wide tgrep registry attached.
