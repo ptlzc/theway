@@ -477,6 +477,8 @@ impl App {
         if !self.busy {
             return;
         }
+        // A second Ctrl-C while the turn is still busy force-quits the TUI.
+        self.abort_requested = true;
         // Issue #99 hardening: dedupe in-flight cancels — a hung daemon must
         // not accumulate one forever-blocked RPC task per Ctrl-C press.
         if self.cancel_in_flight.swap(true, Ordering::SeqCst) {

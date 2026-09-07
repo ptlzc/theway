@@ -651,6 +651,9 @@ pub struct App {
     panel_drag: Option<PanelDrag>,
     last_ctrlc: Option<Instant>,
     quit: bool,
+    /// A turn is busy AND the user already asked to abort it; the next Ctrl-C
+    /// force-quits the TUI instead of issuing another cancel RPC.
+    abort_requested: bool,
 
     /// Stream connection state: `Some` while the frame stream is open.
     connected: bool,

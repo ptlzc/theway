@@ -11,6 +11,15 @@ impl App {
             .unwrap_or(crate::ui::DEFAULT_MAX_FEED_LINES as u32)
     }
 
+    /// L0 transport failure: flip every client-side "live daemon" indicator
+    /// off immediately and surface the gRPC error in the feed.
+    pub(super) fn mark_disconnected(&mut self, message: impl AsRef<str>) {
+        self.connected = false;
+        self.busy = false;
+        self.abort_requested = false;
+        self.error_line(message.as_ref());
+    }
+
     /// Apply either an authoritative full snapshot or a per-stream feed
     /// patch frame, then resync every renderable status field.
     pub(super) fn apply_snapshot(&mut self, mut status: WireStatus) {
@@ -94,6 +103,9 @@ impl App {
             self.theme = Theme::load();
         }
         self.busy = self.latest.busy;
+        if !self.busy {
+            self.abort_requested = false;
+        }
         self.panel_status = PanelStatus::from_sidebar(&self.latest.sidebar);
         self.maybe_show_mcp_error_banner();
         self.model_catalog = self.latest.model_catalog.clone();

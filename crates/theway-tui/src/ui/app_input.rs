@@ -82,7 +82,13 @@ impl App {
                 // (matching the Ctrl-D branch) instead of aborting/exiting.
                 if self.input_text().is_empty() {
                     if self.busy {
-                        self.request_abort();
+                        // First Ctrl-C requests the abort; a second one while
+                        // the turn is still busy force-quits the TUI.
+                        if self.abort_requested {
+                            self.quit = true;
+                        } else {
+                            self.request_abort();
+                        }
                     } else if self.on_idle_ctrlc() {
                         self.quit = true;
                     }

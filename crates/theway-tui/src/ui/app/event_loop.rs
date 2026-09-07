@@ -54,9 +54,13 @@ impl App {
         enter_tui()?;
         let backend = CrosstermBackend::new(std::io::stdout());
         let mut terminal = Terminal::new(backend)?;
+        let session_id = self.session_id.clone();
         let result = self.event_loop(&mut terminal).await;
         leave_tui().ok();
         terminal.show_cursor().ok();
+        // Issue #120: on exit print only the resume command — no banners,
+        // diagnostics, or double-press hints after the TUI leaves raw mode.
+        println!("theway --resume {session_id}");
         // Issue #47: an idle TUI must not leave the daemon's startup session
         // behind as an empty conversation.
         self.reap_empty_auto_session().await;
@@ -91,8 +95,7 @@ impl App {
             {
                 Ok(stream) => Some(stream),
                 Err(e) => {
-                    self.connected = false;
-                    self.error_line(format!("daemon stream: {e}"));
+                    self.mark_disconnected(format!("daemon stream: {e}"));
                     None
                 }
             }
@@ -125,8 +128,7 @@ impl App {
                                 {
                                     Ok(new_stream) => stream = Some(new_stream),
                                     Err(e) => {
-                                        self.connected = false;
-                                        self.error_line(format!("daemon stream: {e}"));
+                                        self.mark_disconnected(format!("daemon stream: {e}"));
                                     }
                                 }
                             }
@@ -145,8 +147,10 @@ impl App {
                                 // stays armed so the next frame retries.
                                 match crate::ui::daemon_call(
                                     "get_snapshot_for_session",
-                                    self.client
-                                        .get_snapshot_for_session(&self.session_id),
+                                    self.client.get_snapshot_for_session_with_limit(
+                                        &self.session_id,
+                                        Some(self.feed_limit()),
+                                    ),
                                 )
                                 .await
                                 {
@@ -157,19 +161,20 @@ impl App {
                                         )
                                     }
                                     Err(e) => {
-                                        self.error_line(format!("resync GetSnapshot: {e}"))
+                                        self.mark_disconnected(format!("resync GetSnapshot: {e}"))
                                     }
                                 }
                             }
                         }
                         Some(Err(e)) => {
-                            self.connected = false;
-                            self.error_line(format!("daemon stream: {e}"));
+                            self.mark_disconnected(format!("daemon stream: {e}"));
                             stream = None;
                         }
                         None => {
                             // Stream closed (daemon died or event loop exited).
                             self.connected = false;
+                            self.busy = false;
+                            self.abort_requested = false;
                             stream = None;
                             if !self.quit {
                                 self.connection_line("daemon connection lost — reconnecting…");
@@ -280,8 +285,7 @@ impl App {
                     // takes over; the UI stays alive and recovers when the
                     // daemon responds again.
                     if self.abort_failed.swap(false, Ordering::SeqCst) {
-                        self.connected = false;
-                        self.connection_line(
+                        self.mark_disconnected(
                             "daemon did not answer cancel within 15s — reconnecting…",
                         );
                         stream = None;

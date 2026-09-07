@@ -114,6 +114,7 @@ impl App {
             panel_drag: None,
             last_ctrlc: None,
             quit: false,
+            abort_requested: false,
             connected: true,
             resync_pending: false,
             resubscribe_session: None,

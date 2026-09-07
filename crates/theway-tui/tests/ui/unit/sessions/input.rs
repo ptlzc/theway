@@ -45,6 +45,29 @@ async fn ctrl_c_while_busy_sends_cancel() {
 }
 
 #[tokio::test]
+async fn second_ctrl_c_during_abort_force_quits() {
+    let (mut app, _rx) = test_app().await;
+    app.busy = true;
+
+    app.handle_key(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        &mut terminal_placeholder(),
+    )
+    .await
+    .unwrap();
+    assert!(app.abort_requested);
+    assert!(!app.quit, "the first Ctrl-C only requests the abort");
+
+    app.handle_key(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        &mut terminal_placeholder(),
+    )
+    .await
+    .unwrap();
+    assert!(app.quit, "the second Ctrl-C must force-quit the TUI");
+}
+
+#[tokio::test]
 async fn control_plane_prompt_key_approves_via_rpc() {
     let (mut app, mut rx) = test_app().await;
     app.control_plane_prompt = Some(theway_transport::wire::WireControlPlanePromptSnapshot {

@@ -729,3 +729,21 @@ async fn request_abort_ignored_when_idle() {
         "idle abort must not arm a cancel"
     );
 }
+
+/// Issue #120: a transport-level gRPC error must flip every live indicator
+/// off immediately — the status line shows `daemon offline` even when the
+/// last snapshot was busy.
+#[tokio::test]
+async fn mark_disconnected_clears_busy_and_abort_state() {
+    let (mut app, _rx) = test_app().await;
+    app.connected = true;
+    app.busy = true;
+    app.abort_requested = true;
+
+    app.mark_disconnected("daemon stream: boom");
+
+    assert!(!app.connected);
+    assert!(!app.busy);
+    assert!(!app.abort_requested);
+    assert!(feed_text(&app).contains("daemon stream: boom"));
+}
