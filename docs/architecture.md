@@ -461,6 +461,10 @@ state stays out of the hand-edited config), so a `[ui]` table in
 Theme reload (`/reload` path) re-reads the same `config.toml`; standalone
 `thewayd` (no controller) keeps its own local `mcp.toml` scan unchanged.
 
+The side-panel `Hooks` and `Runtime` sections are diagnostic detail and
+hidden by default; opt in with `[ui.panel] show_hooks = true` /
+`show_runtime = true` (the MCP section always renders when it has content).
+
 ## Shared contract (`theway-contract`) and storage layering
 
 `theway-contract` is a pure leaf crate — persistence interfaces and records, sidecar data models, and path functions; no engine, protocol, runtime, or workspace dependencies:

@@ -417,3 +417,27 @@
                     && timestamp.is_none()
         ));
     }
+
+    #[test]
+    fn remove_block_drops_one_block_and_rejects_out_of_range() {
+        let mut feed = Feed::new();
+        feed.replace_blocks(&[
+            WireFeedBlock::Plain {
+                text: "notice".into(),
+                level: Level::System,
+                timestamp: None,
+            },
+            WireFeedBlock::Assistant {
+                text: "reply".into(),
+                timestamp: None,
+            },
+        ]);
+
+        assert!(feed.remove_block(0));
+        assert_eq!(feed.blocks().len(), 1);
+        assert!(matches!(&feed.blocks()[0], Block::Assistant { text, .. } if text == "reply"));
+        // Out-of-range indices are rejected and leave the feed untouched.
+        assert!(!feed.remove_block(1));
+        assert!(!feed.remove_block(usize::MAX));
+        assert_eq!(feed.blocks().len(), 1);
+    }

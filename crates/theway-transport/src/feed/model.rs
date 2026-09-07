@@ -181,6 +181,18 @@ impl Feed {
         self.append_blocks(blocks);
     }
 
+    /// Remove one block by index. The open streaming state is left untouched:
+    /// stream deltas always append to the last block, and a plain push closes
+    /// the open block first, so callers must only remove blocks that are not
+    /// the open tail. Returns false when the index is out of range.
+    pub fn remove_block(&mut self, index: usize) -> bool {
+        if index >= self.blocks.len() {
+            return false;
+        }
+        self.blocks.remove(index);
+        true
+    }
+
     /// Replace one block without rebuilding the feed. A mismatched kind or an
     /// out-of-range index is rejected so a stale patch cannot corrupt layout.
     pub fn replace_block(&mut self, index: usize, wire: &WireFeedBlock) -> bool {
