@@ -983,12 +983,8 @@ mod coverage_gap {
         let line = "x".repeat(MAX_MATCH_LINE_CHARS + 100);
         let (preview, truncated) = preview_match_line(&line, None);
         assert!(truncated);
-        assert!(preview.contains("[line truncated]"), "got: {preview}");
-        assert!(
-            !preview.contains("xxx"),
-            "head preview only, got length {}",
-            preview.len()
-        );
+        assert!(preview.ends_with("...[line truncated]"), "got: {preview}");
+        assert!(preview.starts_with(&"x".repeat(MAX_MATCH_LINE_CHARS)));
     }
 
     #[test]
