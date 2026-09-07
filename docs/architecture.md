@@ -298,7 +298,7 @@ reach the OS:
 |-------|---------------|----------------------|
 | Executor-backed file/git tools: `read`, `write`, `edit`, `outline`, `git` | registered; effects go through `LocalExecutor` | registered; effects go through the `SandboxExecutor` seam and fail with `UnsupportedKind` |
 | Direct-OS tools (`LOCAL_ONLY_TOOL_NAMES`): `bash`, `exec`, `get_output`, `kill_shell`, `write_to_process`, `ls`, `grep`, `find` | registered | **not registered — fail closed.** They bypass the `ToolExecutor` seam and would touch the host FS/process table directly, so a `tracing::warn` names every omitted tool; never a silent drop. |
-| Network-only tools: `web_fetch`, `web_search` | registered | registered (no host FS/process side effects) |
+| Network-only tool: `web_fetch` | registered | registered (no host FS/process side effects) |
 | Environment-agnostic engine tools: `dag_*`, `subagent`, the read-only `skill` lookup, `reload`, MCP adapter, trigger/cron management | registered | registered |
 | Direct-FS engine tools (`LOCAL_ONLY_ENGINE_TOOL_NAMES`): `memory`, `install_skill`, `skill_builder`, `set_skill_state`, `remove_skill` | registered | **not registered — fail closed**; the omitted names are logged |
 
