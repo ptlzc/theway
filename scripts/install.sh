@@ -80,6 +80,11 @@ mkdir -p "$BIN_DIR"
 echo "==> 构建并安装 thewayd (release) 到 $BIN_DIR"
 "$CARGO" install --path "$ROOT/crates/theway-daemon" --force --locked --root "$INSTALL_ROOT"
 
+echo "==> 构建并安装 tgrep (release) 到 $BIN_DIR"
+# 内置 grep 工具的索引后端 (issue #121): daemon 在同目录发现 tgrep 并
+# spawn `tgrep serve`, 缺失时 grep 工具自动回退为全量走树 (行为不变).
+"$CARGO" install --path "$ROOT/crates/tgrep-cli" --force --locked --root "$INSTALL_ROOT"
+
 # ── 运行中的 daemon 处理 ───────────────────────────────────────────────────
 # 默认不打断: 正在运行的 thewayd 继续服务现有会话 (Linux 上覆盖运行中二进制的
 # 磁盘文件不影响已加载的进程映像), 关闭对应 TUI 后看门狗会在数秒内让它自动

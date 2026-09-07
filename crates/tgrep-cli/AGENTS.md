@@ -8,7 +8,9 @@ This file contains the complete crate-local modification rules for `tgrep-cli`. 
   upstream [microsoft/tgrep](https://github.com/microsoft/tgrep) at commit
   `e2007b52d2b8fe4176159d0da20c9ba4a46d5aab`. Do not edit them.
 - Do not format, rename, refactor, or "fix lint warnings" in vendored sources;
-  source comparison against upstream depends on zero local diffs.
+  source comparison against upstream depends on zero local diffs. Local lint
+  allowances live at the manifest boundary only (`[lints.clippy]` in
+  `Cargo.toml`), never as inline attributes in `src/`.
 - `Cargo.toml` is self-contained (not verbatim): theway's workspace has no
   `[workspace.dependencies]`, and vendored crates keep independent package
   metadata. On upgrades, re-apply only the version/dependency values upstream

@@ -98,7 +98,7 @@ jobs:
             extension=".exe"
           fi
           mkdir -p dist
-          for binary in theway thewayd; do
+          for binary in theway thewayd tgrep; do
             source="target/${{ matrix.target }}/dist/$binary$extension"
             test -f "$source" || {
               echo "missing dist binary: $source" >&2
@@ -122,7 +122,7 @@ jobs:
             local -a binaries
             case "$product" in
               theway)
-                binaries=(theway thewayd)
+                binaries=(theway thewayd tgrep)
                 ;;
               theway-daemon)
                 binaries=(thewayd)
@@ -251,10 +251,10 @@ jobs:
           generate_release_notes: true
           tag_name: ${{ needs.validate.outputs.tag }}
           body: |
-            Raw binaries per platform — download the `theway` and `thewayd` files for your target and place them side by side in the same directory (the TUI spawns the sibling `thewayd` daemon).
+            Raw binaries per platform — download the `theway`, `thewayd`, and `tgrep` files for your target and place them side by side in the same directory (the TUI spawns the sibling `thewayd` daemon; the daemon spawns the sibling `tgrep` for the built-in grep tool).
 
             Convenience archives:
-            - `theway-<tag>-<target>.tar.gz` (Unix) / `.zip` (Windows) contains `theway`, `thewayd`, release metadata, and project notices.
+            - `theway-<tag>-<target>.tar.gz` (Unix) / `.zip` (Windows) contains `theway`, `thewayd`, `tgrep`, release metadata, and project notices.
             - `theway-daemon-<tag>-<target>.tar.gz` (Unix) / `.zip` (Windows) contains `thewayd`, release metadata, and project notices for daemon-only installs.
 
             Verify downloads against `SHA256SUMS`.

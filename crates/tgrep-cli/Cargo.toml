@@ -14,6 +14,11 @@ readme = "../README.md"
 name = "tgrep"
 path = "src/main.rs"
 
+# Vendored upstream source is not rewritten for workspace style (see AGENTS.md):
+# lint allowances live at this manifest boundary, not in the code.
+[lints.clippy]
+nonminimal_bool = "allow"
+
 [dependencies]
 tgrep-core = { path = "../tgrep-core" }
 serde = { version = "1", features = ["derive"] }
