@@ -259,6 +259,17 @@ pub fn local_tools_for_cwd(
     ]
 }
 
+/// Sandbox-only mirror of [`local_tools_for_cwd_with_tgrep`]: the grep tool
+/// (and its tgrep backend) is local-only, so the registry is dropped here.
+#[cfg(all(not(feature = "local"), feature = "sandbox"))]
+pub fn local_tools_for_cwd_with_tgrep(
+    executor: Arc<dyn ToolExecutor>,
+    cwd: PathBuf,
+    _tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+) -> Vec<Arc<dyn AgentTool>> {
+    local_tools_for_cwd(executor, cwd)
+}
+
 /// Fails the build when neither execution backend is selected. Mirrors
 /// [`crate::executor::default_executor`]: a daemon without any executor backend has no
 /// valid tool execution story at all.
