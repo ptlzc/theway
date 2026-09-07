@@ -50,6 +50,7 @@ Inside the REPL, `/help` lists every slash command. The most-used ones are `/mod
 
 ## Documentation
 
+- [GitHub Wiki](https://github.com/ptlzc/theway/wiki) — tutorials, FAQ, recipes, and runbooks
 - [Architecture](docs/architecture.md) — crate layout, tool policy, daemon path context, storage
 - [Startup modes](docs/startup-modes.md) — daemon spawn/reuse and controller lifecycle
 - [Loops](docs/loops.md) — stateful cron jobs and the triage inbox

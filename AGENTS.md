@@ -88,6 +88,10 @@ Operating rules for any orchestrator driving the built-in subagents (`subagent` 
 
 ## Documentation standards
 
+- `docs/` and crate `README.md` files are the authoritative documentation source and are versioned with the code. The [GitHub Wiki](https://github.com/ptlzc/theway/wiki) is supplementary only.
+- The Wiki hosts tutorials, FAQ, recipes, runbooks, and community guides; repository docs host mechanisms, contracts, architecture, testing, and extension authoring.
+- Wiki pages must not duplicate authoritative content. A Wiki page links to the repository doc it extends; the root `README.md` links to the Wiki, and the Wiki Home links back to `README.md` and `docs/`.
+- Wiki edits bypass PR review, CI, `make doc-sync`, and release tags, so code facts, API contracts, and version-specific configuration stay in repository docs.
 - Crate `README.md` and `docs/*.md` files are English defaults paired with sibling `.zh.md` translations and `.i18n.yaml` records; [`docs/i18n/README.md`](docs/i18n/README.md) is the contract. `AGENTS.md` files remain English-only. Update both sides in one change, run `scripts/verify-doc-i18n.py --write <source.md>`, then run `make doc-sync`.
 - Documents state the current mechanism, not change history. Avoid "previously/now/no longer", PR/commit references, and migration narration in durable prose; change stories belong in commit messages or memory notes.
 - Cross-reference repository files with relative Markdown paths, never bare filenames.
