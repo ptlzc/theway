@@ -153,8 +153,7 @@ async fn walker_fallback_before_readiness_returns_complete_results() {
 async fn missing_binary_stays_on_walker() {
     let root = tempfile::tempdir().expect("tempdir");
     std::fs::write(root.path().join("a.txt"), "needle here\n").unwrap();
-    let registry =
-        TgrepServerRegistry::with_binary(PathBuf::from("/nonexistent/tgrep-binary"));
+    let registry = TgrepServerRegistry::with_binary(PathBuf::from("/nonexistent/tgrep-binary"));
     let tool = GrepTool::new(Some(registry), root.path().to_path_buf());
     let text = run_grep(
         &tool,
