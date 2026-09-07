@@ -154,6 +154,7 @@ fn subagent_tool_and_node_launcher_build() {
         dir.path().to_path_buf(),
         cell,
         local_exec(),
+        None,
     );
     let cloned = Arc::clone(&launcher);
     assert_eq!(Arc::strong_count(&launcher), 2);
