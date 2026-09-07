@@ -50,11 +50,17 @@ impl TurnHost {
                 spec,
                 response,
             } => {
-                let ok = if session_id.is_empty() || session_id == self.session.id {
+                let active_session = session_id.is_empty() || session_id == self.session.id;
+                let ok = if active_session {
                     self.set_model_from_spec(&spec).await
                 } else {
                     self.set_model_for_session(&session_id, &spec).await
                 };
+                if ok && active_session {
+                    // A model-less session can now run the messages it has been
+                    // holding in its queue.
+                    self.start_next_queued_turn(turn);
+                }
                 let _ = response.send(ok);
             }
             WireCommand::SetThinking {
@@ -703,6 +709,9 @@ impl TurnHost {
         } else {
             self.system_line(format!("configure: applied {touched} setting(s)"));
         }
+        // Configure may have supplied the first model for a model-less session;
+        // release any queued message that was waiting for one.
+        self.start_next_queued_turn(turn);
     }
 
     /// Apply a `SetSkillDirs` command authoritatively (issue #68): replace

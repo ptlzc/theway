@@ -150,6 +150,16 @@ fn kernel_current_model_accepts_images_detects_vision_input() {
 }
 
 #[test]
+fn kernel_has_model_tracks_assigned_state() {
+    let (kernel, harness) = kernel_with_input(Vec::new());
+
+    assert!(kernel.has_model());
+
+    harness.agent().state().model = None;
+    assert!(!kernel.has_model(), "a model-less session must report false");
+}
+
+#[test]
 fn kernel_replace_runtime_swaps_all_session_scoped_services() {
     let (mut kernel, original) = kernel_with_input(Vec::new());
     let replacement = harness_with_input(vec![InputModality::Image]);

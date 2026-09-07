@@ -44,10 +44,21 @@ impl TurnHost {
             self.system_line("interrupt: stopping current turn for new message");
             if turn.fut.is_some() {
                 self.queue_user_prompt(display, prompt_text, loaded_images);
-            } else {
+            } else if self.session.kernel.has_model() {
                 self.projection.feed.push_user(display);
                 self.start_user_prompt_turn(prompt_text, loaded_images, turn);
+            } else {
+                self.projection.feed.push_user(display.clone());
+                self.queue_user_prompt(display, prompt_text, loaded_images);
+                self.system_line("no model selected — queued until a model is set");
             }
+        } else if !self.session.kernel.has_model() {
+            // Do not start a turn that is guaranteed to fail inside the LLM
+            // call. Keep the message queued; SetModel/Configure start it once
+            // a model exists.
+            self.projection.feed.push_user(display.clone());
+            self.queue_user_prompt(display, prompt_text, loaded_images);
+            self.system_line("no model selected — queued until a model is set");
         } else if turn.fut.is_some() {
             // Issue #102: a busy tool-calling turn must see the new user
             // message on its NEXT LLM request, not after the whole turn
@@ -120,6 +131,22 @@ impl TurnHost {
         let prompt_text = commands::attach_skill_prompt(trimmed, None);
         if interrupt {
             session.queue.clear();
+        }
+        if !session.kernel.has_model() {
+            // Keep model-less sessions from consuming messages they cannot run.
+            // The queued job is held by `start_parked_turn` until SetModel lands;
+            // the transport loop re-checks parked queues after every command.
+            session.projection.feed.push_user(display.clone());
+            session.queue.push_back(QueuedTurn::UserPrompt {
+                display,
+                prompt: prompt_text,
+                images: loaded_images,
+            });
+            session.projection.feed.push_plain_untimed(
+                "no model selected — queued until a model is set",
+                Level::System,
+            );
+            return;
         }
         if !interrupt && session.busy {
             // Issue #102: interleave into the running turn instead of waiting
@@ -279,6 +306,9 @@ impl TurnHost {
         if input.trim_start().starts_with("/goal") {
             self.refresh_goal_state().await;
         }
+        // Slash commands like `/model` can assign the first model to a
+        // model-less session; run any queued message that was waiting for one.
+        self.start_next_queued_turn(turn);
     }
 
     /// Dispatch a slash command against a parked (non-active) session's own

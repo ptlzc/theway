@@ -20,6 +20,19 @@ impl TurnHost {
         if turn.fut.is_some() {
             return true;
         }
+        if self.session.queue.is_empty() {
+            return false;
+        }
+        // A model-less session must keep the job queued instead of popping it
+        // into an LLM call that is guaranteed to fail with "Agent has no model
+        // set". `SetModel` / `Configure` re-invoke this once a model exists.
+        if !self.session.kernel.has_model() {
+            let queued = self.session.queue.len();
+            self.system_line(format!(
+                "{queued} queued message(s) waiting for a model — select a model to run the next turn"
+            ));
+            return false;
+        }
         let Some(job) = self.session.queue.pop_front() else {
             return false;
         };
@@ -98,6 +111,16 @@ impl TurnHost {
             return false;
         };
         if session.busy {
+            return false;
+        }
+        if session.queue.is_empty() {
+            return false;
+        }
+        // Hold parked jobs exactly like the active queue: a model-less session
+        // must not consume a message it cannot run yet. The submit path already
+        // told the user the message is queued until a model is set; this guard
+        // just keeps it parked (and is re-checked after every command).
+        if !session.kernel.has_model() {
             return false;
         }
         let Some(job) = session.queue.pop_front() else {
@@ -197,6 +220,12 @@ impl TurnHost {
 
     fn start_triggered_turn(&mut self, trace_id: String, turn: &mut TurnState) {
         if self.session.kernel.is_streaming() {
+            return;
+        }
+        if !self.session.kernel.has_model() {
+            self.system_line(
+                "trigger skipped: no model selected — select a model before triggers can run",
+            );
             return;
         }
         let short: String = trace_id.chars().take(8).collect();

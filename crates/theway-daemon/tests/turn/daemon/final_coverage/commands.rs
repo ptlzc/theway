@@ -192,6 +192,149 @@ async fn submit_web_text_empty_text_with_image_starts_vision_turn() {
 }
 
 #[tokio::test]
+async fn submit_web_text_without_model_queues_instead_of_starting_turn() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+
+    let mut turn = TurnState::default();
+    host.submit_web_text("hello model-less".into(), Vec::new(), false, &mut turn)
+        .await;
+
+    assert!(
+        turn.fut.is_none(),
+        "a model-less session must not start an LLM turn"
+    );
+    assert_eq!(host.session.queue.len(), 1);
+    assert!(matches!(
+        host.session.queue.front(),
+        Some(QueuedTurn::UserPrompt { prompt, .. }) if prompt == "hello model-less"
+    ));
+    let feed = host.projection.feed.plain_lines(120);
+    assert!(
+        feed.iter().any(|line| line.contains("no model selected")),
+        "the user must be told why the message is not running: {feed:?}"
+    );
+}
+
+#[tokio::test]
+async fn submit_web_text_for_session_without_model_queues_in_parked_session() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.sessions.insert(SessionRuntimeState::for_test("other"));
+    host.sessions
+        .get_mut("other")
+        .unwrap()
+        .kernel
+        .harness()
+        .agent()
+        .state()
+        .model = None;
+
+    host.submit_web_text_for_session("other", "hello parked".into(), Vec::new(), false)
+        .await;
+
+    let parked = host.sessions.get("other").unwrap();
+    assert_eq!(parked.queue.len(), 1);
+    assert!(matches!(
+        parked.queue.front(),
+        Some(QueuedTurn::UserPrompt { prompt, .. }) if prompt == "hello parked"
+    ));
+    let feed = parked.projection.feed.plain_lines(120);
+    assert!(
+        feed.iter().any(|line| line.contains("no model selected")),
+        "the parked session must explain the queue wait: {feed:?}"
+    );
+}
+
+#[tokio::test]
+async fn submit_web_text_interrupt_without_running_turn_starts_turn_when_model_present() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+
+    let mut turn = TurnState::default();
+    host.submit_web_text("hello interrupt".into(), Vec::new(), true, &mut turn)
+        .await;
+
+    assert!(
+        turn.fut.is_some(),
+        "interrupt without an in-flight turn must start the prompt immediately"
+    );
+    assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
+async fn submit_web_text_interrupt_without_running_turn_queues_when_model_missing() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+
+    let mut turn = TurnState::default();
+    host.submit_web_text("hello interrupt model-less".into(), Vec::new(), true, &mut turn)
+        .await;
+
+    assert!(turn.fut.is_none());
+    assert_eq!(host.session.queue.len(), 1);
+    assert!(matches!(
+        host.session.queue.front(),
+        Some(QueuedTurn::UserPrompt { prompt, .. }) if prompt == "hello interrupt model-less"
+    ));
+}
+
+#[tokio::test]
+async fn submit_web_text_for_session_interrupt_clears_stale_queue_and_queues_new_message() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.sessions.insert(SessionRuntimeState::for_test("other"));
+    let parked = host.sessions.get_mut("other").unwrap();
+    parked.queue.push_back(QueuedTurn::UserPrompt {
+        display: "stale".into(),
+        prompt: "stale prompt".into(),
+        images: Vec::new(),
+    });
+
+    host.submit_web_text_for_session("other", "hello parked interrupt".into(), Vec::new(), true)
+        .await;
+
+    let parked = host.sessions.get("other").unwrap();
+    assert_eq!(parked.queue.len(), 1, "interrupt must replace the stale queued job");
+    assert!(matches!(
+        parked.queue.front(),
+        Some(QueuedTurn::UserPrompt { prompt, .. }) if prompt == "hello parked interrupt"
+    ));
+}
+
+#[tokio::test]
+async fn submit_web_text_for_session_interrupt_without_model_queues_new_message() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.sessions.insert(SessionRuntimeState::for_test("other"));
+    host.sessions
+        .get_mut("other")
+        .unwrap()
+        .kernel
+        .harness()
+        .agent()
+        .state()
+        .model = None;
+
+    host.submit_web_text_for_session(
+        "other",
+        "hello parked interrupt model-less".into(),
+        Vec::new(),
+        true,
+    )
+    .await;
+
+    let parked = host.sessions.get("other").unwrap();
+    assert_eq!(parked.queue.len(), 1);
+    assert!(matches!(
+        parked.queue.front(),
+        Some(QueuedTurn::UserPrompt { prompt, .. }) if prompt == "hello parked interrupt model-less"
+    ));
+}
+
+#[tokio::test]
 async fn dispatch_web_slash_queues_template_and_compaction_when_busy() {
     let built = build_host(harness_with_input(Vec::new()));
     let (mut host, _scratch, _repo) = built.into_parts();
@@ -307,6 +450,183 @@ async fn start_next_queued_turn_handles_all_job_variants() {
     assert!(host.start_next_queued_turn(&mut turn));
     assert_eq!(turn.prefix, "compaction failed: ");
     assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
+async fn start_next_queued_turn_holds_job_until_model_is_assigned() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+    host.enqueue_turn(QueuedTurn::UserPrompt {
+        display: "waiting".into(),
+        prompt: "waiting prompt".into(),
+        images: Vec::new(),
+    });
+
+    let mut turn = TurnState::default();
+    assert!(
+        !host.start_next_queued_turn(&mut turn),
+        "a model-less session must not consume the queued job"
+    );
+    assert_eq!(host.session.queue.len(), 1);
+    assert!(turn.fut.is_none());
+    let waiting_feed = host.projection.feed.plain_lines(120);
+    assert!(
+        waiting_feed
+            .iter()
+            .any(|line| line.contains("waiting for a model")),
+        "the queue wait must be visible: {waiting_feed:?}"
+    );
+
+    host.session.kernel.harness().agent().state().model = Some(faux_model(Vec::new()));
+    assert!(host.start_next_queued_turn(&mut turn));
+    assert!(turn.fut.is_some(), "the held job starts once a model exists");
+    assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
+async fn start_parked_turn_holds_job_until_model_is_assigned() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.sessions.insert(SessionRuntimeState::for_test("other"));
+    {
+        let parked = host.sessions.get_mut("other").unwrap();
+        parked.kernel.harness().agent().state().model = None;
+        parked.queue.push_back(QueuedTurn::UserPrompt {
+            display: "parked waiting".into(),
+            prompt: "parked waiting prompt".into(),
+            images: Vec::new(),
+        });
+    }
+    let mut unordered = futures::stream::FuturesUnordered::new();
+
+    assert!(
+        !host.start_parked_turn("other", &mut unordered),
+        "a model-less parked session must not consume the queued job"
+    );
+    assert_eq!(host.sessions.get("other").unwrap().queue.len(), 1);
+    assert!(unordered.is_empty());
+
+    host.sessions
+        .get_mut("other")
+        .unwrap()
+        .kernel
+        .harness()
+        .agent()
+        .state()
+        .model = Some(faux_model(Vec::new()));
+    assert!(host.start_parked_turn("other", &mut unordered));
+    assert!(host.sessions.get("other").unwrap().queue.is_empty());
+    assert!(!unordered.is_empty(), "the held parked job starts");
+}
+
+#[tokio::test]
+async fn set_model_command_releases_queued_job() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+    host.enqueue_turn(QueuedTurn::UserPrompt {
+        display: "held".into(),
+        prompt: "held prompt".into(),
+        images: Vec::new(),
+    });
+
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|model| SUPPORTED_APIS.contains(&model.api.0.as_str()))
+        .expect("a supported model should exist in the catalog");
+    let spec = format!("{}:{}", model.provider.0, model.id);
+    let (tx, rx) = oneshot::channel();
+    let mut turn = TurnState::default();
+    host.handle_web_command(
+        WireCommand::SetModel {
+            session_id: host.session.id.clone(),
+            spec,
+            response: tx,
+        },
+        &mut turn,
+    )
+    .await;
+
+    assert!(rx.await.unwrap());
+    assert!(turn.fut.is_some(), "SetModel must release the held queued job");
+    assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
+async fn configure_model_patch_releases_queued_job() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+    host.enqueue_turn(QueuedTurn::UserPrompt {
+        display: "configured".into(),
+        prompt: "configured prompt".into(),
+        images: Vec::new(),
+    });
+
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|model| SUPPORTED_APIS.contains(&model.api.0.as_str()))
+        .expect("a supported model should exist in the catalog");
+    let mut patch = WireDaemonConfig::default();
+    patch.provider = Some(model.provider.0.clone());
+    patch.model = Some(model.id.clone());
+
+    let mut turn = TurnState::default();
+    host.handle_configure(patch, &mut turn).await;
+
+    assert!(turn.fut.is_some(), "Configure must release the held queued job");
+    assert!(host.session.queue.is_empty());
+}
+
+#[tokio::test]
+async fn dispatch_web_slash_model_spec_releases_queued_job() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+    host.enqueue_turn(QueuedTurn::UserPrompt {
+        display: "slash-model".into(),
+        prompt: "slash-model prompt".into(),
+        images: Vec::new(),
+    });
+
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|model| SUPPORTED_APIS.contains(&model.api.0.as_str()))
+        .expect("a supported model should exist in the catalog");
+    let mut turn = TurnState::default();
+    host.dispatch_web_slash(
+        &format!("/model {}:{}", model.provider.0, model.id),
+        &mut turn,
+    )
+    .await;
+
+    assert!(
+        turn.fut.is_some(),
+        "the /model command must release the held queued job"
+    );
+    assert!(host.session.queue.is_empty());
+}
+
+#[test]
+fn start_triggered_turn_skips_without_model() {
+    let built = build_host(harness_with_input(Vec::new()));
+    let (mut host, _scratch, _repo) = built.into_parts();
+    host.session.kernel.harness().agent().state().model = None;
+
+    let mut turn = TurnState::default();
+    host.start_triggered_turn("trace12345678".into(), &mut turn);
+
+    assert!(
+        turn.fut.is_none(),
+        "a model-less trigger must not start an LLM turn"
+    );
+    assert!(host.session.queue.is_empty());
+    let feed = host.projection.feed.plain_lines(120);
+    assert!(
+        feed.iter().any(|line| line.contains("trigger skipped")),
+        "the trigger skip must be visible: {feed:?}"
+    );
 }
 
 #[tokio::test]

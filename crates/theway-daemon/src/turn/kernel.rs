@@ -135,6 +135,12 @@ impl ReplKernel {
             .unwrap_or(false)
     }
 
+    /// Whether a model is assigned for this session. Queued turns stay queued
+    /// (rather than failing inside the LLM call) until this becomes true.
+    pub fn has_model(&self) -> bool {
+        self.harness.agent().state().model.is_some()
+    }
+
     pub fn prompt_turn(&self, prompt: String) -> TurnFut {
         let harness = self.harness.clone();
         Box::pin(async move { harness.prompt(prompt).await.map(|_| None) })
