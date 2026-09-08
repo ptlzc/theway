@@ -344,6 +344,16 @@ impl App {
             }
             super::MenuKey::Enter => match state.level {
                 super::GraphMenuLevel::Root => match items.get(state.cursor).copied() {
+                    Some("show") => {
+                        self.cancel_graph_menu();
+                        self.dag_band_mode = crate::ui::DagBandMode::Show;
+                        self.system_line("DAG band 已显示");
+                    }
+                    Some("hide") => {
+                        self.cancel_graph_menu();
+                        self.dag_band_mode = crate::ui::DagBandMode::Hidden;
+                        self.system_line("DAG band 已隐藏");
+                    }
                     Some("clear") => {
                         self.cancel_graph_menu();
                         self.clear_graph_runs().await;

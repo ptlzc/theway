@@ -134,7 +134,15 @@ export interface DagNodeSnapshot {
     | string
     | undefined;
   /** live output while running */
-  livePreview?: string | undefined;
+  livePreview?:
+    | string
+    | undefined;
+  /** model this node runs with: "provider:id" when resolved, or a configured per-node id override */
+  model?:
+    | string
+    | undefined;
+  /** reasoning intensity override (off/minimal/low/medium/high/xhigh/max); unset inherits parent */
+  thinking?: string | undefined;
 }
 
 export interface NodeResultSnapshot {
@@ -186,7 +194,15 @@ export interface SubagentJobSnapshot {
     | string
     | undefined;
   /** completed turns */
-  turn?: number | undefined;
+  turn?:
+    | number
+    | undefined;
+  /** resolved model used by this subagent (provider:id) */
+  model?:
+    | string
+    | undefined;
+  /** resolved reasoning intensity (off/minimal/low/medium/high/xhigh/max) */
+  thinking?: string | undefined;
 }
 
 /** Full output of a DAG node, fetched on demand with an offset (P3). */
@@ -629,6 +645,8 @@ function createBaseDagNodeSnapshot(): DagNodeSnapshot {
     result: undefined,
     outputTail: undefined,
     livePreview: undefined,
+    model: undefined,
+    thinking: undefined,
   };
 }
 
@@ -675,6 +693,12 @@ export const DagNodeSnapshot: MessageFns<DagNodeSnapshot> = {
     }
     if (message.livePreview !== undefined) {
       writer.uint32(114).string(message.livePreview);
+    }
+    if (message.model !== undefined) {
+      writer.uint32(122).string(message.model);
+    }
+    if (message.thinking !== undefined) {
+      writer.uint32(130).string(message.thinking);
     }
     return writer;
   },
@@ -798,6 +822,22 @@ export const DagNodeSnapshot: MessageFns<DagNodeSnapshot> = {
           message.livePreview = reader.string();
           continue;
         }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.model = reader.string();
+          continue;
+        }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.thinking = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -855,6 +895,8 @@ export const DagNodeSnapshot: MessageFns<DagNodeSnapshot> = {
         : isSet(object.live_preview)
         ? globalThis.String(object.live_preview)
         : undefined,
+      model: isSet(object.model) ? globalThis.String(object.model) : undefined,
+      thinking: isSet(object.thinking) ? globalThis.String(object.thinking) : undefined,
     };
   },
 
@@ -902,6 +944,12 @@ export const DagNodeSnapshot: MessageFns<DagNodeSnapshot> = {
     if (message.livePreview !== undefined) {
       obj.livePreview = message.livePreview;
     }
+    if (message.model !== undefined) {
+      obj.model = message.model;
+    }
+    if (message.thinking !== undefined) {
+      obj.thinking = message.thinking;
+    }
     return obj;
   },
 
@@ -926,6 +974,8 @@ export const DagNodeSnapshot: MessageFns<DagNodeSnapshot> = {
       : undefined;
     message.outputTail = object.outputTail ?? undefined;
     message.livePreview = object.livePreview ?? undefined;
+    message.model = object.model ?? undefined;
+    message.thinking = object.thinking ?? undefined;
     return message;
   },
 };
@@ -1085,6 +1135,8 @@ function createBaseSubagentJobSnapshot(): SubagentJobSnapshot {
     chars: undefined,
     toolsCalled: undefined,
     turn: undefined,
+    model: undefined,
+    thinking: undefined,
   };
 }
 
@@ -1152,6 +1204,12 @@ export const SubagentJobSnapshot: MessageFns<SubagentJobSnapshot> = {
     }
     if (message.turn !== undefined) {
       writer.uint32(168).uint32(message.turn);
+    }
+    if (message.model !== undefined) {
+      writer.uint32(178).string(message.model);
+    }
+    if (message.thinking !== undefined) {
+      writer.uint32(186).string(message.thinking);
     }
     return writer;
   },
@@ -1331,6 +1389,22 @@ export const SubagentJobSnapshot: MessageFns<SubagentJobSnapshot> = {
           message.turn = reader.uint32();
           continue;
         }
+        case 22: {
+          if (tag !== 178) {
+            break;
+          }
+
+          message.model = reader.string();
+          continue;
+        }
+        case 23: {
+          if (tag !== 186) {
+            break;
+          }
+
+          message.thinking = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1407,6 +1481,8 @@ export const SubagentJobSnapshot: MessageFns<SubagentJobSnapshot> = {
         ? globalThis.String(object.tools_called)
         : undefined,
       turn: isSet(object.turn) ? globalThis.Number(object.turn) : undefined,
+      model: isSet(object.model) ? globalThis.String(object.model) : undefined,
+      thinking: isSet(object.thinking) ? globalThis.String(object.thinking) : undefined,
     };
   },
 
@@ -1475,6 +1551,12 @@ export const SubagentJobSnapshot: MessageFns<SubagentJobSnapshot> = {
     if (message.turn !== undefined) {
       obj.turn = Math.round(message.turn);
     }
+    if (message.model !== undefined) {
+      obj.model = message.model;
+    }
+    if (message.thinking !== undefined) {
+      obj.thinking = message.thinking;
+    }
     return obj;
   },
 
@@ -1504,6 +1586,8 @@ export const SubagentJobSnapshot: MessageFns<SubagentJobSnapshot> = {
     message.chars = object.chars ?? undefined;
     message.toolsCalled = object.toolsCalled ?? undefined;
     message.turn = object.turn ?? undefined;
+    message.model = object.model ?? undefined;
+    message.thinking = object.thinking ?? undefined;
     return message;
   },
 };

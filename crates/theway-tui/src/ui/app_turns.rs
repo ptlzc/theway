@@ -130,7 +130,7 @@ impl App {
                 self.follow = true;
             }
             "/help" => self.system_line(
-                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /model [provider:model-id] /session switch /side-panel · daemon: /goal /triggers /cron /session …",
+                "theway client · send messages to the thewayd daemon · local: /login /quit /clear /new /resume /model [provider:model-id] /session switch /graph show|hide|clear /side-panel · daemon: /goal /triggers /cron /session …",
             ),
             "/login" => self.login(args, terminal).await,
             "/session" if args.trim_start().starts_with("switch") => {
@@ -144,15 +144,13 @@ impl App {
             "/side-panel" | "/status-panel" => {
                 self.open_panel_menu();
             }
-            // Issue #76: `/graph` controls the DAG status band. Bare `/graph`
-            // toggles Show/Hidden; `/graph show` / `/graph hidden` set it
-            // explicitly; `/graph clear` clears the current session's terminal
-            // DAG runs via the daemon. Band visibility is TUI-local (issue #76);
-            // the `[n graph]` status-bar counter (issue #78) only appears while
-            // Hidden.
-            // Bare `/graph` opens the hierarchical menu (clear when the
-            // session has runs + position); the explicit show/hidden/clear
-            // shortcuts keep working.
+            // Issue #76: `/graph` controls the DAG status band. Bare
+            // `/graph` opens the hierarchical menu (show/hide + clear when
+            // the session has runs + position); `/graph show` / `/graph
+            // hide` (alias: `hidden`) set visibility explicitly; `/graph
+            // clear` clears the current session's terminal DAG runs via the
+            // daemon. Band visibility is TUI-local; the `[n graph]`
+            // status-bar counter (issue #78) only appears while Hidden.
             "/graph" if args.is_empty() => {
                 self.open_graph_menu();
             }
@@ -160,7 +158,7 @@ impl App {
                 self.dag_band_mode = crate::ui::DagBandMode::Show;
                 self.system_line("DAG band 已显示");
             }
-            "/graph" if args == "hidden" => {
+            "/graph" if args == "hide" || args == "hidden" => {
                 self.dag_band_mode = crate::ui::DagBandMode::Hidden;
                 self.system_line("DAG band 已隐藏");
             }

@@ -37,6 +37,8 @@ message DagNodeSnapshot {
   optional NodeResultSnapshot result = 12;
   optional string output_tail = 13; // terminal output tail; full text via events/GetNodeOutput
   optional string live_preview = 14; // live output while running
+  optional string model = 15; // model this node runs with: "provider:id" when resolved, or a configured per-node id override
+  optional string thinking = 16; // reasoning intensity override (off/minimal/low/medium/high/xhigh/max); unset inherits parent
 }
 
 message NodeResultSnapshot {
@@ -70,6 +72,8 @@ message SubagentJobSnapshot {
   optional uint64 chars = 19; // cumulative output chars
   optional uint64 tools_called = 20; // cumulative tool calls
   optional uint32 turn = 21; // completed turns
+  optional string model = 22; // resolved model used by this subagent (provider:id)
+  optional string thinking = 23; // resolved reasoning intensity (off/minimal/low/medium/high/xhigh/max)
 }
 
 // Full output of a DAG node, fetched on demand with an offset (P3).

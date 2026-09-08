@@ -560,10 +560,13 @@ async fn graph_menu_cursor_wraps_at_both_ends() {
     let mut term = terminal_placeholder();
     let key = |code| Event::Key(KeyEvent::new(code, KeyModifiers::empty()));
 
-    // Open at the root and descend into Position (two placements).
+    // Open at the root (show/hide/position) and descend into Position
+    // (two placements).
     app.dispatch_slash("/graph", &mut term).await;
     let state = |app: &crate::ui::App| app.graph_menu.map(|m| (m.level, m.cursor));
     assert_eq!(state(&app), Some((super::GraphMenuLevel::Root, 0)));
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
+    app.handle_event(key(KeyCode::Down), &mut term).await.unwrap();
     app.handle_event(key(KeyCode::Enter), &mut term).await.unwrap();
     assert_eq!(state(&app), Some((super::GraphMenuLevel::Position, 0)));
 

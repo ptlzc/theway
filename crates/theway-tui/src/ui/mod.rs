@@ -278,8 +278,9 @@ impl GraphPosition {
     }
 }
 
-/// `/graph` menu level: the root offers `clear` (only while the session has
-/// graph runs) and `position`; Position carries the two band placements.
+/// `/graph` menu level: the root offers `show`/`hide` (band visibility),
+/// `clear` (only while the session has graph runs), and `position`;
+/// Position carries the two band placements.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GraphMenuLevel {
     Root,
@@ -311,15 +312,16 @@ pub(crate) struct GraphMenuState {
 }
 
 impl GraphMenuState {
-    /// Root items depend on the session's graph runs: `[clear, position]`
-    /// when runs exist, `[position]` otherwise.
+    /// Root items always offer band visibility (`show`/`hide`); `clear` is
+    /// appended only when the session has graph runs, and `position` always
+    /// comes last.
     pub(crate) fn items(&self) -> Vec<&'static str> {
         match self.level {
             GraphMenuLevel::Root => {
                 if self.has_graphs {
-                    vec!["clear", "position"]
+                    vec!["show", "hide", "clear", "position"]
                 } else {
-                    vec!["position"]
+                    vec!["show", "hide", "position"]
                 }
             }
             GraphMenuLevel::Position => vec!["composer top", "side-panel"],

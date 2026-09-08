@@ -106,17 +106,18 @@ pub(crate) const DAEMON_COMMANDS: &[&str] = &[
     "inbox",
 ];
 
-/// TUI-local slash commands (issues #52 + #54 + #56): dispatched in the
-/// client, never forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` —
-/// the daemon has no `/new`, `/status-panel` or `/resume` command; the
-/// client intercepts them (`/new` drives the session-resource RPCs,
+/// TUI-local slash commands (issues #52 + #54 + #56 + #76): dispatched in
+/// the client, never forwarded to the daemon. NOT listed in `DAEMON_COMMANDS` —
+/// the daemon has no `/new`, `/status-panel`, `/resume` or `/graph` command;
+/// the client intercepts them (`/new` drives the session-resource RPCs,
 /// `/status-panel` opens the local panel-mode menu, `/resume` opens the
-/// session-list popup over `list_sessions`).
+/// session-list popup over `list_sessions`, `/graph` controls the DAG band).
 const LOCAL_COMMANDS: &[&str] = &[
     "new",
     "side-panel",
     "status-panel",
     "resume",
+    "graph",
     "extensions",
     "extension-reload",
     "extension-trust",

@@ -79,7 +79,8 @@ async fn ctrl_c_empty_idle_two_presses_exits() {
 
 // ── /graph (issue #76) ────────────────────────────────────────────────
 
-/// Bare `/graph` toggles the DAG band Show ↔ Hidden.
+/// Bare `/graph` opens the root menu: show/hide always, clear only while
+/// the session has graph runs, position always last.
 #[tokio::test]
 async fn graph_bare_opens_menu_and_enter_runs_clear_when_runs_exist() {
     let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
@@ -92,19 +93,19 @@ async fn graph_bare_opens_menu_and_enter_runs_clear_when_runs_exist() {
         ))
     };
 
-    // Without runs the menu offers position only.
+    // Without runs the menu offers show/hide + position.
     app.set_input("/graph");
     app.submit(&mut terminal).await.unwrap();
     let menu = app.graph_menu.expect("bare /graph opens the menu");
     assert_eq!(menu.level, crate::ui::GraphMenuLevel::Root);
-    assert_eq!(menu.items(), vec!["position"]);
+    assert_eq!(menu.items(), vec!["show", "hide", "position"]);
     app.handle_event(key(crossterm::event::KeyCode::Esc), &mut terminal)
         .await
         .unwrap();
     assert!(app.graph_menu.is_none());
 
-    // With runs the root offers clear + position; Enter on clear invokes
-    // the daemon clear RPC.
+    // With runs the root adds clear; Enter on clear invokes the daemon
+    // clear RPC (two Down presses move from show → hide → clear).
     app.latest
         .dags
         .push(theway_transport::wire::WireDagRunSnapshot {
@@ -123,14 +124,53 @@ async fn graph_bare_opens_menu_and_enter_runs_clear_when_runs_exist() {
     app.set_input("/graph");
     app.submit(&mut terminal).await.unwrap();
     let menu = app.graph_menu.expect("menu opens");
-    assert_eq!(menu.items(), vec!["clear", "position"]);
+    assert_eq!(menu.items(), vec!["show", "hide", "clear", "position"]);
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
     app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
         .await
         .unwrap();
     assert!(app.graph_menu.is_none());
 }
 
-/// `/graph show` / `/graph hidden` set the band mode explicitly.
+/// `/graph` menu `show`/`hide` entries set the band visibility directly.
+#[tokio::test]
+async fn graph_menu_show_and_hide_set_band_mode() {
+    let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let key = |code| {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::empty(),
+        ))
+    };
+
+    app.dag_band_mode = crate::ui::DagBandMode::Hidden;
+    app.set_input("/graph");
+    app.submit(&mut terminal).await.unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
+        .await
+        .unwrap();
+    assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Show);
+
+    app.set_input("/graph");
+    app.submit(&mut terminal).await.unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Enter), &mut terminal)
+        .await
+        .unwrap();
+    assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Hidden);
+}
+
+/// `/graph show` / `/graph hide` / `/graph hidden` set the band mode
+/// explicitly.
 #[tokio::test]
 async fn graph_show_and_hidden_set_mode_explicitly() {
     let (mut app, _rx, _ops) = test_app_with_sessions(&["sess-1"], false).await;
@@ -144,6 +184,10 @@ async fn graph_show_and_hidden_set_mode_explicitly() {
     app.set_input("/graph show");
     app.submit(&mut terminal).await.unwrap();
     assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Show);
+
+    app.set_input("/graph hide");
+    app.submit(&mut terminal).await.unwrap();
+    assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Hidden);
 }
 
 /// `/graph clear` clears the current session's terminal runs via the daemon.
@@ -504,9 +548,12 @@ async fn graph_position_menu_previews_commits_and_reverts() {
         ))
     };
 
-    // Open → Down (position) → Enter descends into the placements.
+    // Open → Down, Down (position) → Enter descends into the placements.
     app.set_input("/graph");
     app.submit(&mut terminal).await.unwrap();
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
     app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
         .await
         .unwrap();
@@ -539,7 +586,10 @@ async fn graph_position_menu_previews_commits_and_reverts() {
     );
     assert_eq!(app.graph_position, crate::ui::GraphPosition::ComposerTop);
 
-    // Enter commits side-panel (Descend again, Down, Enter).
+    // Enter commits side-panel (Descend again, Down, Down, Enter, Down, Enter).
+    app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
+        .await
+        .unwrap();
     app.handle_event(key(crossterm::event::KeyCode::Down), &mut terminal)
         .await
         .unwrap();

@@ -19,6 +19,23 @@ fn collect_slash_commands_includes_local_resume_command() {
     );
 }
 
+/// Issue #76: `/graph` completes as a TUI-local command (`LOCAL_COMMANDS`)
+/// and stays out of the daemon-side command table the client forwards.
+#[test]
+fn collect_slash_commands_includes_local_graph_command() {
+    let registry = crate::local_commands::local_registry();
+    let commands = collect_slash_commands(&registry, &[], &[], &[]);
+
+    assert!(
+        commands.contains(&"/graph".to_string()),
+        "completion list must contain /graph, got: {commands:?}"
+    );
+    assert!(
+        !super::DAEMON_COMMANDS.contains(&"graph"),
+        "/graph is TUI-local and must not live in the daemon command table"
+    );
+}
+
 /// Issue #56: `/help` lists `/resume` in the local command surface.
 #[tokio::test]
 async fn help_line_lists_resume_command() {
@@ -33,6 +50,21 @@ async fn help_line_lists_resume_command() {
     assert!(
         text.contains("/resume"),
         "help text must list /resume, got: {text}"
+    );
+}
+
+/// Issue #76: `/help` lists the `/graph show|hide|clear` surface.
+#[tokio::test]
+async fn help_line_lists_graph_command() {
+    let (mut app, _rx) = test_app().await;
+
+    app.dispatch_slash("/help", &mut terminal_placeholder())
+        .await;
+
+    let text = feed_text(&app);
+    assert!(
+        text.contains("/graph show|hide|clear"),
+        "help text must list /graph show|hide|clear, got: {text}"
     );
 }
 

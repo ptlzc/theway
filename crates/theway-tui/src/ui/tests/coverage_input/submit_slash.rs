@@ -109,6 +109,8 @@ async fn dispatch_slash_covers_many_arms() {
     assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Hidden);
     app.dispatch_slash("/graph show", &mut term).await;
     assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Show);
+    app.dispatch_slash("/graph hide", &mut term).await;
+    assert_eq!(app.dag_band_mode, crate::ui::DagBandMode::Hidden);
     app.dispatch_slash("/graph clear", &mut term).await;
     app.dispatch_slash("/extensions", &mut term).await;
     app.dispatch_slash("/extension-reload", &mut term).await;
