@@ -7,7 +7,7 @@ Configuration reference for an agent working inside theway: where every config f
 ## Base directories and layering
 
 - `$THEWAY_DIR` (default `~/.theway`) is the user root. A project layer `<cwd>/.theway/` overlays it per working directory.
-- Config files: `<base>/config.toml`, `<base>/theme.toml`, `<base>/mcp.toml`. The project layer adds `<cwd>/.theway/mcp.toml`, `<cwd>/.theway/skills/`, `<cwd>/.theway/templates/`, and `<cwd>/.theway/extensions/`.
+- The primary config file is `<base>/config.toml`. Legacy files `<base>/theme.toml` and `<base>/mcp.toml` remain as fallbacks when `config.toml` has no `[theme]` / `[[server]]` content. The project layer adds `<cwd>/.theway/mcp.toml`, `<cwd>/.theway/skills/`, `<cwd>/.theway/templates/`, and `<cwd>/.theway/extensions/`.
 - Runtime state also lives under `<base>`: `sessions/` (per-cwd hash buckets), `memory/`, `history`, `exports/`, `logs/`, `auth.json`, `models.json`, `skill-overrides.json`, `extensions/trust.json`, `extensions/audit.jsonl`.
 
 ## config.toml
@@ -17,18 +17,22 @@ Read by the client at startup and provisioned to the daemon as a settings payloa
 | Section | Keys | Meaning |
 |---|---|---|
 | `[executor]` | `kind` | Execution environment for executor-backed tools: `local` (default) or `sandbox`. Startup-only; changes require a client restart. |
-| `[model]` | `provider`, `model`, `thinking` | Startup default model pair and thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). The TUI writes the last `/model` pick here. |
+| `[model]` | `provider`, `model`, `thinking` | Startup default model pair and thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` when the provider supports it). The TUI writes the last `/model` pick here. |
 | `[builtin_skills]` | `enabled` | Enabled built-in skill names; unioned with `--builtin-skill` flags. |
 | `[triggers]` | `poll_interval_secs` | Local dynamic-trigger poll interval (default 600). |
 | `[tui]` | `max_feed_lines` | TUI feed scrollback cap. |
 | `[relay]` | `base_url` | Relay base URL fallback. |
-| `[orchestrator]` | thinking-summary settings | Orchestrator thinking-summary tuning. |
+| `[orchestrator]` | `thinking_summary`, `thinking_summary_min_chars` | When `thinking_summary = true`, finished thinking bursts are replaced by a summarizer subagent output. `thinking_summary_min_chars` defaults to 2000. |
+| `[ui.feed]` | `thinking_mode` | How thinking renders: `full`, `peek`, or `hidden` (Ctrl+O cycles). |
+| `[ui.panel]` | `mode`, `position`, `show_hooks`, `show_runtime` | Side panel visibility (`auto`, `shown`, `hidden`) and position (`top`, `bottom`, `left`, `right`); `show_hooks` / `show_runtime` opt into diagnostic sections. |
+| `[ui.graph]` | `position` | Graph band position: `composer-top` or `side-panel`. |
+| `[[server]]` | same fields as mcp.toml entries | MCP servers defined directly in `config.toml`. A non-empty list wins over the legacy mcp.toml files. |
 
 Malformed values fail soft: the client reports a diagnostic and keeps the default. A running daemon keeps the values it was provisioned with; changing the file requires a client restart (or the settings RPC) to take effect.
 
-## theme.toml
+## theme.toml and [theme]
 
-Versioned theme file (v2). Missing file or unknown sections/keys degrade to the built-in default and warn on stderr.
+Theme settings can live in `<base>/theme.toml` or under a `[theme]` table in `config.toml`; the `config.toml` table wins. Versioned theme format (v2). Missing file, missing table, or unknown sections/keys degrade to the built-in default and warn on stderr.
 
 | Section | Controls |
 |---|---|
@@ -42,9 +46,9 @@ Versioned theme file (v2). Missing file or unknown sections/keys degrade to the 
 
 Theme edits hot-reload: after a daemon-side reload bumps the runtime revision, connected clients re-read the file without a restart.
 
-## mcp.toml
+## mcp.toml and [[server]] in config.toml
 
-MCP stdio/HTTP server definitions under `[[server]]` entries: `name`, `kind`, `command`, `args`, `endpoint`, `auth`, timeouts, `reconnect`, and the notification options `inject_summary` / `inject_and_run`. Read from `<base>/mcp.toml` and `<cwd>/.theway/mcp.toml`; a server that fails to start is skipped with a diagnostic.
+MCP stdio/HTTP server definitions under `[[server]]` entries: `name`, `kind`, `command`, `args`, `endpoint`, `auth`, timeouts, `reconnect`, and the notification options `inject_summary` / `inject_and_run`. A non-empty `[[server]]` list in `config.toml` wins; otherwise the client reads `<base>/mcp.toml` and `<cwd>/.theway/mcp.toml` and merges them. A server that fails to start is skipped with a diagnostic.
 
 ## Skills, templates, and extensions
 

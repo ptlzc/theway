@@ -7,7 +7,7 @@
 ## 基础目录与分层
 
 - `$THEWAY_DIR`（默认 `~/.theway`）是用户根目录。项目层 `<cwd>/.theway/` 按工作目录叠加覆盖。
-- 配置文件：`<base>/config.toml`、`<base>/theme.toml`、`<base>/mcp.toml`。项目层额外提供 `<cwd>/.theway/mcp.toml`、`<cwd>/.theway/skills/`、`<cwd>/.theway/templates/` 和 `<cwd>/.theway/extensions/`。
+- 主配置文件是 `<base>/config.toml`。旧文件 `<base>/theme.toml` 与 `<base>/mcp.toml` 仍作为回退，仅当 `config.toml` 没有 `[theme]` / `[[server]]` 内容时使用。项目层额外提供 `<cwd>/.theway/mcp.toml`、`<cwd>/.theway/skills/`、`<cwd>/.theway/templates/` 和 `<cwd>/.theway/extensions/`。
 - 运行时状态也在 `<base>` 下：`sessions/`（按 cwd 哈希分桶）、`memory/`、`history`、`exports/`、`logs/`、`auth.json`、`models.json`、`skill-overrides.json`、`extensions/trust.json`、`extensions/audit.jsonl`。
 
 ## config.toml
@@ -17,18 +17,22 @@
 | Section | 键 | 含义 |
 |---|---|---|
 | `[executor]` | `kind` | executor 支撑工具的执行环境：`local`（默认）或 `sandbox`。启动时生效，修改后需重启客户端。 |
-| `[model]` | `provider`、`model`、`thinking` | 启动默认模型对与思考等级（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`）。TUI 把最近一次 `/model` 的选择写到这里。 |
+| `[model]` | `provider`、`model`、`thinking` | 启动默认模型对与思考等级（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`，provider 支持时含 `max`）。TUI 把最近一次 `/model` 的选择写到这里。 |
 | `[builtin_skills]` | `enabled` | 启用的内置 skill 名称；与 `--builtin-skill` 参数取并集。 |
 | `[triggers]` | `poll_interval_secs` | 本地动态 trigger 轮询间隔（默认 600）。 |
 | `[tui]` | `max_feed_lines` | TUI 对话流回看上限。 |
 | `[relay]` | `base_url` | Relay base URL 回退值。 |
-| `[orchestrator]` | thinking-summary 设置 | 编排器思考摘要调优。 |
+| `[orchestrator]` | `thinking_summary`、`thinking_summary_min_chars` | `thinking_summary = true` 时，结束的 thinking burst 会被 summarizer 子代理输出替换。`thinking_summary_min_chars` 默认 2000。 |
+| `[ui.feed]` | `thinking_mode` | thinking 渲染方式：`full`、`peek` 或 `hidden`（Ctrl+O 循环）。 |
+| `[ui.panel]` | `mode`、`position`、`show_hooks`、`show_runtime` | 侧栏可见性（`auto`、`shown`、`hidden`）与位置（`top`、`bottom`、`left`、`right`）；`show_hooks` / `show_runtime` 用于开启诊断区。 |
+| `[ui.graph]` | `position` | 图编排带位置：`composer-top` 或 `side-panel`。 |
+| `[[server]]` | 与 mcp.toml 条目相同的字段 | 直接在 `config.toml` 里定义 MCP server。非空列表优先于旧 mcp.toml 文件。 |
 
 非法值软失败：客户端报告诊断并保留默认值。运行中的 daemon 保持它被 provision 时的值；修改文件需要重启客户端（或走 settings RPC）才会生效。
 
-## theme.toml
+## theme.toml 与 [theme]
 
-带版本的 theme 文件（v2）。文件缺失或未知 section/键会回退到内置默认值并在 stderr 告警。
+theme 可以放在 `<base>/theme.toml`，也可以放在 `config.toml` 的 `[theme]` 表里；`config.toml` 的表优先。带版本的 theme 格式（v2）。文件/表缺失或未知 section/键会回退到内置默认值并在 stderr 告警。
 
 | Section | 控制内容 |
 |---|---|
@@ -42,9 +46,9 @@
 
 theme 改动热重载：daemon 侧 reload 使 runtime revision 递增后，已连接客户端无需重启就会重读文件。
 
-## mcp.toml
+## mcp.toml 与 config.toml 里的 [[server]]
 
-`[[server]]` 条目定义 MCP stdio/HTTP 服务：`name`、`kind`、`command`、`args`、`endpoint`、`auth`、超时、`reconnect`，以及通知选项 `inject_summary` / `inject_and_run`。从 `<base>/mcp.toml` 与 `<cwd>/.theway/mcp.toml` 读取；启动失败的服务会被跳过并给出诊断。
+`[[server]]` 条目定义 MCP stdio/HTTP 服务：`name`、`kind`、`command`、`args`、`endpoint`、`auth`、超时、`reconnect`，以及通知选项 `inject_summary` / `inject_and_run`。`config.toml` 里非空的 `[[server]]` 列表优先；否则客户端读取 `<base>/mcp.toml` 与 `<cwd>/.theway/mcp.toml` 并合并。启动失败的服务会被跳过并给出诊断。
 
 ## Skills、templates 与 extensions
 
