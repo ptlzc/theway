@@ -27,3 +27,35 @@ use super::*;
         assert_eq!(resolved, PathBuf::from("./.theway"));
     }
 
+    // ── default config seeding (issue #123) ────────────────────────────
+
+    #[tokio::test]
+    async fn ensure_default_config_creates_file_when_missing_and_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.toml");
+        assert!(!path.exists());
+
+        let created = ensure_default_config_at(&path).await.unwrap();
+        assert!(created);
+        let text = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(text, DEFAULT_CONFIG_TOML);
+        assert_eq!(
+            theway_transport::config::parse_executor_kind(&text).unwrap(),
+            Some("local".into())
+        );
+
+        // Second call is a no-op and never rewrites the file.
+        assert!(!ensure_default_config_at(&path).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn ensure_default_config_preserves_existing_file_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let custom = "# user file\n[model]\nprovider = \"acme\"\nmodel = \"warp-9\"\n";
+        tokio::fs::write(&path, custom).await.unwrap();
+
+        assert!(!ensure_default_config_at(&path).await.unwrap());
+        assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), custom);
+    }
+

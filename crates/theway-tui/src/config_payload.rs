@@ -91,6 +91,53 @@ pub(crate) fn resolve_config_base_dir(
     home.join(".theway")
 }
 
+/// Default `config.toml` seeded on first run / fresh installs so the
+/// runtime-selected `[executor]` section is explicit (issue #123). The daemon
+/// still falls back to `local` when the file is absent, so this file is a
+/// convenience, not a requirement.
+pub(crate) const DEFAULT_CONFIG_TOML: &str = r#"# theway default configuration.
+# Missing values fall back to built-in defaults; delete this file to reset.
+
+[executor]
+kind = "local"
+"#;
+
+/// Create the controller-owned `config.toml` when it is missing.
+/// Existing files (and any parse/content errors in them) are left untouched.
+pub(crate) async fn ensure_default_config(home: Option<&Path>) -> Result<bool, String> {
+    ensure_default_config_at(&config_path(home)).await
+}
+
+/// [`ensure_default_config`] with an explicit target path (hermetic tests).
+pub(crate) async fn ensure_default_config_at(path: &Path) -> Result<bool, String> {
+    match tokio::fs::try_exists(path).await {
+        Ok(true) => return Ok(false),
+        Ok(false) => {}
+        Err(err) => return Err(err.to_string()),
+    }
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| format!("create {}: {err}", parent.display()))?;
+    }
+    let mut file = match tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+    {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(err) => return Err(err.to_string()),
+    };
+    use tokio::io::AsyncWriteExt;
+    file.write_all(DEFAULT_CONFIG_TOML.as_bytes())
+        .await
+        .map_err(|err| err.to_string())?;
+    file.flush().await.map_err(|err| err.to_string())?;
+    Ok(true)
+}
+
 /// Assemble the full daemon config payload: local `config.toml` (a missing
 /// file is the config-file-free posture) merged with the CLI flags — CLI
 /// flags win. Returns the payload plus human-readable diagnostics for

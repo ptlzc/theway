@@ -85,12 +85,28 @@ echo "==> 构建并安装 tgrep (release) 到 $BIN_DIR"
 # spawn `tgrep serve`, 缺失时 grep 工具自动回退为全量走树 (行为不变).
 "$CARGO" install --path "$ROOT/crates/tgrep-cli" --force --locked --root "$INSTALL_ROOT"
 
+# ── 默认配置初始化 (issue #123) ─────────────────────────────────────────────
+# 首次安装时生成 controller 持有的默认 config.toml, 显式声明本地执行环境。
+# 文件已存在时不覆盖, 保留用户的模型/MCP/主题等全部内容。
+THEWAY_BASE="${THEWAY_DIR:-$HOME/.theway}"
+CONFIG_FILE="$THEWAY_BASE/config.toml"
+if [ ! -e "$CONFIG_FILE" ]; then
+    mkdir -p "$THEWAY_BASE"
+    cat > "$CONFIG_FILE" <<'EOF'
+# theway default configuration.
+# Missing values fall back to built-in defaults; delete this file to reset.
+
+[executor]
+kind = "local"
+EOF
+    echo "==> 初始化默认配置 $CONFIG_FILE"
+fi
+
 # ── 运行中的 daemon 处理 ───────────────────────────────────────────────────
 # 默认不打断: 正在运行的 thewayd 继续服务现有会话 (Linux 上覆盖运行中二进制的
 # 磁盘文件不影响已加载的进程映像), 关闭对应 TUI 后看门狗会在数秒内让它自动
 # 退出并清理自己的端口文件, 下次启动即用新二进制。--restart-daemon 保留旧行为:
 # 立即停掉所有 thewayd (其他终端的 theway 会话会断开)。
-THEWAY_BASE="${THEWAY_DIR:-$HOME/.theway}"
 if [ -n "$RESTART_DAEMON" ]; then
     echo "==> 重启旧版 thewayd 进程 (其他终端的 theway 会话会断开)"
     pkill -TERM -x thewayd 2>/dev/null || true

@@ -12,10 +12,11 @@ Configuration reference for an agent working inside theway: where every config f
 
 ## config.toml
 
-Read by the client at startup and provisioned to the daemon as a settings payload; the daemon does not read this file itself. Precedence is CLI flags > config.toml > built-in default.
+Read by the client at startup and provisioned to the daemon as a settings payload; the daemon does not read this file itself. On a fresh install or first client start the file is created with `[executor] kind = "local"`; existing files are never overwritten. Precedence is CLI flags > config.toml > built-in default.
 
 | Section | Keys | Meaning |
 |---|---|---|
+| `[executor]` | `kind` | Execution environment for executor-backed tools: `local` (default) or `sandbox`. Startup-only; changes require a client restart. |
 | `[model]` | `provider`, `model`, `thinking` | Startup default model pair and thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). The TUI writes the last `/model` pick here. |
 | `[builtin_skills]` | `enabled` | Enabled built-in skill names; unioned with `--builtin-skill` flags. |
 | `[triggers]` | `poll_interval_secs` | Local dynamic-trigger poll interval (default 600). |

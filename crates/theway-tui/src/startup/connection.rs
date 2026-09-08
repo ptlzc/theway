@@ -106,7 +106,14 @@ impl DaemonConnector {
             StorageServiceState::new(session_ops, storage_ops),
         );
 
-        let (mut desired_config, notes) = assemble_config(cli, cwd).await;
+        let mut notes = Vec::new();
+        // Fresh installs get a default config.toml so `[executor] kind` is
+        // explicit and editable (issue #123). Existing files are never touched.
+        if let Err(err) = crate::config_payload::ensure_default_config(cli.home.as_deref()).await {
+            notes.push(format!("config: cannot initialize config.toml: {err}"));
+        }
+        let (mut desired_config, file_notes) = assemble_config(cli, cwd).await;
+        notes.extend(file_notes);
         apply_controller_endpoints(
             &mut desired_config,
             cli.daemon,

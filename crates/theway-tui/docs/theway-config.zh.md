@@ -12,10 +12,11 @@
 
 ## config.toml
 
-由客户端在启动时读取，并作为 settings payload 提供给 daemon；daemon 自己不读这个文件。优先级为 CLI 参数 > config.toml > 内置默认值。
+由客户端在启动时读取，并作为 settings payload 提供给 daemon；daemon 自己不读这个文件。全新安装或客户端首次启动时会创建默认文件，内容为 `[executor] kind = "local"`；已存在的文件绝不覆盖。优先级为 CLI 参数 > config.toml > 内置默认值。
 
 | Section | 键 | 含义 |
 |---|---|---|
+| `[executor]` | `kind` | executor 支撑工具的执行环境：`local`（默认）或 `sandbox`。启动时生效，修改后需重启客户端。 |
 | `[model]` | `provider`、`model`、`thinking` | 启动默认模型对与思考等级（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`）。TUI 把最近一次 `/model` 的选择写到这里。 |
 | `[builtin_skills]` | `enabled` | 启用的内置 skill 名称；与 `--builtin-skill` 参数取并集。 |
 | `[triggers]` | `poll_interval_secs` | 本地动态 trigger 轮询间隔（默认 600）。 |
