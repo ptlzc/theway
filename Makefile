@@ -117,6 +117,10 @@ run: ## build + run theway in dev mode (interactive)
 install: ## install theway + tw into $(CARGO_HOME)/bin (via scripts/install.sh)
 	scripts/install.sh
 
+.PHONY: install-release
+install-release: ## install/update the latest GitHub Release binaries (no cargo build)
+	scripts/install-release.sh
+
 # --- docs / housekeeping ----------------------------------------------------
 
 .PHONY: doc

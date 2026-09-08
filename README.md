@@ -24,6 +24,33 @@ cargo install --locked theway-tui theway-daemon
 
 This installs the `theway` and `thewayd` binaries from crates.io into `~/.cargo/bin`.
 
+### Quick install / update with curl
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-release.sh | bash
+```
+
+This downloads the latest prebuilt `theway`, `thewayd`, and `tgrep` release binaries from GitHub for your OS/architecture and atomically replaces the installed copies in `~/.cargo/bin` (plus the `tw` shorthand). It is much faster than `cargo install` because it never compiles anything.
+
+The script detects Linux/macOS/Windows (`x86_64` / `aarch64`), verifies the downloaded files against the release `SHA256SUMS`, and leaves a running `thewayd` alone by default. Useful variants:
+
+```bash
+# 安装后立即重启旧 thewayd (其他终端的会话会断开)
+curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-release.sh | bash -s -- --restart-daemon
+
+# 固定版本 / 指定安装目录
+curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-release.sh | bash -s -- --tag v0.1.22 --bin-dir ~/.local/bin
+```
+
+If you prefer to inspect the script before running it, download it first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-release.sh -o install-release.sh
+bash install-release.sh
+```
+
+From a repository checkout, `make install-release` runs the same script.
+
 The npm package [`@theway-ai/sdk`](https://www.npmjs.com/package/@theway-ai/sdk) is a TypeScript SDK for talking to `thewayd`; it is not the CLI.
 
 ### Install locally
