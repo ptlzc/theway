@@ -2,25 +2,28 @@
 # =============================================================================
 # install-release — install/update theway from prebuilt GitHub Release binaries
 #
-# 用法:
-#   scripts/install-release.sh                    # 安装/更新到 ~/.cargo/bin
-#   scripts/install-release.sh --bin-dir DIR      # 安装到 DIR
-#   scripts/install-release.sh --tag v0.1.22      # 指定版本 (默认 latest release)
-#   scripts/install-release.sh --restart-daemon   # 安装后立即重启旧 thewayd
-#   scripts/install-release.sh --dry-run          # 只打印将下载的资产和 URL
+# Usage:
+#   scripts/install-release.sh                    # install/update into ~/.cargo/bin
+#   scripts/install-release.sh --bin-dir DIR      # install into DIR
+#   scripts/install-release.sh --tag v0.1.22      # pin a release (default: latest)
+#   scripts/install-release.sh --restart-daemon   # restart the old thewayd afterwards
+#   scripts/install-release.sh --dry-run          # print the assets and URLs only
 #   scripts/install-release.sh --help
 #
-# 行为:
-#   - 从 GitHub API 解析 latest release tag (可用 --tag 固定版本)
-#   - 按当前 OS/arch 选择 x86_64/aarch64 + linux/darwin/windows 资产
-#   - 下载 theway / thewayd / tgrep 三个原始二进制并原子替换安装
-#   - 下载 SHA256SUMS 并对本次安装的三个文件做校验 (系统有 sha256sum 或
-#     shasum 时; 可用 --no-verify 跳过)
-#   - 生成 `tw` 简写 (与 theway 相同)
-#   - 默认不打断正在运行的 thewayd; --restart-daemon 保留旧行为并立即切换
+# Behavior:
+#   - Resolve the latest release tag from the GitHub API (pin it with --tag).
+#   - Select x86_64/aarch64 assets for Linux, macOS, or Windows.
+#   - Download the theway, thewayd, and tgrep binaries and replace them
+#     atomically in the target directory.
+#   - Download SHA256SUMS and verify the three installed binaries when
+#     sha256sum (Linux) or shasum (macOS) is available; --no-verify skips.
+#   - Create the `tw` shorthand (same binary as theway).
+#   - Leave a running thewayd alone by default; --restart-daemon switches it
+#     immediately.
 #
-# 依赖: bash, curl, uname, 以及 sha256sum (Linux) 或 shasum (macOS) 之一。
-# 这是 install.sh 的快速替代: 直接下载 GitHub Release 产物, 不做 cargo 编译。
+# Dependencies: bash, curl, uname, and sha256sum or shasum.
+# This is the fast alternative to scripts/install.sh: it downloads GitHub
+# Release artifacts instead of building with Cargo.
 # =============================================================================
 
 set -euo pipefail
@@ -33,13 +36,13 @@ SKIP_VERIFY=0
 TAG="${THEWAY_RELEASE_TAG:-}"
 
 usage() {
-    sed -n '4,9p' "${BASH_SOURCE[0]}"
+    sed -n '5,9p' "${BASH_SOURCE[0]}"
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --bin-dir)
-            BIN_DIR="${2:?--bin-dir 需要一个目录参数}"
+            BIN_DIR="${2:?--bin-dir requires a directory argument}"
             shift 2
             ;;
         --bin-dir=*)
@@ -47,7 +50,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --tag)
-            TAG="${2:?--tag 需要一个版本参数}"
+            TAG="${2:?--tag requires a version argument}"
             shift 2
             ;;
         --tag=*)
@@ -71,7 +74,7 @@ while [ $# -gt 0 ]; do
             exit 0
             ;;
         *)
-            echo "install-release.sh: 未知参数: $1" >&2
+            echo "install-release.sh: unknown argument: $1" >&2
             usage >&2
             exit 2
             ;;
@@ -79,7 +82,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$TAG" ]; then
-    echo "==> 查询 $REPO 最新 release"
+    echo "==> Resolving the latest release of $REPO"
     TAG="$(curl -fsSL --retry 3 --retry-delay 2 \
         "https://api.github.com/repos/$REPO/releases/latest" \
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
@@ -88,12 +91,12 @@ fi
 case "$TAG" in
     v*) ;;
     *)
-        echo "install-release.sh: 无效的 tag: $TAG (期望 vX.Y.Z)" >&2
+        echo "install-release.sh: invalid tag: $TAG (expected vX.Y.Z)" >&2
         exit 2
         ;;
 esac
 
-# ── 平台映射 ─────────────────────────────────────────────────────────────────
+# ── Platform mapping ─────────────────────────────────────────────────────────
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 EXE=""
@@ -122,8 +125,8 @@ case "$OS" in
 esac
 
 if [ -z "$TARGET" ]; then
-    echo "install-release.sh: 不支持的平台: $OS/$ARCH" >&2
-    echo "支持的平台: x86_64/aarch64 的 Linux、macOS、Windows。" >&2
+    echo "install-release.sh: unsupported platform: $OS/$ARCH" >&2
+    echo "Supported platforms: Linux, macOS, and Windows on x86_64 or aarch64." >&2
     exit 2
 fi
 
@@ -148,7 +151,7 @@ mkdir -p "$BIN_DIR"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/theway-release.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-echo "==> 下载 $TAG ($TARGET) 的预编译二进制"
+echo "==> Downloading prebuilt $TAG binaries for $TARGET"
 
 download_asset() {
     local asset="$1"
@@ -162,10 +165,10 @@ for asset in "${ASSETS[@]}"; do
     download_asset "$asset"
 done
 
-# ── SHA256 校验 ──────────────────────────────────────────────────────────────
+# ── SHA256 verification ──────────────────────────────────────────────────────
 verify_assets() {
     if [ "$SKIP_VERIFY" -eq 1 ]; then
-        echo "==> 跳过 SHA256 校验"
+        echo "==> Skipping SHA256 verification"
         return 0
     fi
     local sum_cmd=""
@@ -175,7 +178,7 @@ verify_assets() {
         sum_cmd="shasum -a 256"
     fi
     if [ -z "$sum_cmd" ]; then
-        echo "==> 未找到 sha256sum/shasum, 跳过 SHA256 校验" >&2
+        echo "==> sha256sum/shasum not found; skipping SHA256 verification" >&2
         return 0
     fi
     curl -fsSL --retry 3 --retry-delay 2 \
@@ -185,24 +188,24 @@ verify_assets() {
         local expected
         expected="$(awk -v name="$asset" '$2 == name {print $1; exit}' "$TMP_DIR/SHA256SUMS")"
         if [ -z "$expected" ]; then
-            echo "install-release.sh: SHA256SUMS 缺少 $asset" >&2
+            echo "install-release.sh: SHA256SUMS is missing $asset" >&2
             return 1
         fi
         local actual
         actual="$($sum_cmd "$TMP_DIR/$asset" | awk '{print $1}')"
         if [ "$expected" != "$actual" ]; then
-            echo "install-release.sh: SHA256 校验失败: $asset" >&2
+            echo "install-release.sh: SHA256 verification failed for $asset" >&2
             echo "  expected: $expected" >&2
             echo "  actual:   $actual" >&2
             return 1
         fi
     done
-    echo "==> SHA256 校验通过"
+    echo "==> SHA256 verification passed"
 }
 
 verify_assets
 
-# ── 原子替换安装 ────────────────────────────────────────────────────────────
+# ── Atomic install ───────────────────────────────────────────────────────────
 install_asset() {
     local product="$1"
     local src="$TMP_DIR/$product-$TAG-$TARGET$EXE"
@@ -213,20 +216,20 @@ install_asset() {
     mv -f "$tmp_dst" "$dst"
 }
 
-echo "==> 安装到 $BIN_DIR"
+echo "==> Installing into $BIN_DIR"
 install_asset theway
 install_asset thewayd
 install_asset tgrep
 
-# ── tw 简写 ─────────────────────────────────────────────────────────────────
+# ── tw shorthand ─────────────────────────────────────────────────────────────
 tmp_tw="$BIN_DIR/.tw.tmp.$$"
 cp "$BIN_DIR/theway$EXE" "$tmp_tw"
 mv -f "$tmp_tw" "$BIN_DIR/tw$EXE"
 
-# ── 运行中的 daemon 处理 (与 install.sh 一致) ────────────────────────────────
+# ── Running daemon handling (same policy as scripts/install.sh) ─────────────
 THEWAY_BASE="${THEWAY_DIR:-$HOME/.theway}"
 if [ "$RESTART_DAEMON" -eq 1 ]; then
-    echo "==> 重启旧版 thewayd 进程 (其他终端的 theway 会话会断开)"
+    echo "==> Restarting the old thewayd process (other terminal sessions will disconnect)"
     pkill -TERM -x thewayd 2>/dev/null || true
     for _ in 1 2 3 4 5; do
         pgrep -x thewayd >/dev/null 2>&1 || break
@@ -243,20 +246,20 @@ else
         fi
     done
     if pgrep -x thewayd >/dev/null 2>&1; then
-        echo "==> 检测到仍在运行的 thewayd (继续服务现有会话, 不受影响):"
+        echo "==> A running thewayd is still serving existing sessions and is unaffected:"
         for pid in $(pgrep -x thewayd); do
-            echo "     pid $pid — 关闭对应 TUI 后会在数秒内自动退出, 下次启动即用新二进制"
+            echo "     pid $pid — it exits a few seconds after its TUI closes; the next start uses the new binary"
         done
     fi
 fi
 
-echo "==> 完成:"
+echo "==> Done:"
 "$BIN_DIR/theway$EXE" --version
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *)
-        echo "提示: $BIN_DIR 不在 PATH 中, 请加入 shell 配置, 例如:" >&2
+        echo "Note: $BIN_DIR is not on PATH; add it to your shell profile, for example:" >&2
         echo "  export PATH=\"$BIN_DIR:\$PATH\"" >&2
         ;;
 esac
