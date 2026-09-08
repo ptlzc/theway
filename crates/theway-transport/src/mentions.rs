@@ -3,16 +3,17 @@
 //! intake expand the same mention syntax.
 //!
 //! When the user types a prompt containing `@<path>` tokens, the REPL resolves each path
-//! against the current working directory, reads the file, and prepends a small attachment
-//! block to the prompt. The agent never sees the raw `@path` token — it sees:
+//! against the current working directory, reads the file, and appends a small attachment
+//! block to the END of the user message. Missing/unrecognized `@` paths are silently
+//! skipped — they add no error block and no prompt. The agent sees:
 //!
 //! ```text
+//! <user's original text>
+//!
 //! Files in context:
 //! <file path="src/foo.rs">
 //! …content…
 //! </file>
-//!
-//! <user's original text>
 //! ```
 //!
 //! Size cap: 64 KiB per file. Files larger than that are truncated with a "(truncated at N
@@ -23,8 +24,10 @@ use std::path::{Path, PathBuf};
 
 const MAX_BYTES: usize = 64 * 1024;
 
-/// Returns `(rewritten_prompt, resolved_paths)`. If `input` has no `@<path>` tokens, the
-/// rewritten prompt is the original and `resolved_paths` is empty.
+/// Returns `(rewritten_prompt, resolved_paths)`. If `input` has no `@<path>` tokens,
+/// or every mention is an unrecognized/missing path, the rewritten prompt is the
+/// original and `resolved_paths` is empty. Recognized files are appended after the
+/// user's original text; failed resolutions are silently skipped.
 pub async fn expand(input: &str, cwd: &Path) -> (String, Vec<PathBuf>) {
     let mentions = extract_mentions(input);
     if mentions.is_empty() {
@@ -34,32 +37,26 @@ pub async fn expand(input: &str, cwd: &Path) -> (String, Vec<PathBuf>) {
     let mut resolved = Vec::new();
     for rel in &mentions {
         let path = cwd.join(rel);
-        match tokio::fs::read_to_string(&path).await {
-            Ok(text) => {
-                let (body, truncated) = truncate(&text);
-                let display = rel.to_string();
-                let block = if truncated {
-                    format!(
-                        "<file path=\"{display}\">\n{body}\n\n(truncated at {} KiB)\n</file>",
-                        MAX_BYTES / 1024
-                    )
-                } else {
-                    format!("<file path=\"{display}\">\n{body}\n</file>")
-                };
-                blocks.push(block);
-                resolved.push(path);
-            }
-            Err(e) => {
-                blocks.push(format!(
-                    "<file path=\"{rel}\" error=\"{e}\" />",
-                    rel = rel,
-                    e = e
-                ));
-            }
+        if let Ok(text) = tokio::fs::read_to_string(&path).await {
+            let (body, truncated) = truncate(&text);
+            let display = rel.to_string();
+            let block = if truncated {
+                format!(
+                    "<file path=\"{display}\">\n{body}\n\n(truncated at {} KiB)\n</file>",
+                    MAX_BYTES / 1024
+                )
+            } else {
+                format!("<file path=\"{display}\">\n{body}\n</file>")
+            };
+            blocks.push(block);
+            resolved.push(path);
         }
     }
-    let header = format!("Files in context:\n{}\n\n", blocks.join("\n"));
-    (format!("{header}{input}"), resolved)
+    if blocks.is_empty() {
+        return (input.to_string(), Vec::new());
+    }
+    let attachments = format!("Files in context:\n{}", blocks.join("\n"));
+    (format!("{input}\n\n{attachments}"), resolved)
 }
 
 /// Scan for `@<path>` tokens. Stops a path at whitespace, semicolon, comma, parenthesis, or
@@ -142,21 +139,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expand_reads_files_and_falls_back_to_error_block_on_missing() {
+    async fn expand_reads_files_and_appends_them_after_the_user_text() {
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("hello.txt");
         std::fs::write(&p, "hi there").unwrap();
         let (out, resolved) = expand("look at @hello.txt and @missing.txt", dir.path()).await;
-        assert!(out.starts_with("Files in context:"));
+        assert!(
+            out.starts_with("look at @hello.txt"),
+            "original text stays first: {out}"
+        );
+        let header = out.find("Files in context:").expect("header present");
+        assert!(header > 0, "attachments are appended, not prepended: {out}");
         assert!(out.contains("<file path=\"hello.txt\">"), "{out}");
         assert!(out.contains("hi there"), "{out}");
-        assert!(out.contains("<file path=\"missing.txt\""), "{out}");
-        assert!(out.contains("look at @hello.txt"), "original kept: {out}");
+        assert!(
+            !out.contains("error="),
+            "unrecognized mentions are skipped without an error block: {out}"
+        );
         assert_eq!(
             resolved.len(),
             1,
             "only existing files in resolved: {resolved:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn expand_skips_mentions_that_do_not_resolve() {
+        let dir = TempDir::new().unwrap();
+        let (out, resolved) = expand("check @missing.txt please", dir.path()).await;
+        assert_eq!(out, "check @missing.txt please");
+        assert!(resolved.is_empty());
     }
 
     #[tokio::test]
