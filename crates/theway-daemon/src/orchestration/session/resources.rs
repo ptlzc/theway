@@ -256,7 +256,7 @@ impl SessionExtensionResources {
                 for permission in package.granted_permissions() {
                     if let theway_contract::extension::ExtensionPermission::SecretsRead(name) =
                         permission
-                        && let Ok(value) = std::env::var(name)
+                        && let Some(value) = crate::ts_extensions::resolve_extension_secret(name)
                     {
                         broker_services.set_secret(name, value);
                     }

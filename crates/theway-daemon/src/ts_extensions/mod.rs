@@ -46,6 +46,7 @@ use std::path::Path;
 
 pub use audit::ExtensionAuditLog;
 pub use broker_services::ExtensionBrokerServices;
+pub(crate) use broker_services::resolve_extension_secret;
 pub use catalog::{ExtensionPackage, PackageCatalog};
 pub use compaction::{
     LegacyCompactionHost, TsCompactAlgorithm, compact_algorithm_registry,

@@ -190,7 +190,7 @@ impl QuickJsEnginePool {
         for package in catalog.effective_packages() {
             for permission in package.granted_permissions() {
                 if let ExtensionPermission::SecretsRead(name) = permission
-                    && let Ok(value) = std::env::var(name)
+                    && let Some(value) = super::broker_services::resolve_extension_secret(name)
                 {
                     self.inner.broker_services.set_secret(name, value);
                 }

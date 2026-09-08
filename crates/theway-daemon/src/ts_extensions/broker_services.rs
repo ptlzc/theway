@@ -12,6 +12,22 @@ use super::engine::EngineInstanceKey;
 use super::live_event::LiveEvent;
 use super::state_broker::ExtensionStateBroker;
 
+/// Resolve a `secrets.read:<name>` capability value: the exact environment
+/// variable name wins; otherwise the user's configured provider credential
+/// (`~/.theway/auth.json`, with the provider env-var mapping) is used. This
+/// lets extensions reuse a provider the user already logged into instead of
+/// requiring a second copy of the key in the daemon environment.
+pub(crate) fn resolve_extension_secret(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .or_else(|| {
+            theway_transport::auth::AuthStore::load()
+                .ok()
+                .and_then(|store| store.resolve_for_provider(name))
+        })
+        .filter(|value| !value.trim().is_empty())
+}
+
 /// Session-keyed publisher for the live plugin event seam. Every session host
 /// registers one unbounded sender; capability brokers call [`publish`] directly
 /// from the QuickJS worker and the host pump delivers the event asynchronously.

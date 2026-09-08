@@ -1,8 +1,45 @@
 
 use theway_contract::extension::{ExtensionDiagnostic, ExtensionDiagnosticCode, ExtensionDurableEntry};
 
-use super::super::broker_services::ExtensionBrokerServices;
+use super::super::broker_services::{ExtensionBrokerServices, resolve_extension_secret};
 use super::super::engine::EngineInstanceKey;
+
+fn set_env(key: &str, value: Option<&std::ffi::OsStr>) {
+    unsafe {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+    }
+}
+
+#[test]
+fn resolve_extension_secret_prefers_env_then_configured_provider_credential() {
+    let _env_guard = theway_transport::auth::ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let previous_base = std::env::var_os("THEWAY_DIR");
+    let previous_exact = std::env::var_os("secret-provider-test");
+    set_env("THEWAY_DIR", Some(temp.path().as_os_str()));
+    set_env("secret-provider-test", None);
+
+    theway_transport::auth::save_api_key("secret-provider-test", "sk-auth-store")
+        .expect("save provider credential");
+    assert_eq!(
+        resolve_extension_secret("secret-provider-test").as_deref(),
+        Some("sk-auth-store"),
+        "a user-configured provider credential must back extension secrets"
+    );
+
+    set_env("secret-provider-test", Some(std::ffi::OsStr::new("sk-exact-env")));
+    assert_eq!(
+        resolve_extension_secret("secret-provider-test").as_deref(),
+        Some("sk-exact-env"),
+        "the exact env-var permission name must win over the auth store"
+    );
+
+    set_env("THEWAY_DIR", previous_base.as_deref());
+    set_env("secret-provider-test", previous_exact.as_deref());
+}
 
 #[test]
 fn secrets_set_get_has() {
