@@ -12,7 +12,7 @@ Configuration reference for an agent working inside theway: where every config f
 
 ## config.toml
 
-Read by the client at startup and provisioned to the daemon as a settings payload; the daemon does not read this file itself. On a fresh install or first client start the file is created with `[executor] kind = "local"`; existing files are never overwritten. Precedence is CLI flags > config.toml > built-in default.
+Read by the client at startup and provisioned to the daemon as a settings payload; the daemon does not read this file itself. On a fresh install or first client start the file is created with `[executor] kind = "local"` plus a commented-out DeepSeek `[model]` sample; existing files are never overwritten. API keys are never accepted from this file — provider credentials come from environment variables or the credential store. Precedence is CLI flags > config.toml > built-in default.
 
 | Section | Keys | Meaning |
 |---|---|---|

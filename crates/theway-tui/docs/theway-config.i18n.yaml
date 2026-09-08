@@ -1,4 +1,4 @@
 # English-first bilingual documentation record. Update both files, then run:
 #   scripts/verify-doc-i18n.py --write crates/theway-tui/docs/theway-config.md
-theway-config.md: 2ccf5c3fdd17c8d421d64e1066accd5282976448
-theway-config.zh.md: 9d461f445f6902c6ee3f5f610f0cad92a5a4bd45
+theway-config.md: 7fbb8a14bd8b993a68e9cad8ab41776ea0ae2b8b
+theway-config.zh.md: a2b0a963bcc4de58796b69de018c1051864849de

@@ -43,6 +43,15 @@ use super::*;
             theway_transport::config::parse_executor_kind(&text).unwrap(),
             Some("local".into())
         );
+        // The model block is only a commented sample; it must not become a
+        // hardcoded default that overrides env auto-detection.
+        assert_eq!(
+            theway_transport::config::parse_model_default(&text).unwrap(),
+            None
+        );
+        assert!(text.contains("provider = \"deepseek\""));
+        assert!(text.contains("model = \"deepseek-v4-flash\""));
+        assert!(text.contains("api_key = \"sk-xxxxxx\""));
 
         // Second call is a no-op and never rewrites the file.
         assert!(!ensure_default_config_at(&path).await.unwrap());

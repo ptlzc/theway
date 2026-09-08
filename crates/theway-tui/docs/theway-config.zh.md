@@ -12,7 +12,7 @@
 
 ## config.toml
 
-由客户端在启动时读取，并作为 settings payload 提供给 daemon；daemon 自己不读这个文件。全新安装或客户端首次启动时会创建默认文件，内容为 `[executor] kind = "local"`；已存在的文件绝不覆盖。优先级为 CLI 参数 > config.toml > 内置默认值。
+由客户端在启动时读取，并作为 settings payload 提供给 daemon；daemon 自己不读这个文件。全新安装或客户端首次启动时会创建默认文件，内容为 `[executor] kind = "local"` 加一段注释掉的 DeepSeek `[model]` 示例；已存在的文件绝不覆盖。API key 从不从本文件读取——provider 凭证来自环境变量或凭证存储。优先级为 CLI 参数 > config.toml > 内置默认值。
 
 | Section | 键 | 含义 |
 |---|---|---|

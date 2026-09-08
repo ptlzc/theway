@@ -98,6 +98,15 @@ if [ ! -e "$CONFIG_FILE" ]; then
 
 [executor]
 kind = "local"
+
+# Example model defaults (DeepSeek official, commented out).
+# Uncomment provider/model/thinking and replace with your own values;
+# when they stay commented the daemon keeps environment auto-detection.
+# [model]
+# provider = "deepseek"
+# model = "deepseek-v4-flash"
+# thinking = "medium"
+# api_key = "sk-xxxxxx"  # EXAMPLE ONLY — real keys are read from environment variables, never written here.
 EOF
     echo "==> 初始化默认配置 $CONFIG_FILE"
 fi

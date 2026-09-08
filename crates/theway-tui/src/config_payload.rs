@@ -92,14 +92,25 @@ pub(crate) fn resolve_config_base_dir(
 }
 
 /// Default `config.toml` seeded on first run / fresh installs so the
-/// runtime-selected `[executor]` section is explicit (issue #123). The daemon
-/// still falls back to `local` when the file is absent, so this file is a
-/// convenience, not a requirement.
+/// runtime-selected `[executor]` section is explicit (issue #123). The model
+/// section is shipped COMMENTED OUT as a DeepSeek sample: missing model values
+/// keep the daemon's env auto-detection, and API keys are never accepted from
+/// this file — the `sk-xxxxxx` placeholder documents that real keys live in
+/// environment variables / the credential store.
 pub(crate) const DEFAULT_CONFIG_TOML: &str = r#"# theway default configuration.
 # Missing values fall back to built-in defaults; delete this file to reset.
 
 [executor]
 kind = "local"
+
+# Example model defaults (DeepSeek official, commented out).
+# Uncomment provider/model/thinking and replace with your own values;
+# when they stay commented the daemon keeps environment auto-detection.
+# [model]
+# provider = "deepseek"
+# model = "deepseek-v4-flash"
+# thinking = "medium"
+# api_key = "sk-xxxxxx"  # EXAMPLE ONLY — real keys are read from environment variables, never written here.
 "#;
 
 /// Create the controller-owned `config.toml` when it is missing.
