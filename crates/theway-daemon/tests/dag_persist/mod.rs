@@ -79,6 +79,7 @@ async fn test_context(
         storage,
         paths,
         crate::executor::executor_for_cwd(cwd.to_path_buf()),
+        theway_core::executor::ExecutorKind::Local,
         theway_llm_provider::get_model(
             &theway_llm_provider::Provider::from("openai"),
             "gpt-4o-mini",

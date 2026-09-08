@@ -344,6 +344,9 @@ pub struct SessionExecutionContext {
     pub paths: crate::DaemonPaths,
     /// Execution environment this context's harness tools dispatch through.
     pub executor: Arc<dyn theway_core::executor::ToolExecutor>,
+    /// Runtime-selected execution environment (issue #123). Drives the
+    /// fail-closed tool-set policy alongside `executor`.
+    pub executor_kind: theway_core::executor::ExecutorKind,
     /// Effective active model for this context. `None` when the client has not
     /// yet injected a model for the session; the turn loop errors until one is
     /// assigned via `set_model`.
@@ -367,6 +370,7 @@ impl SessionExecutionContext {
         storage: Arc<dyn RuntimeStorage>,
         paths: crate::DaemonPaths,
         executor: Arc<dyn theway_core::executor::ToolExecutor>,
+        executor_kind: theway_core::executor::ExecutorKind,
         model: impl Into<Option<theway_llm_provider::Model>>,
         thinking: theway_core::ThinkingLevel,
         resources: SessionProjectResources,
@@ -391,6 +395,7 @@ impl SessionExecutionContext {
             storage,
             paths,
             executor,
+            executor_kind,
             model: model.into(),
             thinking,
             resources,
@@ -420,6 +425,7 @@ impl SessionExecutionContext {
             .with_context(|| format!("canonicalize work dir {}", requested_work_dir.display()))?;
         let paths = base_paths.with_work_dir(cwd.clone());
         let executor = crate::executor::executor_for_cwd(cwd.clone());
+        let executor_kind = theway_core::executor::ExecutorKind::Local;
         let loaded_mcp = if load_local_sources {
             crate::mcp_loader::load_all(&paths).await
         } else {
@@ -440,6 +446,7 @@ impl SessionExecutionContext {
             storage,
             base_paths,
             executor,
+            executor_kind,
             model,
             thinking,
             resources,

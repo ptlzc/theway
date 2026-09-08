@@ -46,7 +46,7 @@ impl SessionRuntimeBuilder {
             .insert(ctx.session_id.clone(), skill_harness_cell.clone());
         self.dag_engine.set_session_launcher(
             Some(ctx.session_id.clone()),
-            tools::node_launcher(
+            tools::node_launcher_with_kind(
                 self.dag_engine.clone(),
                 ctx.model.clone(),
                 Some(self.stream_fn.clone()),
@@ -57,6 +57,7 @@ impl SessionRuntimeBuilder {
                 skill_harness_cell.clone(),
                 ctx.executor.clone(),
                 Some(self.services.tgrep.clone()),
+                ctx.executor_kind,
             ),
         );
 
@@ -91,7 +92,7 @@ impl SessionRuntimeBuilder {
         };
         self.dag_engine.set_session_launcher(
             Some(session_id.to_string()),
-            tools::node_launcher(
+            tools::node_launcher_with_kind(
                 self.dag_engine.clone(),
                 model,
                 Some(self.stream_fn.clone()),
@@ -102,6 +103,7 @@ impl SessionRuntimeBuilder {
                 cell,
                 ctx.executor.clone(),
                 Some(self.services.tgrep.clone()),
+                ctx.executor_kind,
             ),
         );
         true

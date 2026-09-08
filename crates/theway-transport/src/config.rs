@@ -132,6 +132,25 @@ pub async fn relay_base_url() -> Result<String, String> {
     }
 }
 
+/// Parse the `[executor] kind = "local" | "sandbox"` setting from
+/// `config.toml`. Missing section/key → `None` (local is the daemon default).
+/// Any other value is an error: a typo would silently change the execution
+/// environment.
+pub fn parse_executor_kind(toml_text: &str) -> Result<Option<String>, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    let Some(kind) = parsed.executor.and_then(|section| section.kind) else {
+        return Ok(None);
+    };
+    let normalized = kind.trim().to_lowercase();
+    if !matches!(normalized.as_str(), "local" | "sandbox") {
+        return Err(format!(
+            "invalid `[executor] kind` value {kind:?}: expected \"local\" or \"sandbox\""
+        ));
+    }
+    Ok(Some(normalized))
+}
+
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     triggers: Option<TriggerConfigSection>,
@@ -139,6 +158,7 @@ struct ConfigFile {
     model: Option<ModelConfigSection>,
     tui: Option<TuiConfigSection>,
     orchestrator: Option<OrchestratorConfigSection>,
+    executor: Option<ExecutorConfigSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,6 +219,11 @@ struct RelayConfigSection {
 #[derive(Debug, Deserialize)]
 struct TriggerConfigSection {
     poll_interval_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecutorConfigSection {
+    kind: Option<String>,
 }
 
 #[cfg(test)]
@@ -321,6 +346,21 @@ poll_interval_secs = 0
     fn parse_model_thinking_default_rejects_unknown_levels() {
         assert!(parse_model_thinking_default("[model]\nthinking = \"turbo\"\n").is_err());
         assert!(parse_model_thinking_default("[model]\nthinking = \"\"\n").is_err());
+    }
+
+    #[test]
+    fn parse_executor_kind_reads_and_validates() {
+        assert_eq!(parse_executor_kind("").unwrap(), None);
+        assert_eq!(
+            parse_executor_kind("[executor]\nkind = \"Sandbox\"\n").unwrap(),
+            Some("sandbox".into())
+        );
+        assert_eq!(
+            parse_executor_kind("[executor]\nkind = \"local\"\n").unwrap(),
+            Some("local".into())
+        );
+        assert!(parse_executor_kind("[executor]\nkind = \"docker\"\n").is_err());
+        assert!(parse_executor_kind("[executor]\nkind = \"\"\n").is_err());
     }
 
     #[test]

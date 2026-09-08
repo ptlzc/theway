@@ -180,6 +180,7 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
             .map(|lines| lines.min(u32::MAX as u64) as u32),
         tool_service_addr: config.tool_service_addr.clone(),
         storage_service_addr: config.storage_service_addr.clone(),
+        executor_kind: config.executor_kind.clone(),
         clear_fields: config.clear_fields.clone(),
     }
 }
@@ -222,6 +223,7 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         tui_max_feed_lines: config.tui_max_feed_lines.map(u64::from),
         tool_service_addr: config.tool_service_addr.clone(),
         storage_service_addr: config.storage_service_addr.clone(),
+        executor_kind: config.executor_kind.clone(),
         clear_fields: config.clear_fields.clone(),
     }
 }

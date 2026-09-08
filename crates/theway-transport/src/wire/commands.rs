@@ -132,6 +132,11 @@ pub struct WireDaemonConfig {
     /// legacy `thinking` toggle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    /// Execution environment for executor-backed tools ("local" | "sandbox").
+    /// Startup-only: the executor and tool set are bound when the daemon
+    /// starts, so runtime `Configure` changes are rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_kind: Option<String>,
     /// Enabled builtin skill names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_skills: Vec<String>,
@@ -261,7 +266,7 @@ pub struct WireProvisionedMcpReconnect {
 }
 
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 14] = [
+    pub const FIELDS: [&'static str; 15] = [
         "provider",
         "model",
         "base_url",
@@ -276,6 +281,7 @@ impl WireDaemonConfig {
         "tui_max_feed_lines",
         "tool_service_addr",
         "storage_service_addr",
+        "executor_kind",
     ];
 
     pub fn clears(&self, field: &str) -> bool {
@@ -302,6 +308,7 @@ impl WireDaemonConfig {
                 "base_url" => self.base_url.take().is_some(),
                 "thinking" => self.thinking.take().is_some(),
                 "thinking_level" => self.thinking_level.take().is_some(),
+                "executor_kind" => self.executor_kind.take().is_some(),
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
                 "skills" => !std::mem::take(&mut self.skills).is_empty(),
                 "templates" => !std::mem::take(&mut self.templates).is_empty(),
@@ -333,6 +340,10 @@ impl WireDaemonConfig {
         }
         if let Some(level) = patch.thinking_level.clone() {
             self.thinking_level = Some(level);
+            touched += 1;
+        }
+        if let Some(kind) = patch.executor_kind.clone() {
+            self.executor_kind = Some(kind);
             touched += 1;
         }
         if !patch.builtin_skills.is_empty() {

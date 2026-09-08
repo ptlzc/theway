@@ -21,29 +21,22 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use theway_llm_provider::Model;
-
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::multiagent::types::ToolSetResolver;
 use theway_core::{AgentTool, StreamFn};
+use theway_llm_provider::Model;
 
 use super::dag_tools;
-use super::skill::{self, SkillHarnessCell};
-use super::subagent::{SubagentTool, SubagentToolsFn};
-use theway_core::multiagent::types::AgentRunResolver;
-
-// Direct-FS-write tool bodies are only referenced from the `local` registration path.
-#[cfg(feature = "local")]
 use super::install_skill;
-#[cfg(feature = "local")]
 use super::memory::MemoryTool;
-#[cfg(feature = "local")]
 use super::remove_skill;
-#[cfg(feature = "local")]
 use super::set_skill_state;
-#[cfg(feature = "local")]
+use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
+use super::subagent::{SubagentTool, SubagentToolsFn};
+use theway_core::executor::ExecutorKind;
+use theway_core::multiagent::types::AgentRunResolver;
 
 /// Engine-owned tool names whose bodies write straight to the host filesystem outside
 /// the [`theway_core::executor::ToolExecutor`] seam:
@@ -52,10 +45,10 @@ use super::skill_builder;
 /// - `set_skill_state` — writes the `~/.theway/skill-overrides.json` overlay;
 /// - `remove_skill` — `tokio::fs` dir/file removal under `~/.theway/skills`.
 ///
-/// Registered ONLY in `local` builds; sandbox-only builds omit them (fail closed,
-/// issue #64) and name every omission via `tracing::warn`. The read-only `skill`
+/// Registered ONLY in local execution mode; sandbox mode omits them (fail closed,
+/// issue #64/#123) and names every omission via `tracing::warn`. The read-only `skill`
 /// lookup (in-memory catalog snapshot) and `reload` (harness-level rescan) stay
-/// registered in every build.
+/// registered in every mode.
 pub const LOCAL_ONLY_ENGINE_TOOL_NAMES: &[&str] = &[
     "memory",
     "install_skill",
@@ -64,15 +57,17 @@ pub const LOCAL_ONLY_ENGINE_TOOL_NAMES: &[&str] = &[
     "remove_skill",
 ];
 
-/// Sandbox-only note (issue #64): one explicit `tracing::warn` per tool-set assembly
-/// naming every engine-owned direct-FS-write tool that was left unregistered.
-#[cfg(all(not(feature = "local"), feature = "sandbox"))]
-fn warn_sandbox_omitted_engine_tools() {
-    tracing::warn!(
-        omitted = ?LOCAL_ONLY_ENGINE_TOOL_NAMES,
-        "sandbox-only build: engine tools that write directly to the host FS are NOT \
-         registered (fail closed); the in-memory `skill` lookup and `reload` remain"
-    );
+/// Sandbox-mode note (issue #64/#123): one explicit `tracing::warn` per tool-set
+/// assembly naming every engine-owned direct-FS-write tool that was left
+/// unregistered.
+fn warn_sandbox_omitted_engine_tools(kind: ExecutorKind) {
+    if kind == ExecutorKind::Sandbox {
+        tracing::warn!(
+            omitted = ?LOCAL_ONLY_ENGINE_TOOL_NAMES,
+            "sandbox execution mode: engine tools that write directly to the host FS are NOT \
+             registered (fail closed); the in-memory `skill` lookup and `reload` remain"
+        );
+    }
 }
 
 // The reload tool body lives flat in `src/tools/reload.rs` next to the other
@@ -87,7 +82,8 @@ pub type LocalToolsFn = Arc<dyn Fn() -> Vec<Arc<dyn AgentTool>> + Send + Sync>;
 
 /// Assemble the engine-owned MAIN-AGENT tool set: DAG tools, the `subagent` delegation
 /// tool, the skill family, and memory. The app layer calls this and appends its local
-/// tools (and process-level groups like MCP).
+/// tools (and process-level groups like MCP). Local execution mode assumed — daemon
+/// assembly calls [`engine_tools_for_kind`] with the runtime-selected executor kind.
 #[allow(clippy::too_many_arguments)]
 pub fn engine_tools(
     memory_dir: &Path,
@@ -102,6 +98,42 @@ pub fn engine_tools(
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
     reload_runtime: reload::ReloadRuntimeSlot,
+) -> Vec<Arc<dyn AgentTool>> {
+    engine_tools_for_kind(
+        memory_dir,
+        base_dir,
+        dag_engine,
+        subagent_registry,
+        subagent_tools,
+        launch_resolver,
+        spec_names,
+        model,
+        stream_fn,
+        skill_harness_cell,
+        session_id,
+        reload_runtime,
+        ExecutorKind::Local,
+    )
+}
+
+/// [`engine_tools`] with the runtime-selected execution environment (issue #123).
+/// In sandbox mode the direct-FS-write skill family and `memory` are omitted
+/// (fail closed, issue #64); the read-only `skill` lookup and `reload` stay.
+#[allow(clippy::too_many_arguments)]
+pub fn engine_tools_for_kind(
+    memory_dir: &Path,
+    base_dir: &Path,
+    dag_engine: &Arc<DagEngine>,
+    subagent_registry: &SubagentJobRegistry,
+    subagent_tools: SubagentToolsFn,
+    launch_resolver: AgentRunResolver,
+    spec_names: Vec<String>,
+    model: Option<&Model>,
+    stream_fn: Option<&StreamFn>,
+    skill_harness_cell: &SkillHarnessCell,
+    session_id: &str,
+    reload_runtime: reload::ReloadRuntimeSlot,
+    kind: ExecutorKind,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = Vec::new();
     // DAG tools (session-stamped: dag_* refuse runs owned by another session).
@@ -124,10 +156,9 @@ pub fn engine_tools(
         )
         .with_session_id(Some(session_id.to_string())),
     ));
-    // Skill family — each wires a fresh harness cell per harness build. In
-    // sandbox-only builds the direct-FS-write members are left unregistered
-    // (see `skill_family`).
-    tools.extend(skill_family(skill_harness_cell, base_dir));
+    // Skill family — each wires a fresh harness cell per harness build. In sandbox
+    // mode the direct-FS-write members are left unregistered (see `skill_family`).
+    tools.extend(skill_family(kind, skill_harness_cell, base_dir));
     // Reload: the LLM's entry point for rescan semantics. The application-owned
     // runtime slot is bound after TurnHost construction.
     tools.push(Arc::new(reload::ReloadTool::new(
@@ -136,9 +167,8 @@ pub fn engine_tools(
     )));
     // Memory: same dir as the parent's store. Direct `tokio::fs` writes — gated
     // the same way as the skill writers (issue #64).
-    push_memory_tool(&mut tools, memory_dir);
-    #[cfg(all(not(feature = "local"), feature = "sandbox"))]
-    warn_sandbox_omitted_engine_tools();
+    push_memory_tool(&mut tools, memory_dir, kind);
+    warn_sandbox_omitted_engine_tools(kind);
     tools
 }
 
@@ -146,31 +176,42 @@ pub fn engine_tools(
 /// no `subagent` (no recursive delegation) and no `dag_*` (no DAG orchestration from
 /// inside a subagent). Skills + memory are engine capabilities a subagent may use.
 /// `base_dir` is the theway base dir (issue #66: `DaemonPaths::base`), wired into
-/// the direct-FS-write skill family.
+/// the direct-FS-write skill family. Local execution mode assumed.
 pub fn subagent_engine_tools(
     memory_dir: &Path,
     base_dir: &Path,
     skill_harness_cell: &SkillHarnessCell,
 ) -> Vec<Arc<dyn AgentTool>> {
-    let mut tools = skill_family(skill_harness_cell, base_dir);
-    push_memory_tool(&mut tools, memory_dir);
-    #[cfg(all(not(feature = "local"), feature = "sandbox"))]
-    warn_sandbox_omitted_engine_tools();
+    subagent_engine_tools_for_kind(
+        memory_dir,
+        base_dir,
+        skill_harness_cell,
+        ExecutorKind::Local,
+    )
+}
+
+/// [`subagent_engine_tools`] with the runtime-selected execution environment
+/// (issue #123): sandbox mode omits the direct-FS-write tools.
+pub fn subagent_engine_tools_for_kind(
+    memory_dir: &Path,
+    base_dir: &Path,
+    skill_harness_cell: &SkillHarnessCell,
+    kind: ExecutorKind,
+) -> Vec<Arc<dyn AgentTool>> {
+    let mut tools = skill_family(kind, skill_harness_cell, base_dir);
+    push_memory_tool(&mut tools, memory_dir, kind);
+    warn_sandbox_omitted_engine_tools(kind);
     tools
 }
 
-/// Append the `memory` tool in `local` builds only. Its body reads/writes the memory
-/// dir with `tokio::fs` directly (no [`theway_core::executor::ToolExecutor`] seam), so
-/// sandbox-only builds leave it unregistered (issue #64, fail closed); the omission is
-/// covered by the assembly-level warn next to the call sites.
-#[cfg(feature = "local")]
-fn push_memory_tool(tools: &mut Vec<Arc<dyn AgentTool>>, memory_dir: &Path) {
-    tools.push(Arc::new(MemoryTool::new(memory_dir.to_path_buf())));
-}
-
-#[cfg(not(feature = "local"))]
-fn push_memory_tool(tools: &mut Vec<Arc<dyn AgentTool>>, memory_dir: &Path) {
-    let _ = (tools, memory_dir);
+/// Append the `memory` tool in local execution mode only. Its body reads/writes the
+/// memory dir with `tokio::fs` directly (no [`theway_core::executor::ToolExecutor`]
+/// seam), so sandbox mode leaves it unregistered (issue #64, fail closed); the
+/// omission is covered by [`warn_sandbox_omitted_engine_tools`].
+fn push_memory_tool(tools: &mut Vec<Arc<dyn AgentTool>>, memory_dir: &Path, kind: ExecutorKind) {
+    if kind == ExecutorKind::Local {
+        tools.push(Arc::new(MemoryTool::new(memory_dir.to_path_buf())));
+    }
 }
 
 /// Build the ONE subagent tool-set resolver: every spec (explorer / planner /
@@ -184,11 +225,28 @@ pub fn subagent_tools(
     skill_harness_cell: &SkillHarnessCell,
     local_tools: LocalToolsFn,
 ) -> ToolSetResolver {
+    subagent_tools_for_kind(
+        memory_dir,
+        base_dir,
+        skill_harness_cell,
+        local_tools,
+        ExecutorKind::Local,
+    )
+}
+
+/// [`subagent_tools`] with the runtime-selected execution environment (issue #123).
+pub fn subagent_tools_for_kind(
+    memory_dir: &Path,
+    base_dir: &Path,
+    skill_harness_cell: &SkillHarnessCell,
+    local_tools: LocalToolsFn,
+    kind: ExecutorKind,
+) -> ToolSetResolver {
     let memory_dir = memory_dir.to_path_buf();
     let base_dir = base_dir.to_path_buf();
     let cell = skill_harness_cell.clone();
     Arc::new(move |_spec_name: &str| {
-        let mut tools = subagent_engine_tools(&memory_dir, &base_dir, &cell);
+        let mut tools = subagent_engine_tools_for_kind(&memory_dir, &base_dir, &cell, kind);
         tools.extend(local_tools());
         tools
     })
@@ -203,20 +261,20 @@ pub fn subagent_tools(
 /// this set reads `THEWAY_DIR` / `HOME` at construction time. `base_dir.join("skills")`
 /// mirrors `DaemonPaths::skills_root()`.
 ///
-/// Feature gating (issue #64, fail closed): `skill` is a pure in-memory catalog lookup
-/// and stays registered in every build. The other four write the host filesystem
-/// directly (`~/.theway/skills/**`, `~/.theway/skill-overrides.json`) without going
-/// through the executor seam, so sandbox-only builds leave them unregistered; the
-/// assembly-level `warn_sandbox_omitted_engine_tools` names them.
-#[cfg_attr(not(feature = "local"), allow(unused_variables))]
-fn skill_family(skill_harness_cell: &SkillHarnessCell, base_dir: &Path) -> Vec<Arc<dyn AgentTool>> {
-    // `mut` is only needed on the `local` path, which extends the set below.
-    #[cfg_attr(not(feature = "local"), allow(unused_mut))]
+/// Runtime gating (issue #64/#123, fail closed): `skill` is a pure in-memory catalog
+/// lookup and stays registered in every execution mode. The other four write the host
+/// filesystem directly (`~/.theway/skills/**`, `~/.theway/skill-overrides.json`) without
+/// going through the executor seam, so sandbox mode leaves them unregistered;
+/// [`warn_sandbox_omitted_engine_tools`] names them.
+fn skill_family(
+    kind: ExecutorKind,
+    skill_harness_cell: &SkillHarnessCell,
+    base_dir: &Path,
+) -> Vec<Arc<dyn AgentTool>> {
     let mut tools: Vec<Arc<dyn AgentTool>> =
         vec![Arc::new(skill::SkillTool::new(skill_harness_cell.clone()))];
 
-    #[cfg(feature = "local")]
-    {
+    if kind == ExecutorKind::Local {
         let skills_root = base_dir.join("skills");
         tools.extend([
             Arc::new(install_skill::InstallSkillTool::with_skills_root(

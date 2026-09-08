@@ -93,6 +93,12 @@ pub(crate) fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<S
         args.push("--trigger-poll-secs".to_string());
         args.push(secs.to_string());
     }
+    // Issue #123: the executor environment is selected by `[executor] kind`
+    // in config.toml and is startup-only, so it rides the spawn args.
+    if let Some(kind) = &config.executor_kind {
+        args.push("--executor-kind".to_string());
+        args.push(kind.clone());
+    }
     if let Some(addr) = &config.storage_service_addr {
         args.push("--storage-service-addr".to_string());
         args.push(addr.clone());
@@ -609,6 +615,9 @@ enabled = [\"debugging\"]
 
 [triggers]
 poll_interval_secs = 45
+
+[executor]
+kind = \"sandbox\"
 ";
         // No CLI config flags at all — every config launch arg is file-derived.
         let cli = Cli::parse_from(["theway"]);
@@ -630,6 +639,8 @@ poll_interval_secs = 45
                 "debugging",
                 "--trigger-poll-secs",
                 "45",
+                "--executor-kind",
+                "sandbox",
             ]
         );
 
@@ -667,6 +678,8 @@ poll_interval_secs = 45
                 "debugging",
                 "--trigger-poll-secs",
                 "15",
+                "--executor-kind",
+                "sandbox",
             ]
         );
 
@@ -690,6 +703,8 @@ poll_interval_secs = 45
                 "debugging",
                 "--trigger-poll-secs",
                 "45",
+                "--executor-kind",
+                "sandbox",
             ]
         );
     }

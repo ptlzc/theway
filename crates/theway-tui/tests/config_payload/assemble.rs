@@ -67,6 +67,9 @@ use super::*;
         );
         assert_eq!(payload.trigger_poll_secs, Some(45));
         assert_eq!(payload.tui_max_feed_lines, Some(8000));
+        // `[executor] kind` rides the payload so `daemon_runtime_args` can
+        // pass it to a freshly spawned daemon.
+        assert_eq!(payload.executor_kind.as_deref(), Some("sandbox"));
         // Persisted `[model] thinking` (the user's last pick) becomes the
         // payload when the CLI flag is at its default.
         assert_eq!(payload.thinking_level.as_deref(), Some("high"));
@@ -144,6 +147,9 @@ poll_interval_secs = 0
 
 [tui]
 max_feed_lines = 0
+
+[executor]
+kind = \"docker\"
 ";
         let cli = cli_from(&["theway"]);
         let (payload, diagnostics) = assemble_config_from(&cli, Some(toml), "cfg.toml", std::path::Path::new("/tmp/fake-cwd"));
@@ -151,10 +157,12 @@ max_feed_lines = 0
         assert_eq!(payload.model, None);
         assert_eq!(payload.trigger_poll_secs, None);
         assert_eq!(payload.tui_max_feed_lines, None);
-        assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+        assert_eq!(payload.executor_kind, None);
+        assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
         assert!(diagnostics[0].contains("model"), "{diagnostics:?}");
         assert!(diagnostics[1].contains("poll interval"), "{diagnostics:?}");
         assert!(diagnostics[2].contains("max_feed_lines"), "{diagnostics:?}");
+        assert!(diagnostics[3].contains("executor"), "{diagnostics:?}");
         assert!(
             diagnostics.iter().all(|d| d.contains("cfg.toml")),
             "{diagnostics:?}"

@@ -176,7 +176,7 @@ impl SessionRuntimeBuilder {
 
         // Fresh per-session tool set (dag_* / task stamped with the target session; the
         // skill family gets a brand-new harness cell filled right after construction).
-        let mut tools = tools::session_tool_set_for_cwd(
+        let mut tools = tools::session_tool_set_for_cwd_with_kind(
             &ctx.resources.memory_dir,
             &ctx.paths.base,
             &self.dag_engine,
@@ -189,6 +189,7 @@ impl SessionRuntimeBuilder {
             &self.services,
             ctx.repo.clone(),
             ctx.cwd.clone(),
+            ctx.executor_kind,
         );
         if let Some(provision) = ctx.mcp.provision.as_ref() {
             // Controller mode (issue #73): the provision slot is the live

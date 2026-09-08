@@ -25,12 +25,9 @@ use std::path::PathBuf;
 
 use theway_core::{Skill, SkillDiagnostic, SkillSource};
 
-#[cfg(feature = "local")]
 use crate::env::native::NativeEnv;
 use crate::paths::DaemonPaths;
-#[cfg(feature = "local")]
 use theway_core::load_skills;
-#[cfg(feature = "local")]
 use tokio_util::sync::CancellationToken;
 
 /// Ordered scan roots, highest priority first. Roots are consulted in this
@@ -106,10 +103,6 @@ pub struct LoadedSkills {
 /// writes into `<base>/skills`, which is on the scan list, so installed
 /// skills are discovered by the next load/reload — the scan roots and the
 /// install target agree (issue #66).
-///
-/// `sandbox`-only builds return empty: local skill discovery walks the OS filesystem
-/// via [`NativeEnv`], which is a `local`-feature capability (daemon-kernel-layers).
-#[cfg(feature = "local")]
 pub async fn load_all(paths: &DaemonPaths) -> LoadedSkills {
     let env = NativeEnv::new(paths.work_dir.to_string_lossy().to_string());
     let cancel = CancellationToken::new();
@@ -136,34 +129,14 @@ pub async fn load_all(paths: &DaemonPaths) -> LoadedSkills {
     }
 }
 
-/// Sandbox-only stub (see the `local` impl above).
-///
-/// Sandbox builds must never degrade silently: skill discovery is unavailable
-/// without the `local` feature, so the composition root logs an explicit warn
-/// instead of looking like an empty-but-healthy skill directory. The
-/// once-per-startup semantics are guaranteed by the callers (the composition
-/// root loads skills once), not by this stub.
-#[cfg(not(feature = "local"))]
-pub async fn load_all(_paths: &DaemonPaths) -> LoadedSkills {
-    tracing::warn!(
-        "skill discovery unavailable in sandbox build — loading no skills (the sandbox feature \
-         has no local filesystem access)"
-    );
-    LoadedSkills {
-        skills: Vec::new(),
-        diagnostics: Vec::new(),
-    }
-}
-
 /// Insert `skill` into `combined` unless a same-name skill was already loaded
 /// from a higher-priority root (issue #37: first-loaded wins; `--skills-dir`
 /// extras carry the highest weight, then `.agents` among the project roots).
-#[cfg(feature = "local")]
 fn dedupe_first_wins(combined: &mut Vec<Skill>, skill: Skill) {
     if !combined.iter().any(|s| s.name == skill.name) {
         combined.push(skill);
     }
 }
 
-#[cfg(all(test, feature = "local"))]
+#[cfg(test)]
 tests_bridge_macro::tests_bridge!("skills");

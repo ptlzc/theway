@@ -50,6 +50,39 @@ use super::*;
     }
 
     #[test]
+    fn reconcile_reports_executor_kind_mismatch_only_on_attach() {
+        let current = WireDaemonConfig {
+            executor_kind: Some("local".into()),
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig {
+            executor_kind: Some("sandbox".into()),
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert_eq!(patch, WireDaemonConfig::default());
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("executor"), "{notes:?}");
+        assert!(notes[0].contains("spawn"), "{notes:?}");
+
+        // Fresh spawn carries the value through the daemon launch args.
+        let (patch, notes) = reconcile(&desired, &current, false);
+        assert_eq!(patch, WireDaemonConfig::default());
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    #[test]
+    fn reconcile_matching_executor_kind_stays_quiet() {
+        let current = WireDaemonConfig {
+            executor_kind: Some("sandbox".into()),
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&current.clone(), &current, true);
+        assert_eq!(patch, WireDaemonConfig::default());
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    #[test]
     fn reconcile_never_pushes_partial_model_pair() {
         let current = WireDaemonConfig::default();
         let desired = WireDaemonConfig {

@@ -57,7 +57,7 @@ A daemon configured with controller storage is valid only while that storage ser
 
 [`tools/mod.rs`](../src/tools/mod.rs) contains model-facing tool implementations and assembly. Filesystem, command, git, search, memory, skill, MCP, web, subagent, and DAG tools are daemon-owned because they combine core tool interfaces with host policy and external services.
 
-[`executor/mod.rs`](../src/executor/mod.rs) implements `theway-core::ToolExecutor`. The default `local` feature provides `LocalExecutor`; `sandbox` without `local` provides a fail-fast placeholder. [`forwarding_tool_ops.rs`](../src/forwarding_tool_ops.rs) is a separate protocol adapter that sends `ToolOps` requests to the controller address in `WireDaemonConfig` and refreshes its cached client when that address changes.
+[`executor/mod.rs`](../src/executor/mod.rs) implements `theway-core::ToolExecutor`. The execution environment is selected at runtime from `[executor] kind` in `config.toml` (issue #123): `local` provides `LocalExecutor`, `sandbox` provides a fail-fast placeholder and the runtime tool assembly omits direct-OS tools. [`forwarding_tool_ops.rs`](../src/forwarding_tool_ops.rs) is a separate protocol adapter that sends `ToolOps` requests to the controller address in `WireDaemonConfig` and refreshes its cached client when that address changes.
 
 [`hooks/mod.rs`](../src/hooks/mod.rs), [`hook_executors.rs`](../src/hook_executors.rs), [`trigger_engine/mod.rs`](../src/trigger_engine/mod.rs), and [`triggers/mod.rs`](../src/triggers/mod.rs) own process/webhook effects, dynamic trigger polling and promotion, cron execution, and notification delivery. Persisted sidecar records come from `theway-contract`; scheduling and delivery policy remains here.
 

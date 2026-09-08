@@ -26,4 +26,7 @@ poll_interval_secs = 45
 
 [tui]
 max_feed_lines = 8000
+
+[executor]
+kind = \"sandbox\"
 ";

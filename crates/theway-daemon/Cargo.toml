@@ -14,11 +14,11 @@ name = "theway_daemon"
 path = "src/lib.rs"
 
 [features]
-# Controller-side execution modes (issue #78): the daemon no longer executes
-# file/process operations locally — they are forwarded to the controller's
-# ToolService endpoint. `local` / `sandbox` are retained as compatibility
-# feature names for the controller-side executor selection; the daemon build
-# itself is execution-agnostic.
+# Issue #123: the execution environment is selected at RUNTIME via
+# `[executor] kind = "local" | "sandbox"` in config.toml, so both executor
+# implementations and tool bodies are always compiled. These feature names are
+# retained as no-op compatibility labels for builds/scripts that still pass
+# `--features local` / `--features sandbox`; they no longer gate code.
 default = ["local"]
 local = []
 sandbox = []

@@ -14,7 +14,7 @@ Daemon 负责会话运行时组装、面向模型的工具、本地与 sandbox e
 - `SessionRuntimeBuilder` 是初始、恢复和切换会话运行时的统一内部构建路径；session-scoped runtime extension 的启动上下文由 `SessionExecutionContext` 持有。
 - 公开模块为 executor、hook、存储适配器、工具、template、skill、trigger 和 TypeScript 扩展提供支持的扩展点；扩展宿主负责 package 发现、信任、QuickJS 隔离、capability broker、可逆注册、持久状态 projection、静默点重载和客户端中立诊断。
 
-默认 `local` feature 选择 `LocalExecutor`。只启用 `sandbox` 时选择 `SandboxExecutor`，不支持的操作以 `ExecutorError::UnsupportedKind` 失败。协议服务也可以把 `ToolOps` 转发到 controller 提供的 gRPC 工具端点。
+执行环境在运行时选择。`config.toml` 中的 `[executor] kind = "local" | "sandbox"` 由 `theway-tui` 以 `--executor-kind` 传给新启动的 daemon（issue #123）。默认 `local` 绑定 `LocalExecutor`；`sandbox` 绑定 `SandboxExecutor`，不支持的操作以 `ExecutorError::UnsupportedKind` 失败，并省略直接访问操作系统的工具。协议服务也可以把 `ToolOps` 转发到 controller 提供的 gRPC 工具端点。
 
 ## 运行与验证
 

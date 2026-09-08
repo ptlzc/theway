@@ -57,7 +57,7 @@
 
 [`tools/mod.rs`](../src/tools/mod.rs) 包含面向模型的工具实现与组装。文件系统、命令、git、搜索、memory、skill、MCP、web、subagent 和 DAG 工具由 daemon 负责，因为它们把 core 工具接口与宿主策略、外部服务组合起来。
 
-[`executor/mod.rs`](../src/executor/mod.rs) 实现 `theway-core::ToolExecutor`。默认 `local` feature 提供 `LocalExecutor`；不启用 `local` 的 `sandbox` 构建提供快速失败占位实现。[`forwarding_tool_ops.rs`](../src/forwarding_tool_ops.rs) 是独立协议适配器，把 `ToolOps` 请求发送到 `WireDaemonConfig` 中的 controller 地址，并在地址变化时刷新缓存客户端。
+[`executor/mod.rs`](../src/executor/mod.rs) 实现 `theway-core::ToolExecutor`。执行环境由 `config.toml` 中的 `[executor] kind` 在运行时选择（issue #123）：`local` 提供 `LocalExecutor`，`sandbox` 提供快速失败占位实现，且运行时工具组装会省略直接访问操作系统的工具。[`forwarding_tool_ops.rs`](../src/forwarding_tool_ops.rs) 是独立协议适配器，把 `ToolOps` 请求发送到 `WireDaemonConfig` 中的 controller 地址，并在地址变化时刷新缓存客户端。
 
 [`hooks/mod.rs`](../src/hooks/mod.rs)、[`hook_executors.rs`](../src/hook_executors.rs)、[`trigger_engine/mod.rs`](../src/trigger_engine/mod.rs) 和 [`triggers/mod.rs`](../src/triggers/mod.rs) 负责进程/webhook 操作、动态 trigger 轮询与提升、cron 执行和 notification 投递。持久化 sidecar 记录来自 `theway-contract`，调度与投递策略留在本 crate。
 

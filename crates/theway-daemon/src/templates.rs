@@ -6,18 +6,13 @@
 //! only consumes already-loaded `PromptTemplate` values (interpolation happens on the
 //! type itself via `PromptTemplate::interpolate`).
 
-#[cfg(feature = "local")]
 use std::path::PathBuf;
 
-#[cfg(feature = "local")]
 use serde::Deserialize;
-#[cfg(feature = "local")]
 use theway_core::{ExecutionEnv, FileErrorCode, FileKind, SkillDiagnosticCode};
 use theway_core::{PromptTemplate, SkillDiagnostic};
-#[cfg(feature = "local")]
 use tokio_util::sync::CancellationToken;
 
-#[cfg(feature = "local")]
 use crate::env::native::NativeEnv;
 
 pub struct LoadedTemplates {
@@ -25,10 +20,8 @@ pub struct LoadedTemplates {
     pub diagnostics: Vec<SkillDiagnostic>,
 }
 
-/// `sandbox`-only builds return empty: local template discovery walks the OS
-/// filesystem via [`NativeEnv`], which is a `local`-feature capability
-/// (daemon-kernel-layers).
-#[cfg(feature = "local")]
+/// Load prompt templates from the project and user roots, project overriding
+/// user on a name collision.
 pub async fn load_all(paths: &crate::DaemonPaths) -> LoadedTemplates {
     let project: PathBuf = paths.work_dir.join(".theway").join("templates");
     let user: PathBuf = paths.base.join("templates");
@@ -59,30 +52,10 @@ pub async fn load_all(paths: &crate::DaemonPaths) -> LoadedTemplates {
     }
 }
 
-/// Sandbox-only stub (see the `local` impl above).
-///
-/// Sandbox builds must never degrade silently: template discovery is
-/// unavailable without the `local` feature, so the composition root logs an
-/// explicit warn instead of looking like an empty-but-healthy template set.
-/// The once-per-startup semantics are guaranteed by the callers (the
-/// composition root loads templates once), not by this stub.
-#[cfg(not(feature = "local"))]
-pub async fn load_all(_paths: &crate::DaemonPaths) -> LoadedTemplates {
-    tracing::warn!(
-        "template discovery unavailable in sandbox build — loading no templates (the sandbox \
-         feature has no local filesystem access)"
-    );
-    LoadedTemplates {
-        templates: Vec::new(),
-        diagnostics: Vec::new(),
-    }
-}
-
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // File loader
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
-#[cfg(feature = "local")]
 #[derive(Debug, Default, Deserialize)]
 struct TemplateFrontmatter {
     name: Option<String>,
@@ -100,7 +73,6 @@ pub struct LoadTemplatesOutput {
 /// (templates are flat to keep `/template <name>` unambiguous).
 ///
 /// Same diagnostic shape as the skills loader so the CLI can render both uniformly.
-#[cfg(feature = "local")]
 async fn load_templates(
     env: &dyn ExecutionEnv,
     dirs: &[&str],
@@ -181,7 +153,6 @@ async fn load_templates(
     out
 }
 
-#[cfg(feature = "local")]
 fn parse_frontmatter(content: &str) -> Result<(TemplateFrontmatter, String), String> {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
     if !normalized.starts_with("---") {

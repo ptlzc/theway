@@ -14,7 +14,7 @@ The daemon owns session runtime assembly, model-facing tools, local and sandbox 
 - `SessionRuntimeBuilder` is the internal construction path for initial, resumed, and switched session runtimes; session-scoped runtime-extension startup context is owned by `SessionExecutionContext`.
 - Public modules expose supported extension points for executors, hooks, storage adapters, tools, templates, skills, triggers, and TypeScript extensions; the extension host owns package discovery, trust, QuickJS isolation, capability brokers, reversible registrations, durable state projection, quiescent reload, and client-neutral diagnostics.
 
-The default `local` feature selects `LocalExecutor`. A `sandbox`-only build selects `SandboxExecutor`, whose unsupported operations fail with `ExecutorError::UnsupportedKind`. The protocol server can also forward `ToolOps` to a controller-provided gRPC tool endpoint.
+The execution environment is selected at runtime. `[executor] kind = "local" | "sandbox"` in `config.toml` is carried by `theway-tui` into the spawned daemon as `--executor-kind` (issue #123). `local` is the default and binds `LocalExecutor`; `sandbox` binds `SandboxExecutor`, whose unsupported operations fail with `ExecutorError::UnsupportedKind`, and omits the direct-OS tools. The protocol server can also forward `ToolOps` to a controller-provided gRPC tool endpoint.
 
 ## Running and validation
 

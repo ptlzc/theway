@@ -107,6 +107,7 @@ impl TurnHost {
             tui_max_feed_lines: config.startup.tui_max_feed_lines,
             tool_service_addr: None,
             storage_service_addr: config.startup.storage_service_addr.clone(),
+            executor_kind: Some(config.startup.executor_kind.to_string()),
             clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));

@@ -54,6 +54,11 @@ message DaemonConfig {
   // trigger rules, cron jobs) over RPC instead of local storage directly.
   optional string storage_service_addr = 10;
 
+  // ── execution environment (issue #123) ──
+  // Runtime-selected executor for executor-backed tools: "local" (default)
+  // or "sandbox". Startup-only; the daemon rejects runtime changes.
+  optional string executor_kind = 16;
+
   // ── thinking level (persisted last-choice default) ──
   // Full thinking level string ("off" | "minimal" | "low" | "medium" |
   // "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle

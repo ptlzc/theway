@@ -703,6 +703,12 @@ impl TurnHost {
             );
         }
 
+        if config.executor_kind.is_some() || config.clears("executor_kind") {
+            self.error_line(
+                "configure: executor_kind is startup-only and cannot be changed at runtime; set `[executor] kind` in config.toml and restart the daemon",
+            );
+        }
+
         let touched = self.runtime.config.write().unwrap().merge_from(&applied);
         if touched == 0 {
             self.system_line("configure: no applicable settings changed");

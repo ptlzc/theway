@@ -86,8 +86,9 @@ pub use crate::triggers::tool_assembly::{
 /// Tool names that bypass the [`ToolExecutor`] seam and touch the host OS directly:
 /// `bash` spawns `sh -c` process groups (setsid/killpg), the `exec_shell` family owns
 /// `tokio::process` children, and `ls` / `grep` / `find` walk the local filesystem
-/// with `tokio::fs` / `ignore`. They are registered ONLY in `local` builds. In
-/// sandbox-only builds they are omitted from the tool set (fail closed, issue #64) —
+/// with `tokio::fs` / `ignore`. They are registered ONLY in `local` execution mode.
+/// In sandbox mode (issue #123: selected at runtime via `[executor] kind` in
+/// config.toml) they are omitted from the tool set (fail closed, issue #64) —
 /// the [`crate::executor::sandbox::SandboxExecutor`] seam covers only the
 /// executor-backed tools, so these bodies would otherwise keep acting straight on the
 /// host even in sandbox mode.
@@ -162,7 +163,6 @@ impl AgentTool for CwdScopedTool {
 }
 
 /// Compatibility wrapper that uses the process cwd as the owning cwd.
-#[cfg(feature = "local")]
 pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
     local_tools_for_cwd(executor, std::env::current_dir().unwrap_or_default())
 }
@@ -180,15 +180,6 @@ pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
 /// process-group-kill + cancel semantics (the executor's `run_command` kills only the
 /// direct child), and `ls` / `grep` / `find` / the `exec_shell` family use richer
 /// directory/walk surfaces than the executor trait's first cut exposes.
-///
-/// **Feature gating (issue #64, fail closed)**: in sandbox-only builds
-/// (`not(local) + sandbox`) the direct-OS tools ([`LOCAL_ONLY_TOOL_NAMES`]) are NOT
-/// registered and a `tracing::warn` names every omitted tool — never a silent drop.
-/// The executor-backed tools (read / write / edit / outline / git) stay registered:
-/// their effects go through the [`ToolExecutor`] seam, where the sandbox executor
-/// answers with an explicit `UnsupportedKind` error. `web_fetch` stays too: it is a
-/// pure network request with no host FS/process side effects.
-#[cfg(feature = "local")]
 pub fn local_tools_for_cwd(
     executor: Arc<dyn ToolExecutor>,
     cwd: PathBuf,
@@ -198,7 +189,6 @@ pub fn local_tools_for_cwd(
 
 /// [`local_tools_for_cwd`] with the daemon-wide tgrep registry attached to the
 /// grep tool (issue #121). `None` keeps the grep tool on its in-process walker.
-#[cfg(feature = "local")]
 pub fn local_tools_for_cwd_with_tgrep(
     executor: Arc<dyn ToolExecutor>,
     cwd: PathBuf,
@@ -228,23 +218,14 @@ pub fn local_tools_for_cwd_with_tgrep(
     ]
 }
 
-/// Sandbox-only variant: only the executor-backed tools and the network-only web
-/// tool are registered (see the `local` variant's doc for the policy). The omitted
-/// direct-OS tools are named explicitly in a `tracing::warn` so the degraded tool set
-/// is never silent.
-#[cfg(all(not(feature = "local"), feature = "sandbox"))]
-pub fn local_tools(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
-    local_tools_for_cwd(executor, std::env::current_dir().unwrap_or_default())
-}
-
-#[cfg(all(not(feature = "local"), feature = "sandbox"))]
-pub fn local_tools_for_cwd(
-    executor: Arc<dyn ToolExecutor>,
-    _cwd: PathBuf,
-) -> Vec<Arc<dyn AgentTool>> {
+/// Sandbox tool set: only the executor-backed tools and the network-only web
+/// tool are registered (issue #64, fail closed). The omitted direct-OS tools
+/// are named explicitly in a `tracing::warn` so the degraded tool set is never
+/// silent.
+pub fn sandbox_tools_for_cwd(executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
     tracing::warn!(
         omitted = ?LOCAL_ONLY_TOOL_NAMES,
-        "sandbox-only build: local-only tools bypass the ToolExecutor seam and touch \
+        "sandbox execution mode: local-only tools bypass the ToolExecutor seam and touch \
          the host FS/process table directly, so they are NOT registered (fail closed); \
          executor-backed tools (read/write/edit/outline/git) and the network-only
          web_fetch tool remain"
@@ -259,25 +240,24 @@ pub fn local_tools_for_cwd(
     ]
 }
 
-/// Sandbox-only mirror of [`local_tools_for_cwd_with_tgrep`]: the grep tool
-/// (and its tgrep backend) is local-only, so the registry is dropped here.
-#[cfg(all(not(feature = "local"), feature = "sandbox"))]
-pub fn local_tools_for_cwd_with_tgrep(
+/// Runtime execution-environment tool set (issue #123): `local` registers the
+/// full local tool set (including direct-OS tools), `sandbox` registers only
+/// the executor-backed tools plus `web_fetch`. The daemon's session/subagent
+/// assembly calls this with the `[executor] kind` selected at startup; the
+/// older [`local_tools_for_cwd_with_tgrep`] entry points stay local for
+/// compatibility with tests and embedders.
+pub fn tools_for_cwd_with_tgrep(
     executor: Arc<dyn ToolExecutor>,
     cwd: PathBuf,
-    _tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+    tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+    kind: theway_core::executor::ExecutorKind,
 ) -> Vec<Arc<dyn AgentTool>> {
-    local_tools_for_cwd(executor, cwd)
-}
-
-/// Fails the build when neither execution backend is selected. Mirrors
-/// [`crate::executor::default_executor`]: a daemon without any executor backend has no
-/// valid tool execution story at all.
-#[cfg(not(any(feature = "local", feature = "sandbox")))]
-pub fn local_tools(_executor: Arc<dyn ToolExecutor>) -> Vec<Arc<dyn AgentTool>> {
-    compile_error!("theway-daemon requires at least one of the `local` or `sandbox` features");
-    #[allow(unreachable_code)]
-    unreachable!()
+    match kind {
+        theway_core::executor::ExecutorKind::Local => {
+            local_tools_for_cwd_with_tgrep(executor, cwd, tgrep)
+        }
+        theway_core::executor::ExecutorKind::Sandbox => sandbox_tools_for_cwd(executor),
+    }
 }
 
 /// Build the `Subagent` tool. Separate from `local_tools` because the tool needs the model handle to
@@ -361,7 +341,31 @@ pub fn subagent_tool_sets_for_cwd_with_tgrep(
     cwd: PathBuf,
     tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
 ) -> ToolSetResolver {
-    assembly::subagent_tools(
+    subagent_tool_sets_for_cwd_with_tgrep_and_kind(
+        memory_dir,
+        base_dir,
+        skill_harness_cell,
+        executor,
+        cwd,
+        tgrep,
+        theway_core::executor::ExecutorKind::Local,
+    )
+}
+
+/// [`subagent_tool_sets_for_cwd_with_tgrep`] with the runtime-selected execution
+/// environment (issue #123). Sandbox mode swaps the app-layer tools for the
+/// executor-backed set and drops the direct-FS engine tools.
+#[allow(clippy::too_many_arguments)]
+pub fn subagent_tool_sets_for_cwd_with_tgrep_and_kind(
+    memory_dir: PathBuf,
+    base_dir: PathBuf,
+    skill_harness_cell: SkillHarnessCell,
+    executor: Arc<dyn ToolExecutor>,
+    cwd: PathBuf,
+    tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+    kind: theway_core::executor::ExecutorKind,
+) -> ToolSetResolver {
+    assembly::subagent_tools_for_kind(
         &memory_dir,
         &base_dir,
         &skill_harness_cell,
@@ -369,8 +373,9 @@ pub fn subagent_tool_sets_for_cwd_with_tgrep(
         // so every subagent / DAG-node tool set dispatches through the same execution
         // environment and path-scoped direct-OS tools.
         Arc::new(move || {
-            local_tools_for_cwd_with_tgrep(executor.clone(), cwd.clone(), tgrep.clone())
+            tools_for_cwd_with_tgrep(executor.clone(), cwd.clone(), tgrep.clone(), kind)
         }),
+        kind,
     )
 }
 
@@ -389,19 +394,50 @@ pub fn node_launcher(
     executor: Arc<dyn ToolExecutor>,
     tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
 ) -> Arc<node_launcher::NodeLauncherImpl> {
+    node_launcher_with_kind(
+        engine,
+        model,
+        stream_fn,
+        cwd,
+        registry,
+        memory_dir,
+        base_dir,
+        skill_harness_cell,
+        executor,
+        tgrep,
+        theway_core::executor::ExecutorKind::Local,
+    )
+}
+
+/// [`node_launcher`] with the runtime-selected execution environment (issue #123).
+#[allow(clippy::too_many_arguments)]
+pub fn node_launcher_with_kind(
+    engine: Arc<DagEngine>,
+    model: impl Into<Option<theway_llm_provider::Model>>,
+    stream_fn: Option<theway_core::StreamFn>,
+    cwd: PathBuf,
+    registry: SubagentJobRegistry,
+    memory_dir: PathBuf,
+    base_dir: PathBuf,
+    skill_harness_cell: SkillHarnessCell,
+    executor: Arc<dyn ToolExecutor>,
+    tgrep: Option<crate::tgrep_server::TgrepServerRegistry>,
+    kind: theway_core::executor::ExecutorKind,
+) -> Arc<node_launcher::NodeLauncherImpl> {
     node_launcher::node_launcher(
         engine,
         model.into(),
         stream_fn,
         cwd.clone(),
         registry,
-        subagent_tool_sets_for_cwd_with_tgrep(
+        subagent_tool_sets_for_cwd_with_tgrep_and_kind(
             memory_dir,
             base_dir,
             skill_harness_cell,
             executor,
             cwd,
             tgrep,
+            kind,
         ),
         crate::agent_specs::launch_resolver(),
     )
@@ -457,22 +493,62 @@ pub fn session_tool_set_for_cwd(
     repo: Arc<dyn SessionRepository>,
     cwd: PathBuf,
 ) -> Vec<Arc<dyn AgentTool>> {
-    let mut tools =
-        local_tools_for_cwd_with_tgrep(executor.clone(), cwd.clone(), Some(services.tgrep.clone()));
-    // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the
-    // same subagent tool-set resolver the DAG node launcher uses.
-    tools.extend(assembly::engine_tools(
+    session_tool_set_for_cwd_with_kind(
         memory_dir,
         base_dir,
         dag_engine,
         subagent_registry,
-        subagent_tool_sets_for_cwd_with_tgrep(
+        model,
+        stream_fn,
+        skill_harness_cell,
+        session_id,
+        executor,
+        services,
+        repo,
+        cwd,
+        theway_core::executor::ExecutorKind::Local,
+    )
+}
+
+/// [`session_tool_set_for_cwd`] with the runtime-selected execution environment
+/// (issue #123).
+#[allow(clippy::too_many_arguments)]
+pub fn session_tool_set_for_cwd_with_kind(
+    memory_dir: &std::path::Path,
+    base_dir: &std::path::Path,
+    dag_engine: &Arc<DagEngine>,
+    subagent_registry: &SubagentJobRegistry,
+    model: Option<&theway_llm_provider::Model>,
+    stream_fn: Option<&theway_core::StreamFn>,
+    skill_harness_cell: &SkillHarnessCell,
+    session_id: &str,
+    executor: Arc<dyn ToolExecutor>,
+    services: &crate::DaemonServices,
+    repo: Arc<dyn SessionRepository>,
+    cwd: PathBuf,
+    kind: theway_core::executor::ExecutorKind,
+) -> Vec<Arc<dyn AgentTool>> {
+    let mut tools = tools_for_cwd_with_tgrep(
+        executor.clone(),
+        cwd.clone(),
+        Some(services.tgrep.clone()),
+        kind,
+    );
+    // Engine-owned tools (DAG / subagent / skills / memory), assembled kernel-side with the
+    // same subagent tool-set resolver the DAG node launcher uses.
+    tools.extend(assembly::engine_tools_for_kind(
+        memory_dir,
+        base_dir,
+        dag_engine,
+        subagent_registry,
+        subagent_tool_sets_for_cwd_with_tgrep_and_kind(
             memory_dir.to_path_buf(),
             base_dir.to_path_buf(),
             skill_harness_cell.clone(),
             executor,
             cwd.clone(),
             Some(services.tgrep.clone()),
+            kind,
         ),
         crate::agent_specs::launch_resolver(),
         crate::agent_specs::spec_names(),
@@ -481,6 +557,7 @@ pub fn session_tool_set_for_cwd(
         skill_harness_cell,
         session_id,
         services.reload.clone(),
+        kind,
     ));
     // Session graph tools (main-agent only): list/read/status/wait/attach against
     // the Turso-backed session graph.

@@ -1,11 +1,11 @@
-//! Sandbox-only tool-set gating (issue #64, fail closed).
+//! Sandbox tool-set gating (issue #64/#123, fail closed).
 //!
-//! In a build without the `local` feature the daemon must NOT register any tool that
-//! bypasses the [`theway_core::executor::ToolExecutor`] seam and touches the host OS
-//! directly (process table / filesystem). These tests call the REAL assembly functions
-//! — [`theway_daemon::tools::local_tools`], [`theway_daemon::tools::session_tool_set`],
-//! [`theway_daemon::tools::assembly::engine_tools`] and the subagent tool-set resolver —
-//! and assert:
+//! When the runtime-selected execution environment is `sandbox`
+//! (`[executor] kind = "sandbox"` in config.toml) the daemon must NOT
+//! register any tool that bypasses the
+//! [`theway_core::executor::ToolExecutor`] seam and touches the host OS
+//! directly (process table / filesystem). These tests call the REAL assembly
+//! functions with `ExecutorKind::Sandbox` and assert:
 //!
 //! 1. The direct-OS tools (`bash`, `exec`/`get_output`/`kill_shell`/`write_to_process`,
 //!    `ls`, `grep`, `find`) and the direct-FS-write engine tools (`memory`,
@@ -19,8 +19,6 @@
 //!    `skill` lookup, `reload`, the DAG/subagent orchestration and the in-memory
 //!    trigger/cron family remain for the same reason.
 //! 3. An executor-backed call actually fails closed with the unsupported-kind error.
-
-#![cfg(all(not(feature = "local"), feature = "sandbox"))]
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -99,40 +97,32 @@ fn harness_cell() -> SkillHarnessCell {
 }
 
 #[tokio::test]
-async fn default_executor_reports_sandbox_kind() {
-    let executor = theway_daemon::executor::default_executor();
+async fn executor_for_kind_returns_the_sandbox_stub() {
+    let dir = tempfile::tempdir().unwrap();
+    let executor = theway_daemon::executor::executor_for_kind(ExecutorKind::Sandbox, dir.path());
     assert_eq!(executor.kind().await, ExecutorKind::Sandbox);
 }
 
 #[test]
-fn local_tools_omits_every_direct_os_tool() {
-    let local_names = names(&tools::local_tools(sandbox_exec()));
+fn local_tools_omits_every_direct_os_tool_in_sandbox_mode() {
+    let sandbox_names = names(&tools::sandbox_tools_for_cwd(sandbox_exec()));
 
     for tool in DIRECT_OS_LOCAL_TOOLS {
         assert!(
-            !local_names.contains(*tool),
-            "sandbox-only build must not register direct-OS tool `{tool}`; got {local_names:?}"
+            !sandbox_names.contains(*tool),
+            "sandbox mode must not register direct-OS tool `{tool}`; got {sandbox_names:?}"
         );
     }
     // Belt and braces against a silently emptied set: the documented remainder is exact.
     assert_eq!(
-        local_names,
+        sandbox_names,
         HashSet::from_iter(
             EXECUTOR_BACKED_TOOLS
                 .iter()
                 .chain(NETWORK_ONLY_TOOLS)
                 .map(|s| s.to_string())
         ),
-        "sandbox-only local_tools must be exactly the executor-backed + network-only set"
-    );
-
-    let cwd_names = names(&tools::local_tools_for_cwd(
-        sandbox_exec(),
-        std::path::PathBuf::from("/tmp/cwd"),
-    ));
-    assert_eq!(
-        local_names, cwd_names,
-        "cwd-scoped local_tools must omit the same direct-OS tools"
+        "sandbox mode local tools must be exactly the executor-backed + network-only set"
     );
 }
 
@@ -141,7 +131,7 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
     let dag_engine = Arc::new(DagEngine::new());
     let registry = SubagentJobRegistry::new();
     let model = faux_model();
-    let tools = assembly::engine_tools(
+    let tools = assembly::engine_tools_for_kind(
         std::path::Path::new("/nonexistent-memory-dir"),
         std::path::Path::new("/nonexistent-theway-base"),
         &dag_engine,
@@ -154,13 +144,14 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
         &harness_cell(),
         "session-sandbox-gate",
         ReloadRuntimeSlot::default(),
+        ExecutorKind::Sandbox,
     );
     let names = names(&tools);
 
     for tool in DIRECT_OS_ENGINE_TOOLS {
         assert!(
             !names.contains(*tool),
-            "sandbox-only build must not register direct-FS-write engine tool `{tool}`; got {names:?}"
+            "sandbox mode must not register direct-FS-write engine tool `{tool}`; got {names:?}"
         );
     }
     // The read-only in-memory skill lookup and the harness-level reload stay; so does
@@ -168,7 +159,7 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
     for tool in ["skill", "reload", "subagent", "dag_plan", "dag_status"] {
         assert!(
             names.contains(tool),
-            "engine tool `{tool}` must remain registered in sandbox-only builds; got {names:?}"
+            "engine tool `{tool}` must remain registered in sandbox mode; got {names:?}"
         );
     }
 }
@@ -182,7 +173,7 @@ fn session_tool_set_assembly_is_fail_closed() {
     let repo: Arc<dyn SessionRepository> = Arc::new(
         theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_dir.path()),
     );
-    let tools = tools::session_tool_set_for_cwd(
+    let tools = tools::session_tool_set_for_cwd_with_kind(
         std::path::Path::new("/nonexistent-memory-dir"),
         std::path::Path::new("/nonexistent-theway-base"),
         &dag_engine,
@@ -195,6 +186,7 @@ fn session_tool_set_assembly_is_fail_closed() {
         &DaemonServices::new(),
         repo,
         std::path::PathBuf::from("/tmp/session-cwd"),
+        ExecutorKind::Sandbox,
     );
     let names = names(&tools);
 
@@ -207,7 +199,7 @@ fn session_tool_set_assembly_is_fail_closed() {
     for tool in DIRECT_OS_LOCAL_TOOLS.iter().chain(DIRECT_OS_ENGINE_TOOLS) {
         assert!(
             !names.contains(*tool),
-            "sandbox-only session tool set must not contain direct-OS tool `{tool}`; got {names:?}"
+            "sandbox session tool set must not contain direct-OS tool `{tool}`; got {names:?}"
         );
     }
 
@@ -215,7 +207,7 @@ fn session_tool_set_assembly_is_fail_closed() {
     for tool in EXECUTOR_BACKED_TOOLS.iter().chain(NETWORK_ONLY_TOOLS) {
         assert!(
             names.contains(*tool),
-            "`{tool}` must remain registered in sandbox-only builds; got {names:?}"
+            "`{tool}` must remain registered in sandbox mode; got {names:?}"
         );
     }
 
@@ -236,18 +228,20 @@ fn session_tool_set_assembly_is_fail_closed() {
 
 #[test]
 fn subagent_tool_sets_omit_direct_os_tools_for_every_spec() {
-    let resolver = tools::subagent_tool_sets_for_cwd(
+    let resolver = tools::subagent_tool_sets_for_cwd_with_tgrep_and_kind(
         std::path::Path::new("/nonexistent-memory-dir").to_path_buf(),
         std::path::Path::new("/nonexistent-theway-base").to_path_buf(),
         harness_cell(),
         sandbox_exec(),
         std::path::PathBuf::from("/tmp/subagent-cwd"),
+        None,
+        ExecutorKind::Sandbox,
     );
     for spec in theway_daemon::agent_specs::spec_names() {
         let set = resolver(&spec);
         assert!(
             !set.is_empty(),
-            "subagent spec `{spec}` tool set must not be empty in sandbox-only builds"
+            "subagent spec `{spec}` tool set must not be empty in sandbox mode"
         );
         let names = names(&set);
         for tool in DIRECT_OS_LOCAL_TOOLS.iter().chain(DIRECT_OS_ENGINE_TOOLS) {

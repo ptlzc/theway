@@ -17,6 +17,7 @@
 //! composition root (`thewayd`).
 
 use theway_core::ThinkingLevel;
+use theway_core::executor::ExecutorKind;
 use theway_transport::config::{ModelDefault, ThinkingSummarySettings};
 use theway_transport::triggers::DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS;
 use theway_transport::wire::WireDaemonConfig;
@@ -43,6 +44,10 @@ pub struct StartupConfig {
     pub trigger_poll_secs: u64,
     /// TUI feed scrollback cap (`None` → TUI built-in default).
     pub tui_max_feed_lines: Option<u64>,
+    /// Execution environment for executor-backed tools: `local` (default) or
+    /// `sandbox`. Startup-only — the executor and tool set are bound once at
+    /// daemon startup.
+    pub executor_kind: ExecutorKind,
     /// Orchestrator thinking-summary settings (`None` → thinking stays raw).
     /// TODO(#73): `WireDaemonConfig` has no thinking-summary fields yet;
     /// until the settings proto grows them, [`apply_wire`](Self::apply_wire)
@@ -71,6 +76,7 @@ impl Default for StartupConfig {
             builtin_skills: Vec::new(),
             trigger_poll_secs: DEFAULT_DYNAMIC_TRIGGER_POLL_INTERVAL_SECS,
             tui_max_feed_lines: None,
+            executor_kind: ExecutorKind::Local,
             thinking_summary: None,
             load_local_sources: true,
             storage_service_addr: None,
@@ -123,6 +129,17 @@ impl StartupConfig {
             self.tui_max_feed_lines = Some(lines);
             touched += 1;
         }
+        if let Some(raw) = patch.executor_kind.as_deref() {
+            match crate::executor::parse_executor_kind(raw) {
+                Ok(kind) => {
+                    self.executor_kind = kind;
+                    touched += 1;
+                }
+                Err(err) => {
+                    tracing::warn!("ignoring invalid executor kind in settings payload: {err}")
+                }
+            }
+        }
         // TODO(#73): `base_url` / `thinking` patches already take effect at
         // runtime (`TurnHost::handle_configure` + `SetModel`), but have no
         // startup representation here yet; thinking-summary and
@@ -148,6 +165,7 @@ mod tests {
         );
         assert_eq!(config.trigger_poll_secs, 600);
         assert!(config.tui_max_feed_lines.is_none());
+        assert_eq!(config.executor_kind, ExecutorKind::Local);
         assert!(config.thinking_summary.is_none());
         assert!(config.load_local_sources, "local scans stay on by default");
         assert!(config.storage_service_addr.is_none());
@@ -168,6 +186,7 @@ mod tests {
             builtin_skills: vec!["debugging".into()],
             trigger_poll_secs: Some(30),
             tui_max_feed_lines: Some(8000),
+            executor_kind: Some("sandbox".into()),
             ..Default::default()
         };
         let config = StartupConfig::from_wire(&payload);
@@ -183,6 +202,18 @@ mod tests {
         assert_eq!(config.builtin_skills, vec!["debugging".to_string()]);
         assert_eq!(config.trigger_poll_secs, 30);
         assert_eq!(config.tui_max_feed_lines, Some(8000));
+        assert_eq!(config.executor_kind, ExecutorKind::Sandbox);
+    }
+
+    #[test]
+    fn invalid_executor_kind_is_ignored() {
+        let payload = WireDaemonConfig {
+            executor_kind: Some("docker".into()),
+            ..Default::default()
+        };
+        let mut config = StartupConfig::default();
+        assert_eq!(config.apply_wire(&payload), 0);
+        assert_eq!(config.executor_kind, ExecutorKind::Local);
     }
 
     #[test]

@@ -313,7 +313,8 @@ fn tool_specs() -> Vec<ToolSpec> {
                     "trigger_poll_secs": { "type": "integer" },
                     "tui_max_feed_lines": { "type": "integer" },
                     "tool_service_addr": { "type": "string" },
-                    "storage_service_addr": { "type": "string" }
+                    "storage_service_addr": { "type": "string" },
+                    "executor_kind": { "type": "string", "enum": ["local", "sandbox"] }
                 }
             }),
         },

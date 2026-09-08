@@ -446,9 +446,9 @@ static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     }),
 });
 
-// The test bodies dispatch through the real local executor; sandbox-only builds gate
-// the `local` executor module out, so the suite compiles only with `local` (issue #64).
-#[cfg(all(test, feature = "local"))]
+// The suite exercises the local executor's host side effects; the executor is
+// always compiled (issue #123), and sandbox mode omits these tools at runtime.
+#[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;

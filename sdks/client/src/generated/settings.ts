@@ -85,6 +85,14 @@ export interface DaemonConfig {
     | string
     | undefined;
   /**
+   * ── execution environment (issue #123) ──
+   * Runtime-selected executor for executor-backed tools: "local" (default)
+   * or "sandbox". Startup-only; the daemon rejects runtime changes.
+   */
+  executorKind?:
+    | string
+    | undefined;
+  /**
    * ── thinking level (persisted last-choice default) ──
    * Full thinking level string ("off" | "minimal" | "low" | "medium" |
    * "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle
@@ -236,6 +244,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     tuiMaxFeedLines: undefined,
     toolServiceAddr: undefined,
     storageServiceAddr: undefined,
+    executorKind: undefined,
     thinkingLevel: undefined,
     skills: [],
     templates: [],
@@ -275,6 +284,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.storageServiceAddr !== undefined) {
       writer.uint32(82).string(message.storageServiceAddr);
+    }
+    if (message.executorKind !== undefined) {
+      writer.uint32(130).string(message.executorKind);
     }
     if (message.thinkingLevel !== undefined) {
       writer.uint32(98).string(message.thinkingLevel);
@@ -381,6 +393,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.storageServiceAddr = reader.string();
           continue;
         }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.executorKind = reader.string();
+          continue;
+        }
         case 12: {
           if (tag !== 98) {
             break;
@@ -470,6 +490,11 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.storage_service_addr)
         ? globalThis.String(object.storage_service_addr)
         : undefined,
+      executorKind: isSet(object.executorKind)
+        ? globalThis.String(object.executorKind)
+        : isSet(object.executor_kind)
+        ? globalThis.String(object.executor_kind)
+        : undefined,
       thinkingLevel: isSet(object.thinkingLevel)
         ? globalThis.String(object.thinkingLevel)
         : isSet(object.thinking_level)
@@ -526,6 +551,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.storageServiceAddr !== undefined) {
       obj.storageServiceAddr = message.storageServiceAddr;
     }
+    if (message.executorKind !== undefined) {
+      obj.executorKind = message.executorKind;
+    }
     if (message.thinkingLevel !== undefined) {
       obj.thinkingLevel = message.thinkingLevel;
     }
@@ -559,6 +587,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.tuiMaxFeedLines = object.tuiMaxFeedLines ?? undefined;
     message.toolServiceAddr = object.toolServiceAddr ?? undefined;
     message.storageServiceAddr = object.storageServiceAddr ?? undefined;
+    message.executorKind = object.executorKind ?? undefined;
     message.thinkingLevel = object.thinkingLevel ?? undefined;
     message.skills = object.skills?.map((e) => ProvisionedSkill.fromPartial(e)) || [];
     message.templates = object.templates?.map((e) => ProvisionedTemplate.fromPartial(e)) || [];

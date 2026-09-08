@@ -11,6 +11,7 @@ use crate::stream_auth::stream_fn_with_auth_store;
 use crate::turn::daemon::{DaemonConfig, RuntimeCapabilities, TurnHost};
 use crate::{agent_specs, runtime_capabilities, session_ops};
 use anyhow::{Context, Result};
+use theway_core::executor::ExecutorKind;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
 
@@ -49,6 +50,7 @@ pub struct DaemonOptions {
     pub trigger_poll_secs: Option<u64>,
     pub builtin_skills: Vec<String>,
     pub storage_service_addr: Option<String>,
+    pub executor_kind: Option<String>,
 }
 
 const STORAGE_WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -154,6 +156,13 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     if let Some(secs) = options.trigger_poll_secs {
         startup.trigger_poll_secs = secs;
     }
+    // CLI flag wins over the initial settings payload (which itself carries
+    // the controller-owned `[executor] kind` from config.toml when the TUI
+    // spawned the daemon).
+    if let Some(raw) = options.executor_kind.as_deref() {
+        startup.executor_kind =
+            crate::executor::parse_executor_kind(raw).map_err(anyhow::Error::msg)?;
+    }
     startup.storage_service_addr = options.storage_service_addr.clone();
     // Issue #86: when the controller provides StorageService, treat the daemon
     // as controller-provisioned and skip local auxiliary-source discovery
@@ -162,6 +171,11 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     // roots and provisions both catalogs through `WireDaemonConfig`. Custom
     // model definitions remain local until the settings RPC can provision them.
     if options.storage_service_addr.is_some() {
+        startup.load_local_sources = false;
+    }
+    // Issue #123: a sandbox-configured daemon must not scan or execute against
+    // the host either — the same fail-closed posture as the controller mode.
+    if startup.executor_kind == ExecutorKind::Sandbox {
         startup.load_local_sources = false;
     }
 
@@ -236,11 +250,10 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         theway_core::multiagent::jobs::SubagentJobRegistry::with_observer(runtime_observer.clone());
     subagent_registry.set_transcript_store(Some(storage.job_transcript_store(&cwd)));
     // Execution-environment seam (daemon-kernel-layers): local tool bodies
-    // dispatch through a `ToolExecutor`; the composition root picks the executor
-    // by feature — the local filesystem/process executor for `local` builds, the
-    // sandbox stub for `sandbox`-only builds.
+    // dispatch through a `ToolExecutor`; the composition root binds the
+    // executor selected at runtime by `[executor] kind` (issue #123).
     let executor: Arc<dyn theway_core::executor::ToolExecutor> =
-        crate::executor::executor_for_cwd(cwd.clone());
+        crate::executor::executor_for_kind(startup.executor_kind, cwd.clone());
     let session_paths = paths.with_work_dir(cwd.clone());
     // TODO(#73): MCP servers are still read from local `mcp.toml` files;
     // once the settings RPC provisions them, this local read goes away. The
@@ -278,6 +291,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         storage.clone(),
         paths.clone(),
         executor.clone(),
+        startup.executor_kind,
         model.clone(),
         thinking,
         project_resources,

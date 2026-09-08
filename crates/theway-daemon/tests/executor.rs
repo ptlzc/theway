@@ -1,7 +1,8 @@
 //! Integration tests for the daemon kernel executors — `LocalExecutor` (real
-//! filesystem + process table, `local` feature) and the `SandboxExecutor` stub
-//! (`sandbox` feature) — against the `theway_core::executor::ToolExecutor` trait
-//! (daemon-kernel-layers, executor impls moved sdk → daemon).
+//! filesystem + process table) and the `SandboxExecutor` stub — against the
+//! `theway_core::executor::ToolExecutor` trait (daemon-kernel-layers, executor
+//! impls moved sdk → daemon). Both executors are always compiled; the
+//! execution environment is selected at runtime (issue #123).
 
 use std::time::Duration;
 #[cfg(feature = "local")]
@@ -9,12 +10,9 @@ use std::time::Instant;
 
 #[cfg(feature = "local")]
 use tempfile::tempdir;
-#[cfg(feature = "sandbox")]
 use theway_core::executor::ExecutorKind;
 use theway_core::executor::{ExecutorError, ToolExecutor};
-#[cfg(feature = "local")]
 use theway_daemon::executor::local::LocalExecutor;
-#[cfg(feature = "sandbox")]
 use theway_daemon::executor::sandbox::SandboxExecutor;
 
 fn argv(parts: &[&str]) -> Vec<String> {
@@ -243,7 +241,6 @@ async fn git_runs_in_repo_context() {
 }
 
 /// kind() reports Local / Sandbox respectively.
-#[cfg(all(feature = "local", feature = "sandbox"))]
 #[tokio::test]
 async fn kind_reports_local_and_sandbox() {
     assert_eq!(LocalExecutor::new().kind().await, ExecutorKind::Local);
@@ -252,7 +249,6 @@ async fn kind_reports_local_and_sandbox() {
 
 /// Every sandbox operation fails promptly with `UnsupportedKind(Sandbox)` — never
 /// hangs (each call is additionally guarded by a hard deadline).
-#[cfg(feature = "sandbox")]
 #[tokio::test]
 async fn sandbox_all_operations_fail_fast_with_unsupported() {
     let ex = SandboxExecutor::new();

@@ -478,6 +478,7 @@ fn daemon_config_round_trips_wire_and_proto() {
         tui_max_feed_lines: Some(8000),
         tool_service_addr: None,
         storage_service_addr: None,
+        executor_kind: Some("sandbox".into()),
         clear_fields: vec!["tool_service_addr".into()],
     };
     let proto = daemon_config_to_proto(&config);
@@ -490,6 +491,7 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert_eq!(proto.trigger_poll_secs, Some(60));
     assert_eq!(proto.tui_max_feed_lines, Some(8000));
     assert_eq!(proto.thinking_level.as_deref(), Some("high"));
+    assert_eq!(proto.executor_kind.as_deref(), Some("sandbox"));
     assert_eq!(proto.clear_fields, vec!["tool_service_addr"]);
 
     assert_eq!(proto.skills.len(), 1);
@@ -542,6 +544,7 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert!(proto_empty.base_url.is_none());
     assert!(proto_empty.thinking.is_none());
     assert!(proto_empty.thinking_level.is_none());
+    assert!(proto_empty.executor_kind.is_none());
     assert!(proto_empty.builtin_skills.is_empty());
     assert!(proto_empty.skills.is_empty());
     assert!(proto_empty.templates.is_empty());

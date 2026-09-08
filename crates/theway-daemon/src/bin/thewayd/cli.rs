@@ -73,4 +73,9 @@ struct Cli {
     /// runtime storage (issue #85). When unset, the daemon uses local storage.
     #[arg(long = "storage-service-addr")]
     storage_service_addr: Option<String>,
+    /// Execution environment for executor-backed tools: `local` (default) or
+    /// `sandbox`. Usually supplied by the TUI from `[executor] kind` in
+    /// config.toml (issue #123).
+    #[arg(long, value_parser = ["local", "sandbox"])]
+    executor_kind: Option<String>,
 }

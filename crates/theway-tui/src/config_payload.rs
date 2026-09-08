@@ -260,6 +260,18 @@ pub(crate) fn assemble_config_from(
         }
     }
 
+    // Executor environment ([executor] kind). Startup-only: it rides the
+    // daemon launch args, so the spawned daemon binds the requested executor
+    // before assembling tools.
+    if let Some(text) = config_toml {
+        match config::parse_executor_kind(text) {
+            Ok(kind) => payload.executor_kind = kind,
+            Err(err) => diagnostics.push(format!(
+                "executor: ignoring invalid kind in {source}: {err}"
+            )),
+        }
+    }
+
     (payload, diagnostics)
 }
 
@@ -387,6 +399,17 @@ pub(crate) fn reconcile(
         }
     } else if desired.clears("tui_max_feed_lines") && current.tui_max_feed_lines.is_some() {
         clear_field(&mut patch, "tui_max_feed_lines");
+    }
+
+    // Executor environment: bound at daemon startup together with the tool
+    // set, so it is not runtime-reappliable. A fresh spawn carries it through
+    // the launch args; attaching to a mismatched daemon reports the note.
+    if let Some(kind) = &desired.executor_kind {
+        if current.executor_kind.as_deref() != Some(kind.as_str()) && attach {
+            notes.push(format!(
+                "executor {kind} requested, but the execution environment only changes on daemon (re)spawn"
+            ));
+        }
     }
 
     // Controller service endpoints: the tool endpoint is read at call time by
