@@ -83,6 +83,12 @@ impl TurnHost {
             (thinking_level, usage, state.system_prompt.clone())
         };
         let context_window = context_window_for(&model);
+        // Resolved launch settings for graph runs: running/finished DAG nodes
+        // report their subagent job's actual model/thinking; pending nodes
+        // fall back to the configured node override and then the session
+        // model. Thinking is never inherited — absent override means off.
+        let jobs = self.automation.subagents.list();
+        let default_model = (model != "no-model").then(|| model.clone());
         // Last-turn usage (not session-cumulative): the last assistant message's
         // usage so clients can compare one turn against the context window.
         WireStatus {
@@ -117,12 +123,11 @@ impl TurnHost {
                 .list_runs()
                 .iter()
                 .filter(|run| run.session_id.as_deref() == Some(self.session.id.as_str()))
-                .map(dag_run_snapshot)
+                .map(|run| {
+                    dag_run_snapshot_resolved(run, default_model.as_deref(), &jobs)
+                })
                 .collect(),
-            subagents: self
-                .automation
-                .subagents
-                .list()
+            subagents: jobs
                 .iter()
                 .filter(|job| job.session_id.as_deref() == Some(self.session.id.as_str()))
                 .map(subagent_job_snapshot)

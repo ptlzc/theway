@@ -222,6 +222,10 @@ pub struct SubagentJobSnapshot {
     pub tools_called: u64,
     pub turn: u32,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
     pub output_tail: String,
     pub truncated: bool,
     pub live_preview: Option<String>,

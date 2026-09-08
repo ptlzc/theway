@@ -342,6 +342,8 @@ fn dag_node_wire(node: &crate::wire::WireDagNodeSnapshot) -> wire::DagNodeSnapsh
         }),
         output_tail: node.output_tail.clone(),
         live_preview: node.live_preview.clone(),
+        model: node.model.clone(),
+        thinking: node.thinking.clone(),
     }
 }
 
@@ -480,6 +482,8 @@ fn subagent_wire(job: &crate::wire::WireAgentJobSnapshot) -> wire::SubagentJobSn
         chars: job.chars,
         tools_called: job.tools_called,
         turn: job.turn,
+        model: job.model.clone(),
+        thinking: job.thinking.clone(),
     }
 }
 

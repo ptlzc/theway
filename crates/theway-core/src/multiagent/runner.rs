@@ -215,6 +215,11 @@ pub fn filter_tool_set(
 pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
     let started = Instant::now();
 
+    // Capture the resolved launch settings for the registry snapshot before
+    // the options are consumed below.
+    let job_model = format!("{}:{}", opts.model.provider.0, opts.model.id);
+    let job_thinking = opts.thinking.clone();
+
     // Graph mode: track this job in the registry (metrics + full-text output).
     let job_id = opts.registry.register_observed(
         SubagentJobInit {
@@ -226,6 +231,10 @@ pub async fn run_agent(opts: AgentRunOptions) -> AgentRunResult {
         },
         opts.observation_parent,
     );
+    opts.registry.update(&job_id, |job| {
+        job.model = Some(job_model);
+        job.thinking = job_thinking;
+    });
     let job_operation = opts.registry.operation_id(&job_id);
 
     let storage = Arc::new(MemorySessionStorage::new());

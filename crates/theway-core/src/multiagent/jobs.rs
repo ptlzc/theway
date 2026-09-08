@@ -86,6 +86,12 @@ pub struct SubagentJob {
     pub tools_called: u64,
     pub turn: u32,
     pub error: Option<String>,
+    /// Resolved model used by this run (`provider:id`), captured at launch
+    /// time so the graph UI can show what a node/subagent actually runs with.
+    pub model: Option<String>,
+    /// Resolved thinking level used by this run; `None` inherits the harness
+    /// default (`off`).
+    pub thinking: Option<String>,
     /// Full-text output buffer (capped at MAX_OUTPUT_BYTES).
     pub output: String,
     pub truncated: bool,
@@ -130,6 +136,8 @@ impl SubagentJob {
             tools_called: 0,
             turn: 0,
             error: None,
+            model: None,
+            thinking: None,
             output: String::new(),
             truncated: false,
             messages: Vec::new(),
@@ -182,6 +190,8 @@ impl From<&SubagentJob> for SubagentJobSnapshot {
             tools_called: job.tools_called,
             turn: job.turn,
             error: job.error.clone(),
+            model: job.model.clone(),
+            thinking: job.thinking.clone(),
             output_tail: job.output.clone(),
             truncated: job.truncated,
             live_preview: None,

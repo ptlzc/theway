@@ -166,6 +166,8 @@ fn subagent_snapshot_to_wire_computes_duration_and_fields() {
         tools_called: 40,
         turn: 5,
         error: None,
+        model: Some("faux:tiny".into()),
+        thinking: Some("high".into()),
         output_tail: "out".into(),
         truncated: false,
         live_preview: None,
@@ -177,6 +179,8 @@ fn subagent_snapshot_to_wire_computes_duration_and_fields() {
     assert_eq!(wire.duration_ms, Some(150));
     assert_eq!(wire.tps, Some(1.5));
     assert_eq!(wire.input_tokens, Some(10));
+    assert_eq!(wire.model.as_deref(), Some("faux:tiny"));
+    assert_eq!(wire.thinking.as_deref(), Some("high"));
 
     let mut no_duration = job;
     no_duration.completed_at = None;

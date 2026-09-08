@@ -110,6 +110,15 @@ pub struct WireDagNodeSnapshot {
     pub result: Option<WireNodeResultSnapshot>,
     pub output_tail: Option<String>,
     pub live_preview: Option<String>,
+    /// Model this node runs with (`provider:id` when resolved, an id when
+    /// only a per-node model override is configured). `None` = unknown/
+    /// inherit the parent session model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Reasoning-intensity override for this node
+    /// (off/minimal/low/medium/high/xhigh/max); `None` inherits the parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -229,4 +238,11 @@ pub struct WireAgentJobSnapshot {
     pub chars: Option<u64>,
     pub tools_called: Option<u64>,
     pub turn: Option<u32>,
+    /// Resolved model used by this subagent run (`provider:id`); `None` for
+    /// older daemons or runs created before launch settings were captured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Resolved reasoning intensity used by this subagent run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
 }

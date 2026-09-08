@@ -7,6 +7,7 @@ use theway_transport::wire::{
 };
 
 use super::metadata::now_rfc3339;
+use crate::transport_adapter::configured_node_model;
 
 pub(super) fn storage_node_to_wire(
     node: &SessionGraphNode,
@@ -134,6 +135,8 @@ fn persisted_node_to_wire(node: &theway_contract::dag::PersistedNode) -> WireDag
         }),
         output_tail: node.output.clone(),
         live_preview: node.live_preview.clone(),
+        model: configured_node_model(node.provider.as_deref(), node.model.as_deref()),
+        thinking: node.thinking.clone(),
     }
 }
 
@@ -165,5 +168,7 @@ pub(super) fn subagent_snapshot_to_wire(
         chars: Some(job.chars),
         tools_called: Some(job.tools_called),
         turn: Some(job.turn),
+        model: job.model.clone(),
+        thinking: job.thinking.clone(),
     }
 }

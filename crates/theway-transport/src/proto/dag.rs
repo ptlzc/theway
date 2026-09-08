@@ -37,6 +37,8 @@ fn wire_dag_run(run: &wire::DagRunSnapshot) -> crate::wire::WireDagRunSnapshot {
                     }),
                 output_tail: node.output_tail.clone(),
                 live_preview: node.live_preview.clone(),
+                model: node.model.clone(),
+                thinking: node.thinking.clone(),
             })
             .collect(),
     }
@@ -65,5 +67,7 @@ fn wire_subagent_job(job: &wire::SubagentJobSnapshot) -> crate::wire::WireAgentJ
         chars: job.chars,
         tools_called: job.tools_called,
         turn: job.turn,
+        model: job.model.clone(),
+        thinking: job.thinking.clone(),
     }
 }

@@ -31,6 +31,8 @@ fn job() -> SubagentJob {
         tools_called: 0,
         turn: 0,
         error: None,
+        model: None,
+        thinking: None,
         output: String::new(),
         truncated: false,
         messages: Vec::new(),

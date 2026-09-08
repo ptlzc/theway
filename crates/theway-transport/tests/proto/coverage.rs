@@ -143,6 +143,8 @@ fn rich_snapshot() -> WireStatus {
             }),
             output_tail: Some("tail".into()),
             live_preview: Some("live".into()),
+            model: Some("faux:tiny".into()),
+            thinking: Some("high".into()),
         }],
     }];
     snapshot.subagents = vec![WireAgentJobSnapshot {
@@ -167,6 +169,8 @@ fn rich_snapshot() -> WireStatus {
         chars: Some(100),
         tools_called: Some(3),
         turn: Some(2),
+        model: Some("faux:tiny".into()),
+        thinking: Some("high".into()),
     }];
     snapshot.extensions = WireExtensionSnapshot {
         revision: 11,

@@ -21,6 +21,8 @@ fn node(id: &str, status: &str) -> WireDagNodeSnapshot {
         result: None,
         output_tail: None,
         live_preview: None,
+        model: None,
+        thinking: None,
     }
 }
 

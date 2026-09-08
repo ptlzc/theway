@@ -321,7 +321,7 @@ impl App {
                 String::new()
             }
         };
-        let features = feature_labels(&self.latest.dags);
+        let features = feature_labels(&self.latest.dags, &self.latest.subagents);
         let working_dir = self.cwd.to_string_lossy();
         let chrome = prompt_chrome::PromptChrome {
             focused,

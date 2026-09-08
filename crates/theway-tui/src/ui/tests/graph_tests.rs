@@ -247,6 +247,8 @@ async fn graph_counter_hidden_only_and_sub_shell() {
             result: None,
             output_tail: None,
             live_preview: None,
+            model: None,
+            thinking: None,
         }],
     }];
     status.subagents = vec![WireAgentJobSnapshot {
@@ -271,6 +273,8 @@ async fn graph_counter_hidden_only_and_sub_shell() {
         chars: None,
         tools_called: None,
         turn: None,
+        model: None,
+        thinking: None,
     }];
     status.shell_count = 4;
     status.busy = true;
@@ -355,6 +359,8 @@ async fn hidden_dag_band_is_not_rendered() {
             result: None,
             output_tail: None,
             live_preview: None,
+            model: None,
+            thinking: None,
         }],
     }];
     app.apply_snapshot(status);
@@ -423,6 +429,8 @@ async fn dag_band_scrolls_with_feed() {
             result: None,
             output_tail: None,
             live_preview: None,
+            model: None,
+            thinking: None,
         }],
     }];
     app.apply_snapshot(status);
@@ -497,6 +505,8 @@ async fn terminal_only_dags_auto_hide_the_band() {
                 result: None,
                 output_tail: None,
                 live_preview: None,
+                model: None,
+                thinking: None,
             }],
         }
     }
@@ -648,6 +658,8 @@ async fn graph_band_in_side_panel_renders_graph_section_and_suppresses_feed_band
             result: None,
             output_tail: None,
             live_preview: None,
+            model: None,
+            thinking: None,
         }],
     }];
     app.apply_snapshot(status);

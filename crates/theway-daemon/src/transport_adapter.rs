@@ -138,6 +138,46 @@ impl GraphOps for CoreGraphOps {
 }
 
 pub fn dag_run_snapshot(run: &DagRun) -> WireDagRunSnapshot {
+    dag_run_snapshot_with(run, |node| {
+        (
+            configured_node_model(node.provider.as_deref(), node.model.as_deref()),
+            node.thinking.clone(),
+        )
+    })
+}
+
+/// Live-snapshot variant: the node's resolved model/thinking come from its
+/// most recent registry job when one exists (the job carries the actual
+/// resolved launch settings); pending nodes fall back to the configured
+/// override and then to the owning session's model default. Thinking has no
+/// inheritance — without a node-level override the harness runs `off`, so
+/// only an explicit level is reported.
+pub fn dag_run_snapshot_resolved(
+    run: &DagRun,
+    default_model: Option<&str>,
+    jobs: &[SubagentJob],
+) -> WireDagRunSnapshot {
+    dag_run_snapshot_with(run, |node| {
+        let job = jobs.iter().rev().find(|job| {
+            node.job_id.as_deref() == Some(job.id.as_str())
+                || (job.run_id.as_deref() == Some(run.id.as_str())
+                    && job.node_id.as_deref() == Some(node.id.as_str()))
+        });
+        let model = job
+            .and_then(|job| job.model.clone())
+            .or_else(|| configured_node_model(node.provider.as_deref(), node.model.as_deref()))
+            .or_else(|| default_model.map(str::to_string));
+        let thinking = job
+            .and_then(|job| job.thinking.clone())
+            .or_else(|| node.thinking.clone());
+        (model, thinking)
+    })
+}
+
+fn dag_run_snapshot_with(
+    run: &DagRun,
+    node_runtime: impl Fn(&DagNode) -> (Option<String>, Option<String>),
+) -> WireDagRunSnapshot {
     WireDagRunSnapshot {
         id: run.id.clone(),
         name: run.name.clone(),
@@ -152,11 +192,22 @@ pub fn dag_run_snapshot(run: &DagRun) -> WireDagRunSnapshot {
         created_at: run.created_at,
         completed_at: run.completed_at,
         error: run.error.clone(),
-        nodes: run.nodes.iter().map(dag_node_snapshot).collect(),
+        nodes: run
+            .nodes
+            .iter()
+            .map(|node| {
+                let (model, thinking) = node_runtime(node);
+                dag_node_snapshot_with(node, model, thinking)
+            })
+            .collect(),
     }
 }
 
-fn dag_node_snapshot(node: &DagNode) -> WireDagNodeSnapshot {
+fn dag_node_snapshot_with(
+    node: &DagNode,
+    model: Option<String>,
+    thinking: Option<String>,
+) -> WireDagNodeSnapshot {
     WireDagNodeSnapshot {
         id: node.id.clone(),
         agent: node.agent.clone(),
@@ -172,6 +223,19 @@ fn dag_node_snapshot(node: &DagNode) -> WireDagNodeSnapshot {
         result: node.result.as_ref().map(node_result_snapshot),
         output_tail: node.output.clone(),
         live_preview: node.live_preview.clone(),
+        model,
+        thinking,
+    }
+}
+
+/// The configured node model as a display label: explicit `provider + model`
+/// pairs become `provider:model`, while a bare per-node model override keeps
+/// the id (the parent provider is implied).
+pub fn configured_node_model(provider: Option<&str>, model: Option<&str>) -> Option<String> {
+    match (provider, model) {
+        (Some(provider), Some(model)) if !model.is_empty() => Some(format!("{provider}:{model}")),
+        (None, Some(model)) if !model.is_empty() => Some(model.to_string()),
+        _ => None,
     }
 }
 
@@ -211,6 +275,8 @@ pub fn subagent_job_snapshot(job: &SubagentJob) -> WireAgentJobSnapshot {
         chars: Some(job.chars),
         tools_called: Some(job.tools_called),
         turn: Some(job.turn),
+        model: job.model.clone(),
+        thinking: job.thinking.clone(),
     }
 }
 
@@ -336,7 +402,85 @@ fn dag_status_str(status: &DagStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use theway_core::multiagent::graph::types::{DagNodeDef, DagRunDef};
     use theway_core::multiagent::jobs::SubagentJobInit;
+
+    #[test]
+    fn dag_run_snapshot_resolved_reports_actual_and_configured_runtime() {
+        let engine = Arc::new(DagEngine::new());
+        let run = engine
+            .plan(
+                DagRunDef {
+                    name: "mix".into(),
+                    nodes: vec![
+                        DagNodeDef {
+                            id: "override".into(),
+                            agent: "explorer".into(),
+                            task: "override".into(),
+                            depends_on: None,
+                            timeout: None,
+                            cwd: None,
+                            provider: Some("anthropic".into()),
+                            model: Some("claude-sonnet".into()),
+                            thinking: Some("high".into()),
+                            max_iterations: None,
+                            tools: None,
+                        },
+                        DagNodeDef {
+                            id: "inherit".into(),
+                            agent: "coder".into(),
+                            task: "inherit".into(),
+                            depends_on: None,
+                            timeout: None,
+                            cwd: None,
+                            provider: None,
+                            model: None,
+                            thinking: None,
+                            max_iterations: None,
+                            tools: None,
+                        },
+                    ],
+                    max_concurrency: None,
+                    fail_fast: None,
+                    direction: None,
+                },
+                None,
+                Some("sess-1".into()),
+            )
+            .unwrap();
+
+        // Pending nodes: configured override wins; otherwise the parent model
+        // is inherited and thinking stays unset (no override → off).
+        let pending = dag_run_snapshot_resolved(&run, Some("parent:model"), &[]);
+        assert_eq!(
+            pending.nodes[0].model.as_deref(),
+            Some("anthropic:claude-sonnet")
+        );
+        assert_eq!(pending.nodes[0].thinking.as_deref(), Some("high"));
+        assert_eq!(pending.nodes[1].model.as_deref(), Some("parent:model"));
+        assert_eq!(pending.nodes[1].thinking, None);
+
+        // A launched node reports the registry job's actual resolved settings.
+        let registry = SubagentJobRegistry::new();
+        let job_id = registry.register(SubagentJobInit {
+            agent: "coder".into(),
+            source: "dag".into(),
+            run_id: Some(run.id.clone()),
+            node_id: Some("inherit".into()),
+            session_id: Some("sess-1".into()),
+        });
+        registry.update(&job_id, |job| {
+            job.model = Some("deepseek:deepseek-chat".into());
+            job.thinking = Some("medium".into());
+        });
+
+        let live = dag_run_snapshot_resolved(&run, Some("parent:model"), &registry.list());
+        assert_eq!(
+            live.nodes[1].model.as_deref(),
+            Some("deepseek:deepseek-chat")
+        );
+        assert_eq!(live.nodes[1].thinking.as_deref(), Some("medium"));
+    }
 
     #[test]
     fn job_ops_projects_output_and_messages() {

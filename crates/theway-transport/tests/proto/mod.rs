@@ -220,6 +220,8 @@ fn dag_run_wire_shape_maps_to_proto() {
             result: None,
             output_tail: Some("partial output".into()),
             live_preview: Some("live".into()),
+            model: Some("faux:model".into()),
+            thinking: Some("medium".into()),
         }],
     };
 

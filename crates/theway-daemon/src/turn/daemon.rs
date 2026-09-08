@@ -38,7 +38,8 @@ use crate::runtime_storage::SessionRepository;
 use crate::session_ops::SessionFactory;
 use crate::tools::assembly::reload::ReloadRuntime;
 use crate::transport_adapter::{
-    CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot, subagent_job_snapshot,
+    CoreGraphOps, CoreJobOps, agent_event, dag_event, dag_run_snapshot_resolved,
+    subagent_job_snapshot,
 };
 use theway_llm_provider::{ImageContent, Message, Usage};
 use theway_transport::mentions;

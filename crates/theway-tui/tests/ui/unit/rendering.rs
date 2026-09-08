@@ -16,15 +16,128 @@ fn dag_run(kind: &str) -> theway_transport::wire::WireDagRunSnapshot {
 
 #[test]
 fn feature_labels_empty_without_sources() {
-    assert!(super::feature_labels(&[]).is_empty());
+    assert!(super::feature_labels(&[], &[]).is_empty());
     // Non-dag-kind runs (e.g. goal) do not activate a composer label.
-    assert!(super::feature_labels(&[dag_run("goal")]).is_empty());
+    assert!(super::feature_labels(&[dag_run("goal")], &[]).is_empty());
 }
 
 #[test]
 fn feature_labels_derives_graph_engine_from_dag_run() {
-    let labels = super::feature_labels(&[dag_run("dag")]);
+    let labels = super::feature_labels(&[dag_run("dag")], &[]);
     assert_eq!(labels, vec!["graph engine".to_string()]);
+}
+
+#[test]
+fn feature_labels_list_graph_node_and_subagent_runtime() {
+    let mut run = dag_run("dag");
+    let mut node = dag_node("explore", "pending");
+    node.model = Some("anthropic:claude-sonnet".into());
+    node.thinking = Some("high".into());
+    run.nodes = vec![node];
+
+    let subagent = theway_transport::wire::WireAgentJobSnapshot {
+        id: "sub-1".into(),
+        agent: "reviewer".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        status: "running".into(),
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+        attempt: 1,
+        total_attempts: 1,
+        input_tokens: None,
+        output_tokens: None,
+        error: None,
+        output_tail: None,
+        live_preview: None,
+        tps: None,
+        cps: None,
+        chars: None,
+        tools_called: None,
+        turn: None,
+        model: Some("deepseek:deepseek-chat".into()),
+        thinking: Some("medium".into()),
+    };
+
+    let labels = super::feature_labels(&[run], &[subagent]);
+    assert_eq!(
+        labels,
+        vec![
+            "graph engine".to_string(),
+            "executor-coder anthropic:claude-sonnet · think high".to_string(),
+            "reviewer deepseek:deepseek-chat · think medium".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn feature_labels_omits_dag_jobs_and_dedupes_runtime() {
+    let mut run = dag_run("dag");
+    let mut node = dag_node("explore", "running");
+    node.model = Some("faux:tiny".into());
+    node.thinking = Some("off".into());
+    run.nodes = vec![node];
+
+    let dag_job = theway_transport::wire::WireAgentJobSnapshot {
+        id: "job-dag".into(),
+        agent: "executor-coder".into(),
+        source: "dag".into(),
+        run_id: Some("dag-1".into()),
+        node_id: Some("explore".into()),
+        status: "running".into(),
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+        attempt: 1,
+        total_attempts: 1,
+        input_tokens: None,
+        output_tokens: None,
+        error: None,
+        output_tail: None,
+        live_preview: None,
+        tps: None,
+        cps: None,
+        chars: None,
+        tools_called: None,
+        turn: None,
+        model: Some("faux:tiny".into()),
+        thinking: Some("off".into()),
+    };
+    let standalone = theway_transport::wire::WireAgentJobSnapshot {
+        id: "sub-1".into(),
+        agent: "executor-coder".into(),
+        source: "subagent".into(),
+        run_id: None,
+        node_id: None,
+        status: "running".into(),
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+        attempt: 1,
+        total_attempts: 1,
+        input_tokens: None,
+        output_tokens: None,
+        error: None,
+        output_tail: None,
+        live_preview: None,
+        tps: None,
+        cps: None,
+        chars: None,
+        tools_called: None,
+        turn: None,
+        model: Some("faux:tiny".into()),
+        thinking: Some("off".into()),
+    };
+
+    // The DAG job duplicates its node, `think off` is omitted, and the
+    // standalone job collides with the node runtime → one combined label.
+    let labels = super::feature_labels(&[run], &[dag_job, standalone]);
+    assert_eq!(
+        labels,
+        vec!["graph engine".to_string(), "executor-coder faux:tiny".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -307,6 +420,8 @@ fn dag_node(id: &str, status: &str) -> theway_transport::wire::WireDagNodeSnapsh
         result: None,
         output_tail: None,
         live_preview: None,
+        model: None,
+        thinking: None,
     }
 }
 

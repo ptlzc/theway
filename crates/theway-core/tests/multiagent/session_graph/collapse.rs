@@ -60,6 +60,8 @@ async fn append_and_read_session_graph_state_roundtrips_latest() {
             tools_called: 0,
             turn: 0,
             error: None,
+            model: Some("faux:tiny".into()),
+            thinking: Some("high".into()),
             output_tail: String::new(),
             truncated: false,
             live_preview: None,
