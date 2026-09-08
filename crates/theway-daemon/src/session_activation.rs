@@ -183,7 +183,7 @@ impl SessionActivator {
             repo.clone(),
             self.storage.clone(),
             self.paths.clone(),
-            Some(effective_model.clone()),
+            effective_model.clone(),
             effective_thinking,
             &self.cli_builtin_skills,
             &self.config_builtin_skills,
@@ -200,7 +200,7 @@ impl SessionActivator {
             .map_err(|error| rpc("internal", format!("build session runtime: {error}")))?;
         {
             let mut state = built_runtime.harness.agent().state();
-            state.model = Some(effective_model.clone());
+            state.model = effective_model.clone();
             state.thinking_level = Some(effective_thinking);
         }
         let restored = load_persisted_dag_runs(&ctx, &session_id)
@@ -270,7 +270,10 @@ impl SessionActivator {
             session_id: session_id.clone(),
             name: record.name.unwrap_or_default(),
             cwd: record.cwd,
-            model: format!("{}:{}", effective_model.provider.0, effective_model.id),
+            model: effective_model
+                .as_ref()
+                .map(|model| format!("{}:{}", model.provider.0, model.id))
+                .unwrap_or_default(),
             created_at: record.created_at,
             last_activity_at: record.last_activity_at,
             last_activity_at_rfc3339: epoch_millis_to_rfc3339(record.last_activity_at),
@@ -395,18 +398,13 @@ fn resolve_effective_model(
     provider: Option<&str>,
     model: Option<&str>,
     requested_base_url: Option<&str>,
-) -> Result<Model, WireRpcError> {
-    // Model is session-level: it must be supplied explicitly (activate-request
-    // runtime provider/model or a persisted session binding). There is no
-    // startup default anymore — a session without a model is an error (方案 A).
+) -> Result<Option<Model>, WireRpcError> {
+    // 模型是会话时配置：激活不携带、也不要求模型。无模型的会话允许激活，
+    // 模型经 SetModel 在会话上配置（TUI/宿主模型选择器）；未配置就运行
+    // 首轮时由 run 侧报「no model set for this session」。
     let (provider, model) = match (provider, model) {
         (Some(provider), Some(model)) => (provider, model),
-        _ => {
-            return Err(rpc(
-                "failed_precondition",
-                "no model configured for session; select a model in the TUI",
-            ));
-        }
+        _ => return Ok(None),
     };
     let mut model = get_model(&Provider::from(provider), model).ok_or_else(|| {
         rpc(
@@ -417,7 +415,7 @@ fn resolve_effective_model(
     if let Some(base_url) = resolved_base_url(persisted, requested_base_url) {
         model.base_url = base_url;
     }
-    Ok(model)
+    Ok(Some(model))
 }
 
 fn resolved_base_url(persisted: &SessionRuntimeContext, requested: Option<&str>) -> Option<String> {

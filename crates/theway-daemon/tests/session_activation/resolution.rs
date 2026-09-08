@@ -95,17 +95,16 @@ fn resolve_provider_model_rejects_incomplete_persisted_selection() {
 }
 
 #[test]
-fn resolve_effective_model_errors_without_any_selection() {
-    // Model is session-level: no startup fallback. When neither the activate
-    // request nor the persisted binding supplies a model, activation errors.
+fn resolve_effective_model_is_none_without_any_selection() {
+    // 模型是会话时配置：激活不再要求模型。请求与持久化绑定都未携带时，
+    // 返回 None（会话允许无模型激活，模型经 SetModel 会话时配置）。
     let persisted = runtime_context(Path::new("/tmp"));
 
     // Act
-    let err = resolve_effective_model(&persisted, None, None, None).unwrap_err();
+    let resolved = resolve_effective_model(&persisted, None, None, None).unwrap();
 
     // Assert
-    let text = err.message;
-    assert!(text.contains("no model configured"), "{text}");
+    assert!(resolved.is_none());
 }
 
 #[test]
@@ -117,7 +116,9 @@ fn resolve_effective_model_returns_catalog_model_for_requested_pair() {
     let persisted = runtime_context(Path::new("/tmp"));
 
     // Act
-    let model = resolve_effective_model(&persisted, Some(provider), Some(model_id), None).unwrap();
+    let model = resolve_effective_model(&persisted, Some(provider), Some(model_id), None)
+        .unwrap()
+        .expect("requested pair resolves to a model");
 
     // Assert
     assert_eq!(model.id, model_id);
