@@ -31,8 +31,20 @@ pub fn get_model(provider: &Provider, id: &str) -> Option<Model> {
 
 pub fn list_models() -> Vec<Model> {
     let custom = custom_registry().lock().expect("registry poisoned");
+    // Custom entries override builtin entries with the same `(provider, id)`
+    // key, matching [`get_model`] precedence. A custom override must appear
+    // exactly once instead of twice (builtin + custom) in catalog listings.
     let mut out: Vec<Model> = BUILTIN_MODELS.iter().cloned().collect();
-    out.extend(custom.iter().cloned());
+    for model in custom.iter().cloned() {
+        if let Some(existing) = out
+            .iter_mut()
+            .find(|existing| existing.provider == model.provider && existing.id == model.id)
+        {
+            *existing = model;
+        } else {
+            out.push(model);
+        }
+    }
     out
 }
 
