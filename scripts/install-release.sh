@@ -254,7 +254,20 @@ else
 fi
 
 echo "==> Done:"
-"$BIN_DIR/theway$EXE" --version
+if ! version_output="$("$BIN_DIR/theway$EXE" --version 2>&1)"; then
+    if printf '%s' "$version_output" | grep -q 'GLIBC'; then
+        echo "" >&2
+        echo "The prebuilt binary requires a newer glibc than this system provides." >&2
+        echo "Do not try to upgrade glibc automatically: replacing the system libc can break the OS." >&2
+        echo "Instead build on this machine so it links against the local glibc:" >&2
+        echo "  git clone https://github.com/ptlzc/theway.git" >&2
+        echo "  cd theway && ./scripts/install.sh" >&2
+        exit 1
+    fi
+    echo "$version_output" >&2
+    exit 1
+fi
+echo "$version_output"
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;

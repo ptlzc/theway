@@ -32,13 +32,13 @@ curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-r
 
 This downloads the latest prebuilt `theway`, `thewayd`, and `tgrep` release binaries from GitHub for your OS/architecture and atomically replaces the installed copies in `~/.cargo/bin` (plus the `tw` shorthand). It is much faster than `cargo install` because it never compiles anything.
 
-The script detects Linux/macOS/Windows (`x86_64` / `aarch64`), verifies the downloaded files against the release `SHA256SUMS`, and leaves a running `thewayd` alone by default. Useful variants:
+The script detects Linux/macOS/Windows (`x86_64` / `aarch64`), verifies the downloaded files against the release `SHA256SUMS`, and leaves a running `thewayd` alone by default. Linux binaries are built on Ubuntu 22.04, so they require glibc 2.35 or newer. If the installed binary reports `GLIBC_… not found`, do not try to replace the system glibc; build from source instead with `./scripts/install.sh` so the binary links against your local libc.
 
 ```bash
-# 安装后立即重启旧 thewayd (其他终端的会话会断开)
+# Restart the old thewayd after install (other terminal sessions will disconnect)
 curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-release.sh | bash -s -- --restart-daemon
 
-# 固定版本 / 指定安装目录
+# Pin a release / choose the install directory
 curl -fsSL https://raw.githubusercontent.com/ptlzc/theway/main/scripts/install-release.sh | bash -s -- --tag v0.1.22 --bin-dir ~/.local/bin
 ```
 

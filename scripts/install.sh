@@ -1,35 +1,38 @@
 #!/usr/bin/env bash
 # =============================================================================
-# install — build the latest theway release and install it into a bin dir
+# install — build the latest theway release and install it into a bin directory
 #
-# 用法:
-#   scripts/install.sh                   # 默认安装到 $CARGO_HOME/bin (~/.cargo/bin)
-#   scripts/install.sh --root DIR        # 安装到 DIR/bin (cargo install --root 语义)
-#   scripts/install.sh --restart-daemon  # 安装后立即重启旧 thewayd (会断开现有会话)
+# Usage:
+#   scripts/install.sh                    # install into $CARGO_HOME/bin (~/.cargo/bin)
+#   scripts/install.sh --root DIR         # install into DIR/bin (cargo install --root semantics)
+#   scripts/install.sh --restart-daemon   # restart the old thewayd after install
 #   scripts/install.sh --help
 #
-# 行为:
-#   - cargo install --path crates/theway-tui --force 构建 release 并覆盖安装
-#   - cargo install --path crates/theway-daemon --force 同步安装 thewayd
-#     (TUI 按需 spawn daemon 时从 theway 同目录或 PATH 找 thewayd, 两者必须配套,
-#     否则 discovery 协议错配会表现为冷启动 20s 超时)
-#   - 默认不动正在运行的 thewayd: 它们继续服务现有会话, TUI 关闭后由 controller
-#     存储看门狗在数秒内自动退出 (issue #136), 下次启动即用新二进制; 只清理
-#     进程已不存在的残留端口文件。需要旧 daemon 立即切换新二进制时加
-#     --restart-daemon (先 SIGTERM 优雅退出, 再 SIGKILL 兜底)
-#   - 内置扩展包无需在此复制: theway-extensions crate 把官方插件嵌入 thewayd
-#     二进制, daemon 启动时自举到 $THEWAY_DIR/extensions-managed/ (issue #91)
-#   - 同时生成 `tw` 简写 (与 theway 相同的二进制副本, Makefile 同款约定)
-#   - 安装后打印版本; 若目标 bin 目录不在 PATH 中会给出提示
+# Behavior:
+#   - `cargo install --path crates/theway-tui --force` builds release and
+#     replaces the installed `theway`.
+#   - `cargo install --path crates/theway-daemon --force` installs the matching
+#     `thewayd`. The TUI discovers the daemon next to `theway` or on PATH, so
+#     the two must be built together or discovery can time out at cold start.
+#   - `cargo install --path crates/tgrep-cli --force` installs `tgrep`, the
+#     optional indexing backend for the built-in grep tool.
+#   - A running thewayd is left alone by default: it keeps serving existing
+#     sessions and exits a few seconds after its TUI closes; the next start
+#     uses the new binary. Pass --restart-daemon to switch immediately.
+#   - The `tw` shorthand is created (a copy of the `theway` binary).
+#   - The version is printed at the end; a note is shown when the target bin
+#     directory is not on PATH.
 #
-# 依赖: bash, cargo (rustup 或系统安装均可)
+# Dependencies: bash, cargo (rustup or a system install).
+# Prefer scripts/install-release.sh when you want prebuilt GitHub Release
+# binaries instead of a local Cargo build.
 # =============================================================================
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CARGO="${CARGO:-cargo}"
-EXE="${EXE:-}" # Windows 下可设为 .exe (与 Makefile 的 EXE 变量同约定)
+EXE="${EXE:-}" # set .exe on Windows, matching the Makefile convention
 RESTART_DAEMON="${RESTART_DAEMON:-}"
 
 usage() {
@@ -40,7 +43,7 @@ INSTALL_ROOT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --root)
-            INSTALL_ROOT="${2:?--root 需要一个目录参数}"
+            INSTALL_ROOT="${2:?--root requires a directory argument}"
             shift 2
             ;;
         --root=*)
@@ -56,7 +59,7 @@ while [ $# -gt 0 ]; do
             exit 0
             ;;
         *)
-            echo "install.sh: 未知参数: $1" >&2
+            echo "install.sh: unknown argument: $1" >&2
             usage >&2
             exit 2
             ;;
@@ -64,30 +67,27 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$INSTALL_ROOT" ]; then
-    # cargo 默认前缀: 优先 $CARGO_HOME, 回退 ~/.cargo
+    # Cargo's default prefix: $CARGO_HOME first, then ~/.cargo.
     INSTALL_ROOT="${CARGO_HOME:-$HOME/.cargo}"
 fi
 
 BIN_DIR="$INSTALL_ROOT/bin"
 
-echo "==> 构建并安装 theway (release) 到 $BIN_DIR"
+echo "==> Building and installing theway (release) into $BIN_DIR"
 mkdir -p "$BIN_DIR"
-# --locked: cargo install 默认忽略 workspace Cargo.lock 重新解析依赖, 曾解析出
-# oxc_transformer 0.75.1 + oxc-browserslist 2.3.1 的破坏性组合 (Version 第三字段
-# u32→u16 不兼容); 锁定后与 workspace 构建同一依赖集.
+# --locked keeps the workspace dependency set: a fresh resolution previously
+# produced an incompatible oxc_transformer + oxc-browserslist combination.
 "$CARGO" install --path "$ROOT/crates/theway-tui" --force --locked --root "$INSTALL_ROOT"
 
-echo "==> 构建并安装 thewayd (release) 到 $BIN_DIR"
+echo "==> Building and installing thewayd (release) into $BIN_DIR"
 "$CARGO" install --path "$ROOT/crates/theway-daemon" --force --locked --root "$INSTALL_ROOT"
 
-echo "==> 构建并安装 tgrep (release) 到 $BIN_DIR"
-# 内置 grep 工具的索引后端 (issue #121): daemon 在同目录发现 tgrep 并
-# spawn `tgrep serve`, 缺失时 grep 工具自动回退为全量走树 (行为不变).
+echo "==> Building and installing tgrep (release) into $BIN_DIR"
 "$CARGO" install --path "$ROOT/crates/tgrep-cli" --force --locked --root "$INSTALL_ROOT"
 
-# ── 默认配置初始化 (issue #123) ─────────────────────────────────────────────
-# 首次安装时生成 controller 持有的默认 config.toml, 显式声明本地执行环境。
-# 文件已存在时不覆盖, 保留用户的模型/MCP/主题等全部内容。
+# ── Default configuration (issue #123) ───────────────────────────────────────
+# Seed the controller-owned default config.toml on first install only; an
+# existing file is never overwritten.
 THEWAY_BASE="${THEWAY_DIR:-$HOME/.theway}"
 CONFIG_FILE="$THEWAY_BASE/config.toml"
 if [ ! -e "$CONFIG_FILE" ]; then
@@ -108,27 +108,27 @@ kind = "local"
 # thinking = "medium"
 # api_key = "sk-xxxxxx"  # EXAMPLE ONLY — real keys are read from environment variables, never written here.
 EOF
-    echo "==> 初始化默认配置 $CONFIG_FILE"
+    echo "==> Initialized default config at $CONFIG_FILE"
 fi
 
-# ── 运行中的 daemon 处理 ───────────────────────────────────────────────────
-# 默认不打断: 正在运行的 thewayd 继续服务现有会话 (Linux 上覆盖运行中二进制的
-# 磁盘文件不影响已加载的进程映像), 关闭对应 TUI 后看门狗会在数秒内让它自动
-# 退出并清理自己的端口文件, 下次启动即用新二进制。--restart-daemon 保留旧行为:
-# 立即停掉所有 thewayd (其他终端的 theway 会话会断开)。
+# ── Running daemon handling ──────────────────────────────────────────────────
+# Default: do not interrupt a running thewayd. Replacing the binary on disk
+# does not affect the already-loaded process image; the daemon exits a few
+# seconds after its TUI closes and the next start uses the new binary.
+# --restart-daemon keeps the old behavior and switches immediately.
 if [ -n "$RESTART_DAEMON" ]; then
-    echo "==> 重启旧版 thewayd 进程 (其他终端的 theway 会话会断开)"
+    echo "==> Restarting the old thewayd process (other terminal sessions will disconnect)"
     pkill -TERM -x thewayd 2>/dev/null || true
     for _ in 1 2 3 4 5; do
         pgrep -x thewayd >/dev/null 2>&1 || break
         sleep 1
     done
     pkill -KILL -x thewayd 2>/dev/null || true
-    # 移除旧全局端口文件 + 残留 per-cwd 条目 (新 daemon 启动时会写自己的).
+    # Remove stale port files; a new daemon writes its own.
     rm -f "$THEWAY_BASE"/daemon-port "$THEWAY_BASE"/daemon-port-*
 else
-    # 清理死进程的残留端口文件: 只删 pid 已不存在或已不是 thewayd 的条目,
-    # 活 daemon 的条目原样保留 (daemon 退出时会自己清理).
+    # Remove port files whose pid is gone or no longer thewayd; keep live
+    # daemon entries (the daemon cleans them up when it exits).
     for f in "$THEWAY_BASE"/daemon-port-*; do
         [ -e "$f" ] || continue
         pid=$(awk '{print $2}' "$f" 2>/dev/null || true)
@@ -137,33 +137,32 @@ else
         fi
     done
     if pgrep -x thewayd >/dev/null 2>&1; then
-        echo "==> 检测到仍在运行的 thewayd (继续服务现有会话, 不受影响):"
+        echo "==> A running thewayd is still serving existing sessions and is unaffected:"
         for pid in $(pgrep -x thewayd); do
             cwd=""
             if [ -r "/proc/$pid/cmdline" ]; then
                 cwd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null \
                     | sed -n 's/.*--cwd \([^ ]*\).*/\1/p')
             fi
-            echo "     pid $pid${cwd:+ (cwd $cwd)} — 关闭对应 TUI 后会在数秒内自动退出, 下次启动即用新二进制"
+            echo "     pid $pid${cwd:+ (cwd $cwd)} — it exits a few seconds after its TUI closes; the next start uses the new binary"
         done
     fi
 fi
 
-echo "==> 生成 tw 简写"
-# cp 原地覆盖正在执行的二进制会 ETXTBSY (tw 常被用作 TUI 启动入口, 运行中
-# 的进程仍持有该 inode); 先拷到同目录临时文件再 mv (rename 原子替换), 旧
-# inode 留给运行中的进程, 新启动的 tw 指向新二进制.
+echo "==> Creating the tw shorthand"
+# Copy to a temporary file first and rename: replacing a binary that is
+# currently running can hit ETXTBSY on Linux, and rename is atomic.
 tmp_tw="$BIN_DIR/.tw.tmp.$$"
 cp "$BIN_DIR/theway$EXE" "$tmp_tw"
 mv -f "$tmp_tw" "$BIN_DIR/tw$EXE"
 
-echo "==> 完成:"
+echo "==> Done:"
 "$BIN_DIR/theway$EXE" --version
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *)
-        echo "提示: $BIN_DIR 不在 PATH 中, 请加入 shell 配置, 例如:" >&2
+        echo "Note: $BIN_DIR is not on PATH; add it to your shell profile, for example:" >&2
         echo "  export PATH=\"$BIN_DIR:\$PATH\"" >&2
         ;;
 esac
