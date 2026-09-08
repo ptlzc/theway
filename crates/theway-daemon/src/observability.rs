@@ -663,6 +663,13 @@ fn add_measurement_attributes(
 }
 
 fn log_start(start: &theway_core::OperationStarted) {
+    // Issue #122 forensics: the operation line alone only says `tool.execute`;
+    // without the tool name a burned-out node's turn-by-turn actions cannot be
+    // reconstructed from logs. Carry the detail that identifies the operation.
+    let tool_name = match &start.detail {
+        OperationDetail::ToolExecution { tool_name } => Some(tool_name.as_str()),
+        _ => None,
+    };
     tracing::info!(
         target: "theway::runtime",
         event = "operation_started",
@@ -673,6 +680,7 @@ fn log_start(start: &theway_core::OperationStarted) {
         run_id = start.context.run_id.as_deref(),
         job_id = start.context.job_id.as_deref(),
         node_id = start.context.node_id.as_deref(),
+        tool_name = tool_name,
     );
 }
 
