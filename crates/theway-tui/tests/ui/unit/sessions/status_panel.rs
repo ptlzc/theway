@@ -163,6 +163,9 @@ async fn side_panel_menu_renders_inline_band_with_highlight() {
 #[tokio::test]
 async fn ctrl_o_persists_last_thinking_mode() {
     use crate::feed_render::ThinkingMode as Mode;
+    // Serializes with every other test that swaps the process-wide controller
+    // config / ui-state path (issue #141).
+    let _config_path = crate::config_payload::lock_config_path_for_tests();
     let dir = std::env::temp_dir().join(format!("theway-ui-ctrl-o-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     crate::ui_state::set_state_path_for_tests(Some(dir.join("ui-state.toml")));
