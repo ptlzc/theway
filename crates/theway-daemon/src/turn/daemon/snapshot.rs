@@ -300,46 +300,38 @@ impl TurnHost {
                 // land in the panel/banner without waiting for the next
                 // Configure. Standalone mode (empty slot) falls back to the
                 // startup-frozen capabilities.
-                let slot = self.runtime.mcp_provision.read().unwrap();
-                let slot_active = !slot.configs.is_empty()
-                    || !slot.tools.is_empty()
-                    || !slot.errors.is_empty();
-                if slot_active {
-                    WireMcpSnapshot {
-                        servers: slot.server_names.len(),
-                        tools: slot.tool_names.len(),
-                        notification_hooks: slot.hooks.len(),
-                        server_names: slot.server_names.clone(),
-                        tool_names: slot.tool_names.clone(),
-                        errors: slot
-                            .errors
-                            .iter()
-                            .map(|(name, error)| WireMcpServerError {
-                                name: name.clone(),
-                                error: error.clone(),
-                            })
-                            .collect(),
-                    }
+                // session-scoped-mcp: a session-level overlay owns a per-session
+                // slot that already holds the merged daemon + session servers.
+                if let Some(overlay) = self.session.mcp_overlay.as_ref() {
+                    mcp_snapshot_from_slot(&overlay.slot.read().unwrap())
                 } else {
-                    WireMcpSnapshot {
-                        servers: self.projection.capabilities.mcp_servers,
-                        tools: self.projection.capabilities.mcp_tools,
-                        notification_hooks: self
-                            .projection
-                            .capabilities
-                            .mcp_notification_hooks,
-                        server_names: self.projection.capabilities.mcp_server_names.clone(),
-                        tool_names: self.projection.capabilities.mcp_tool_names.clone(),
-                        errors: self
-                            .projection
-                            .capabilities
-                            .mcp_server_errors
-                            .iter()
-                            .map(|(name, error)| WireMcpServerError {
-                                name: name.clone(),
-                                error: error.clone(),
-                            })
-                            .collect(),
+                    let slot = self.runtime.mcp_provision.read().unwrap();
+                    let slot_active = !slot.configs.is_empty()
+                        || !slot.tools.is_empty()
+                        || !slot.errors.is_empty();
+                    if slot_active {
+                        mcp_snapshot_from_slot(&slot)
+                    } else {
+                        WireMcpSnapshot {
+                            servers: self.projection.capabilities.mcp_servers,
+                            tools: self.projection.capabilities.mcp_tools,
+                            notification_hooks: self
+                                .projection
+                                .capabilities
+                                .mcp_notification_hooks,
+                            server_names: self.projection.capabilities.mcp_server_names.clone(),
+                            tool_names: self.projection.capabilities.mcp_tool_names.clone(),
+                            errors: self
+                                .projection
+                                .capabilities
+                                .mcp_server_errors
+                                .iter()
+                                .map(|(name, error)| WireMcpServerError {
+                                    name: name.clone(),
+                                    error: error.clone(),
+                                })
+                                .collect(),
+                        }
                     }
                 }
             },
@@ -420,4 +412,23 @@ impl TurnHost {
     }
 
     // ── turn lifecycle ────────────────────────────────────────────────────────────────
+}
+
+/// Project one MCP provision slot into the wire snapshot shape.
+fn mcp_snapshot_from_slot(slot: &crate::mcp_loader::McpProvisionState) -> WireMcpSnapshot {
+    WireMcpSnapshot {
+        servers: slot.server_names.len(),
+        tools: slot.tool_names.len(),
+        notification_hooks: slot.hooks.len(),
+        server_names: slot.server_names.clone(),
+        tool_names: slot.tool_names.clone(),
+        errors: slot
+            .errors
+            .iter()
+            .map(|(name, error)| WireMcpServerError {
+                name: name.clone(),
+                error: error.clone(),
+            })
+            .collect(),
+    }
 }

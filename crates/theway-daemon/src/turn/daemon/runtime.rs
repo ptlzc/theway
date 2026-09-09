@@ -160,6 +160,7 @@ impl TurnHost {
                     projection.thinking_summary.clone(),
                 ),
                 aborted: false,
+                mcp_overlay: None,
             },
             sessions: SessionRegistry::new(),
             automation: AutomationRuntime {

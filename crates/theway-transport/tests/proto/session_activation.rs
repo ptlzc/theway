@@ -72,6 +72,7 @@ fn activate_session_request_converts_proto_tags_and_optional_fields() {
     assert_eq!(request.name.as_deref(), Some("name"));
     assert_eq!(request.runtime.as_ref().unwrap().work_dir, "");
     assert!(request.runtime.as_ref().unwrap().provider.is_none());
+    assert!(request.mcp_servers.is_empty());
 
     let optional_absent = wire::ActivateSessionRequest {
         session_id: None,
@@ -84,6 +85,7 @@ fn activate_session_request_converts_proto_tags_and_optional_fields() {
                 ..Default::default()
             },
         )),
+        mcp_servers: Vec::new(),
     };
     let request = activate_session_request_from_proto(&optional_absent).unwrap();
     assert!(request.session_id.is_none());
@@ -101,10 +103,170 @@ fn activate_session_request_requires_runtime() {
         client_key: "key".into(),
         name: None,
         runtime: None,
+        mcp_servers: Vec::new(),
     };
     let err = activate_session_request_from_proto(&proto).unwrap_err();
     assert_eq!(err.code, "missing_runtime");
     assert_eq!(err.message, "ActivateSessionRequest.runtime is required");
+}
+
+#[test]
+fn activate_session_request_maps_session_scoped_mcp_servers() {
+    let proto = wire::ActivateSessionRequest {
+        session_id: None,
+        client_key: "key".into(),
+        name: None,
+        runtime: Some(session_runtime_context_to_proto(
+            &crate::wire::WireSessionRuntimeContext {
+                work_dir: "/work".into(),
+                ..Default::default()
+            },
+        )),
+        mcp_servers: vec![
+            wire::ProvisionedMcpServer {
+                name: "fs".into(),
+                kind: "stdio".into(),
+                command: Some("/usr/bin/mcp-fs".into()),
+                args: vec!["--root".into(), "/srv".into()],
+                endpoint: None,
+                auth: None,
+                request_timeout_ms: Some(5000),
+                sse_idle_timeout_ms: None,
+                body_cap_bytes: Some(1024),
+                reconnect: Some(wire::ProvisionedMcpReconnect {
+                    initial_ms: Some(10),
+                    max_ms: Some(20),
+                    max_attempts: Some(3),
+                }),
+                inject_summary: true,
+                inject_and_run: false,
+            },
+            wire::ProvisionedMcpServer {
+                name: "remote".into(),
+                kind: "streamable_http".into(),
+                endpoint: Some("https://mcp.example.com".into()),
+                auth: Some(wire::ProvisionedMcpAuth {
+                    kind: "bearer".into(),
+                    token_keychain_ref: Some("mcp/remote".into()),
+                }),
+                ..Default::default()
+            },
+        ],
+    };
+
+    let request = activate_session_request_from_proto(&proto).unwrap();
+
+    assert_eq!(request.mcp_servers.len(), 2);
+    let fs = &request.mcp_servers[0];
+    assert_eq!(fs.name, "fs");
+    assert_eq!(fs.kind, "stdio");
+    assert_eq!(fs.command.as_deref(), Some("/usr/bin/mcp-fs"));
+    assert_eq!(fs.args, vec!["--root", "/srv"]);
+    assert_eq!(fs.request_timeout_ms, Some(5000));
+    assert_eq!(fs.body_cap_bytes, Some(1024));
+    assert!(fs.inject_summary);
+    assert!(!fs.inject_and_run);
+    let fs_reconnect = fs.reconnect.as_ref().unwrap();
+    assert_eq!(fs_reconnect.initial_ms, Some(10));
+    assert_eq!(fs_reconnect.max_ms, Some(20));
+    assert_eq!(fs_reconnect.max_attempts, Some(3));
+    let remote = &request.mcp_servers[1];
+    assert_eq!(remote.endpoint.as_deref(), Some("https://mcp.example.com"));
+    assert!(remote.command.is_none());
+    let auth = remote.auth.as_ref().unwrap();
+    assert_eq!(auth.kind, "bearer");
+    assert_eq!(auth.token_keychain_ref.as_deref(), Some("mcp/remote"));
+
+    // Tag 5 survives the protobuf encode/decode boundary.
+    let decoded = wire::ActivateSessionRequest::decode(proto.encode_to_vec().as_slice()).unwrap();
+    assert_eq!(decoded.mcp_servers.len(), 2);
+    assert_eq!(decoded.mcp_servers[1].name, "remote");
+    assert_eq!(
+        decoded.mcp_servers[1]
+            .auth
+            .as_ref()
+            .unwrap()
+            .token_keychain_ref
+            .as_deref(),
+        Some("mcp/remote")
+    );
+}
+
+#[test]
+fn activate_session_request_round_trips_wire_and_proto_mcp_servers() {
+    let request = crate::wire::WireActivateSessionRequest {
+        session_id: Some("sess-1".into()),
+        client_key: "key".into(),
+        name: Some("named".into()),
+        runtime: Some(crate::wire::WireSessionRuntimeContext {
+            work_dir: "/work".into(),
+            ..Default::default()
+        }),
+        mcp_servers: vec![crate::wire::WireProvisionedMcpServer {
+            name: "remote".into(),
+            kind: "streamable_http".into(),
+            endpoint: Some("https://mcp.example.com".into()),
+            auth: Some(crate::wire::WireProvisionedMcpAuth {
+                kind: "bearer".into(),
+                token_keychain_ref: Some("mcp/remote".into()),
+            }),
+            inject_and_run: true,
+            ..Default::default()
+        }],
+    };
+
+    let proto = activate_session_request_to_proto(&request);
+    let round_tripped = activate_session_request_from_proto(&proto).unwrap();
+    assert_eq!(round_tripped, request);
+
+    let no_servers = wire::ActivateSessionRequest {
+        session_id: None,
+        client_key: "key".into(),
+        name: None,
+        runtime: Some(session_runtime_context_to_proto(
+            &crate::wire::WireSessionRuntimeContext::default(),
+        )),
+        mcp_servers: Vec::new(),
+    };
+    assert!(
+        activate_session_request_from_proto(&no_servers)
+            .unwrap()
+            .mcp_servers
+            .is_empty()
+    );
+}
+
+#[test]
+fn activate_session_request_json_omits_empty_mcp_servers() {
+    let empty = crate::wire::WireActivateSessionRequest {
+        client_key: "key".into(),
+        ..Default::default()
+    };
+    let json = serde_json::to_value(&empty).unwrap();
+    assert!(json.get("mcp_servers").is_none());
+
+    let with_servers = crate::wire::WireActivateSessionRequest {
+        client_key: "key".into(),
+        mcp_servers: vec![crate::wire::WireProvisionedMcpServer {
+            name: "remote".into(),
+            kind: "streamable_http".into(),
+            endpoint: Some("https://mcp.example.com".into()),
+            auth: Some(crate::wire::WireProvisionedMcpAuth {
+                kind: "bearer".into(),
+                token_keychain_ref: Some("mcp/remote".into()),
+            }),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let json = serde_json::to_value(&with_servers).unwrap();
+    assert_eq!(json["mcp_servers"][0]["name"], "remote");
+    assert_eq!(
+        json["mcp_servers"][0]["auth"]["token_keychain_ref"],
+        "mcp/remote"
+    );
+    let decoded: crate::wire::WireActivateSessionRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, with_servers);
 }
 
 #[test]

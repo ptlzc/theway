@@ -8,6 +8,7 @@ package theway.grpc.v1;
 import "commands.proto";
 import "extensions.proto";
 import "graph_engine.proto";
+import "settings.proto";
 
 // Incremental transcript patch: appends/replacements since a consumer cursor.
 message FeedBlockPatch {
@@ -460,6 +461,10 @@ message ActivateSessionRequest {
   string client_key = 2;
   optional string name = 3;
   SessionRuntimeContext runtime = 4;
+  // Session-scoped MCP servers: layered over the daemon-level set for this
+  // session only, a same-name server replaces the daemon entry. Credentials
+  // stay in the daemon's auth.json (`token_keychain_ref`), never on the wire.
+  repeated ProvisionedMcpServer mcp_servers = 5;
 }
 
 message ActivateSessionResponse {

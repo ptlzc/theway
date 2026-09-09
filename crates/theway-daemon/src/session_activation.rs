@@ -24,6 +24,10 @@ pub(crate) struct SessionActivator {
     cli_builtin_skills: Vec<String>,
     config_builtin_skills: Vec<String>,
     load_local_sources: bool,
+    /// Controller-provisioned MCP slot (issue #73): activation-built contexts
+    /// read it so daemon-level `Configure` servers reach every activated
+    /// session, not only the startup one. `None` in standalone mode.
+    mcp_provision: Option<Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>>,
 }
 pub(crate) struct SessionActivation {
     pub session_id: String,
@@ -51,7 +55,18 @@ impl SessionActivator {
             cli_builtin_skills,
             config_builtin_skills,
             load_local_sources,
+            mcp_provision: None,
         }
+    }
+
+    /// Attach the controller-provisioned MCP slot (issue #73). Ignored in
+    /// standalone mode, where the local `mcp.toml` scan owns the daemon layer.
+    pub(crate) fn with_mcp_provision(
+        mut self,
+        slot: Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>,
+    ) -> Self {
+        self.mcp_provision = Some(slot);
+        self
     }
 
     /// The shared runtime builder, when the owning daemon slot still holds it.
@@ -177,7 +192,7 @@ impl SessionActivator {
         )?;
         let effective_thinking =
             resolve_thinking(&self.startup_thinking, &persisted, runtime.thinking);
-        let ctx = SessionExecutionContext::build_for_work_dir(
+        let mut ctx = SessionExecutionContext::build_for_work_dir(
             session_id.clone(),
             cwd.clone(),
             repo.clone(),
@@ -191,6 +206,32 @@ impl SessionActivator {
         )
         .await
         .map_err(|error| rpc("internal", format!("build session context: {error}")))?;
+
+        // Controller mode (issue #73): activation-built contexts read the
+        // daemon-level provision slot, so `Configure` MCP servers reach this
+        // session too — and a session-level overlay below layers over them.
+        if !self.load_local_sources
+            && let Some(slot) = self.mcp_provision.as_ref()
+        {
+            ctx.mcp.provision = Some(slot.clone());
+        }
+
+        // Session-scoped MCP servers (session-scoped-mcp): connect them and
+        // install a per-session provision slot layered over the daemon set
+        // before the harness is assembled, so the first build already sees
+        // them and a same-name daemon server is replaced, not connected twice.
+        if !request.mcp_servers.is_empty() {
+            let configs: Vec<_> = request
+                .mcp_servers
+                .iter()
+                .map(crate::mcp_loader::server_config_from_wire)
+                .collect();
+            crate::mcp_loader::validate_unique_names(&configs)
+                .map_err(|message| rpc("invalid_argument", message))?;
+            ctx.mcp
+                .install_session_servers(configs, &cwd, &self.paths.base.join("auth.json"))
+                .await;
+        }
 
         // Detached construction and DAG loading happen before any process or
         // binding mutation.

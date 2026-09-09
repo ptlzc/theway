@@ -164,6 +164,43 @@ pub struct SessionMcpResources {
     /// from the loader diagnostics so the transport snapshot can surface
     /// them to the TUI (3s banner + red `[x] name` panel rows).
     pub server_errors: Vec<(String, String)>,
+    /// Local `mcp.toml` configs (standalone mode) — merge/reconnect source for
+    /// a session-level overlay.
+    pub daemon_configs: Vec<crate::mcp_loader::ServerConfig>,
+    /// Local `mcp.toml` connected servers (standalone mode), grouped by name
+    /// so a session overlay can replace same-name entries.
+    pub daemon_servers: Vec<crate::mcp_loader::ConnectedMcpServer>,
+    /// Session-level MCP servers from `ActivateSession.mcp_servers`
+    /// (session-scoped-mcp): connected at activation and layered over the
+    /// daemon-level set for this session only.
+    pub overlay: Option<SessionMcpOverlay>,
+}
+
+/// Session-level MCP overlay installed by `ActivateSession.mcp_servers`.
+#[derive(Clone)]
+pub struct SessionMcpOverlay {
+    /// Requested configs, in request order; also the shadowing name set.
+    pub configs: Vec<crate::mcp_loader::ServerConfig>,
+    /// Per-session provision slot: the daemon layer with same-name servers
+    /// replaced by the session ones. Session builds, snapshots, `/reload`, and
+    /// a `Configure` re-merge read it exactly like the global controller slot.
+    pub slot: Arc<std::sync::RwLock<crate::mcp_loader::McpProvisionState>>,
+    /// True when the daemon layer came from the global provision slot
+    /// (controller mode), so a later `Configure` must re-merge into this
+    /// session. False when it came from the local `mcp.toml` scan, which
+    /// `Configure` does not govern.
+    pub from_global_slot: bool,
+}
+
+/// MCP capability metadata for one session snapshot.
+#[derive(Clone, Default)]
+pub struct SessionMcpCapabilities {
+    pub servers: usize,
+    pub tools: usize,
+    pub notification_hooks: usize,
+    pub server_names: Vec<String>,
+    pub tool_names: Vec<String>,
+    pub errors: Vec<(String, String)>,
 }
 
 /// Split one loader diagnostic into a `(name, message)` pair — defined in
@@ -175,31 +212,122 @@ impl SessionMcpResources {
     /// Convert an MCP load result into session resources, emitting its
     /// diagnostics once and deriving tool/server capability metadata.
     pub fn from_loaded(loaded: crate::mcp_loader::LoadedMcp) -> Self {
-        for diagnostic in &loaded.diagnostics {
+        let crate::mcp_loader::LoadedMcp {
+            configs,
+            layer,
+            diagnostics,
+        } = loaded;
+        for diagnostic in &diagnostics {
             tracing::warn!(target: "mcp", "{diagnostic}");
         }
-        let tool_names = loaded
-            .tools
-            .iter()
-            .map(|tool| tool.definition().name.clone())
-            .collect::<Vec<_>>();
-        let notification_hook_count = loaded.notification_hooks.len();
-        let server_errors = loaded
-            .diagnostics
-            .iter()
-            .map(|diagnostic| parse_mcp_diagnostic(diagnostic))
-            .collect();
+        let tools = layer.tools();
+        let notification_hooks = layer.hooks();
+        let tool_names = layer.tool_names();
+        let server_names = layer.server_names();
+        let notification_hook_count = layer.servers.len();
+        let server_count = layer.servers.len();
+        let inject_summary_servers = layer.inject_summary.clone();
+        let inject_and_run_servers = layer.inject_and_run.clone();
+        let server_errors = layer.errors.clone();
         Self {
-            tools: loaded.tools,
-            notification_hooks: Arc::new(parking_lot::Mutex::new(loaded.notification_hooks)),
-            inject_summary_servers: loaded.inject_summary_servers,
-            inject_and_run_servers: loaded.inject_and_run_servers,
-            server_count: loaded.client_count,
-            server_names: loaded.server_names,
+            tools,
+            notification_hooks: Arc::new(parking_lot::Mutex::new(notification_hooks)),
+            inject_summary_servers,
+            inject_and_run_servers,
+            server_count,
+            server_names,
             tool_names,
             notification_hook_count,
-            server_errors,
             provision: None,
+            server_errors,
+            daemon_configs: configs,
+            daemon_servers: layer.servers,
+            overlay: None,
+        }
+    }
+
+    /// The daemon layer this context starts from: the global provision slot in
+    /// controller mode, the local `mcp.toml` scan in standalone mode.
+    fn daemon_layer(&self) -> crate::mcp_loader::McpLayer {
+        match self.provision.as_ref() {
+            Some(slot) => slot.read().unwrap().layer(),
+            None => crate::mcp_loader::McpLayer {
+                servers: self.daemon_servers.clone(),
+                inject_summary: self.inject_summary_servers.clone(),
+                inject_and_run: self.inject_and_run_servers.clone(),
+                errors: self.server_errors.clone(),
+            },
+        }
+    }
+
+    fn daemon_layer_configs(&self) -> Vec<crate::mcp_loader::ServerConfig> {
+        match self.provision.as_ref() {
+            Some(slot) => slot.read().unwrap().configs.clone(),
+            None => self.daemon_configs.clone(),
+        }
+    }
+
+    /// Connect the activation request's MCP servers and install a per-session
+    /// provision slot: the daemon layer with same-name servers replaced by the
+    /// requested ones. The overlay is kept on this context so the host can
+    /// re-merge it when the daemon layer changes.
+    pub async fn install_session_servers(
+        &mut self,
+        configs: Vec<crate::mcp_loader::ServerConfig>,
+        cwd: &std::path::Path,
+        auth_path: &std::path::Path,
+    ) {
+        let from_global_slot = self.provision.is_some();
+        let daemon = self.daemon_layer();
+        let daemon_configs = self.daemon_layer_configs();
+        let overlay_names: std::collections::HashSet<String> =
+            configs.iter().map(|config| config.name.clone()).collect();
+        let (layer, diagnostics) =
+            crate::mcp_loader::connect_servers(&configs, cwd, auth_path).await;
+        for diagnostic in &diagnostics {
+            tracing::warn!(target: "mcp", "{diagnostic}");
+        }
+        let effective = crate::mcp_loader::merge_mcp_layers(&daemon, &overlay_names, &layer);
+        let effective_configs: Vec<_> = daemon_configs
+            .into_iter()
+            .filter(|config| !overlay_names.contains(&config.name))
+            .chain(configs.iter().cloned())
+            .collect();
+        let mut state = crate::mcp_loader::McpProvisionState::default();
+        state.replace_connection_result(effective_configs, (effective, diagnostics));
+        let slot = Arc::new(std::sync::RwLock::new(state));
+        let overlay = SessionMcpOverlay {
+            configs,
+            slot: slot.clone(),
+            from_global_slot,
+        };
+        self.provision = Some(slot);
+        self.overlay = Some(overlay);
+    }
+
+    /// Capability metadata for the activated session: the per-session slot when
+    /// an overlay is installed, otherwise the daemon layer.
+    pub fn capabilities(&self) -> SessionMcpCapabilities {
+        match self.provision.as_ref() {
+            Some(slot) => {
+                let slot = slot.read().unwrap();
+                SessionMcpCapabilities {
+                    servers: slot.server_names.len(),
+                    tools: slot.tool_names.len(),
+                    notification_hooks: slot.hooks.len(),
+                    server_names: slot.server_names.clone(),
+                    tool_names: slot.tool_names.clone(),
+                    errors: slot.errors.clone(),
+                }
+            }
+            None => SessionMcpCapabilities {
+                servers: self.server_count,
+                tools: self.tool_names.len(),
+                notification_hooks: self.notification_hook_count,
+                server_names: self.server_names.clone(),
+                tool_names: self.tool_names.clone(),
+                errors: self.server_errors.clone(),
+            },
         }
     }
 }

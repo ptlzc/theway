@@ -46,6 +46,7 @@ use theway_transport::wire::{
 
 mod acceptance;
 mod activation;
+mod activation_mcp;
 mod configuration;
 mod credentials;
 mod model_trigger;
@@ -235,6 +236,7 @@ fn activation_request(
             base_url: None,
             thinking: Some(false),
         }),
+        mcp_servers: Vec::new(),
     }
 }
 
@@ -262,7 +264,8 @@ fn install_activator(config: &mut DaemonConfig, main_run_tx: mpsc::UnboundedSend
         Vec::new(),
         Vec::new(),
         false,
-    );
+    )
+    .with_mcp_provision(config.mcp_provision.clone());
     assert!(config
         .services
         .session_activator

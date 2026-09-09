@@ -14,6 +14,7 @@ fn client_activate_request(work_dir: &str) -> proto::ActivateSessionRequest {
             base_url: None,
             thinking: Some(false),
         }),
+        mcp_servers: Vec::new(),
     }
 }
 

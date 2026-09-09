@@ -80,7 +80,33 @@ pub fn activate_session_request_from_proto(
         client_key: request.client_key.clone(),
         name: request.name.clone(),
         runtime: Some(session_runtime_context_from_proto(runtime)),
+        mcp_servers: request
+            .mcp_servers
+            .iter()
+            .map(provisioned_mcp_server_from_proto)
+            .collect(),
     })
+}
+
+/// Reverse of [`activate_session_request_from_proto`]: the client-side shape of
+/// a session activation, including the session-scoped MCP server list.
+pub fn activate_session_request_to_proto(
+    request: &crate::wire::WireActivateSessionRequest,
+) -> wire::ActivateSessionRequest {
+    wire::ActivateSessionRequest {
+        session_id: request.session_id.clone(),
+        client_key: request.client_key.clone(),
+        name: request.name.clone(),
+        runtime: request
+            .runtime
+            .as_ref()
+            .map(session_runtime_context_to_proto),
+        mcp_servers: request
+            .mcp_servers
+            .iter()
+            .map(provisioned_mcp_server_to_proto)
+            .collect(),
+    }
 }
 
 pub fn activate_session_response_to_proto(

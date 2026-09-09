@@ -167,6 +167,11 @@ struct SessionRuntimeState {
     /// True when a parked session's in-flight turn has been aborted; the
     /// scheduler suppresses its terminal output until the future completes.
     aborted: bool,
+    /// Session-level MCP overlay installed by `ActivateSession.mcp_servers`
+    /// (session-scoped-mcp): the per-session provision slot the snapshot and
+    /// `/reload` read, and the layer a later `Configure` re-merges. `None` =
+    /// the session uses the daemon-level MCP state unchanged.
+    mcp_overlay: Option<crate::orchestration::SessionMcpOverlay>,
 }
 
 /// Per-session runtime registry.
@@ -207,6 +212,7 @@ impl SessionRuntimeState {
             cumulative_usage: WireContextUsage::default(),
             projection,
             aborted: false,
+            mcp_overlay: None,
         }
     }
 }
@@ -270,6 +276,7 @@ impl SessionRuntimeState {
             cumulative_usage: WireContextUsage::default(),
             projection: FeedProjectionState::new(RuntimeCapabilities::default(), None),
             aborted: false,
+            mcp_overlay: None,
         }
     }
 }

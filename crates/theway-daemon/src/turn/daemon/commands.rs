@@ -620,34 +620,7 @@ impl TurnHost {
             let requested: Vec<crate::mcp_loader::ServerConfig> = config
                 .mcp_servers
                 .iter()
-                .map(|server| crate::mcp_loader::ServerConfig {
-                    name: server.name.clone(),
-                    kind: match server.kind.as_str() {
-                        "streamable_http" => crate::mcp_loader::ServerKind::StreamableHttp,
-                        _ => crate::mcp_loader::ServerKind::Stdio,
-                    },
-                    command: server.command.clone(),
-                    args: server.args.clone(),
-                    endpoint: server.endpoint.clone(),
-                    auth: server.auth.as_ref().map(|auth| {
-                        crate::mcp_loader::HttpAuthConfig {
-                            kind: auth.kind.clone(),
-                            token_keychain_ref: auth.token_keychain_ref.clone(),
-                        }
-                    }),
-                    request_timeout_ms: server.request_timeout_ms,
-                    sse_idle_timeout_ms: server.sse_idle_timeout_ms,
-                    body_cap_bytes: server.body_cap_bytes.map(|bytes| bytes as usize),
-                    reconnect: server.reconnect.as_ref().map(|reconnect| {
-                        crate::mcp_loader::ReconnectConfig {
-                            initial_ms: reconnect.initial_ms,
-                            max_ms: reconnect.max_ms,
-                            max_attempts: reconnect.max_attempts.map(|n| n as usize),
-                        }
-                    }),
-                    inject_summary: server.inject_summary,
-                    inject_and_run: server.inject_and_run,
-                })
+                .map(crate::mcp_loader::server_config_from_wire)
                 .collect();
             match crate::mcp_loader::validate_unique_names(&requested) {
                 Ok(()) => {
@@ -676,27 +649,35 @@ impl TurnHost {
                         );
                         (slot.tools.clone(), slot.hooks.clone(), capabilities_update)
                     };
-                    self.session
-                        .kernel
-                        .harness()
-                        .replace_mcp_tools(&old_tools, new_tools);
-                    self.projection.capabilities.mcp_servers = capabilities_update.0;
-                    self.projection.capabilities.mcp_tools = capabilities_update.1;
-                    self.projection.capabilities.mcp_server_names = capabilities_update.2;
-                    self.projection.capabilities.mcp_tool_names = capabilities_update.3;
-                    self.projection.capabilities.mcp_server_errors = capabilities_update.4;
-                    // Register fresh hooks (new instances every connection)
-                    // onto the live session's trigger executor. Hooks are
-                    // one-shot; each generation is registered exactly once.
-                    {
-                        use crate::orchestration::session::NotificationHookSink;
-                        use crate::trigger_engine::notification_hook::NotificationHook;
-                        let executor = self.runtime.trigger_executor.clone();
-                        let mut slot = self.runtime.mcp_provision.write().unwrap();
-                        for hook in &new_hooks {
-                            let label = hook.label().to_string();
-                            if slot.registered_labels.insert(label) {
-                                executor.register(hook.clone());
+                    if self.session.mcp_overlay.is_some() {
+                        // session-scoped-mcp: this session's MCP set is its own
+                        // overlay slot. Re-merge it over the new daemon layer
+                        // instead of swapping the raw daemon tools in, so a
+                        // session server still shadows a same-name daemon one.
+                        self.remerge_active_session_mcp();
+                    } else {
+                        self.session
+                            .kernel
+                            .harness()
+                            .replace_mcp_tools(&old_tools, new_tools);
+                        self.projection.capabilities.mcp_servers = capabilities_update.0;
+                        self.projection.capabilities.mcp_tools = capabilities_update.1;
+                        self.projection.capabilities.mcp_server_names = capabilities_update.2;
+                        self.projection.capabilities.mcp_tool_names = capabilities_update.3;
+                        self.projection.capabilities.mcp_server_errors = capabilities_update.4;
+                        // Register fresh hooks (new instances every connection)
+                        // onto the live session's trigger executor. Hooks are
+                        // one-shot; each generation is registered exactly once.
+                        {
+                            use crate::orchestration::session::NotificationHookSink;
+                            use crate::trigger_engine::notification_hook::NotificationHook;
+                            let executor = self.runtime.trigger_executor.clone();
+                            let mut slot = self.runtime.mcp_provision.write().unwrap();
+                            for hook in &new_hooks {
+                                let label = hook.label().to_string();
+                                if slot.registered_labels.insert(label) {
+                                    executor.register(hook.clone());
+                                }
                             }
                         }
                     }

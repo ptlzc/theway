@@ -312,6 +312,7 @@ async fn session_usage_resets_on_activate_session() {
                     base_url: None,
                     thinking: Some(false),
                 }),
+                mcp_servers: Vec::new(),
             },
             response: tx,
         },
