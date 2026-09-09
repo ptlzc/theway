@@ -38,6 +38,8 @@ JSON Schema derives and the generator in [`generate_extension_artifacts.rs`](../
 
 [`dag.rs`](../src/dag.rs) contains the serializable run, node, result, status, and direction records needed to persist graph-engine snapshots. The graph scheduler and transition rules live in `theway-core`.
 
+[`subagent_settings.rs`](../src/subagent_settings.rs) contains the project-level last-set subagent model/thinking overrides (keyed by DAG node id and subagent spec name) and the `subagent_settings_path_for_project` path rule placing them at `<project>/.pi/subagent-settings.json`, independent of session-scoped state files. Merge policy and file I/O live in `theway-daemon`.
+
 [`triggers.rs`](../src/triggers.rs) contains the sidecar representation for dynamic trigger rules and cron jobs. Polling, scheduling, promotion, and delivery live in `theway-daemon`.
 
 ## Invariants

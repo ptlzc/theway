@@ -38,6 +38,8 @@ JSON Schema derive 与 [`generate_extension_artifacts.rs`](../examples/generate_
 
 [`dag.rs`](../src/dag.rs) 包含持久化图引擎快照所需的可序列化运行、节点、结果、状态和方向记录。图调度器与状态转换规则位于 `theway-core`。
 
+[`subagent_settings.rs`](../src/subagent_settings.rs) 包含项目级的"最后一次设置"子代理模型/思考强度覆盖（按 DAG 节点 id 与子代理 spec 名索引），以及 `subagent_settings_path_for_project` 路径规则——文件位于 `<project>/.pi/subagent-settings.json`，独立于会话级状态文件。合并策略与文件读写位于 `theway-daemon`。
+
 [`triggers.rs`](../src/triggers.rs) 包含动态 trigger 规则和 cron job 的 sidecar 表示。轮询、调度、提升和投递位于 `theway-daemon`。
 
 ## 不变量
