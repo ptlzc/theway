@@ -365,7 +365,12 @@ it.
   per-server failures into the snapshot (`McpSnapshot.errors` → 3s startup
   banner + red panel rows). Credentials never cross the wire — only the
   `token_keychain_ref`, resolved against `auth.json` daemon-side. `/reload`
-  reconnects from the provisioned configs. Standalone `thewayd` keeps the
+  reconnects from the provisioned configs. A session may also carry its own
+  servers on `ActivateSession.mcp_servers`: the daemon connects them for that
+  session only and layers them over the daemon set, where a same-name session
+  server replaces the daemon entry instead of connecting twice; the session
+  snapshot (`McpSnapshot`) reports the merged servers, tools, and failures.
+  Standalone `thewayd` keeps the
   local `mcp.toml` scan. LSP supervisor, lifecycle hooks
   (`hooks`, `hook_executors`), TS extension host, and runtime observability exporters.
 
