@@ -71,6 +71,16 @@ subagent is killed only after N seconds of no output activity (any token chunk /
 update reschedules the watchdog; abort → 5s grace → force-kill; failure text
 `Timed out: no output for {N}s (idle timeout)`), default 120s when unset.
 
+Node override memory: the last-set `provider` / `model` / `thinking` per node id persist
+at `<project>/.pi/subagent-settings.json` (project-level, shared by every session of the
+project). A later `dag_plan` whose node sets nothing inherits the remembered values for
+the same node id (mermaid nodes included); explicit values win and update the memory,
+an empty string clears the field, and `provider` + `model` act as one pair — a provider
+without a model is applied for that run (the launcher fails the node) but never
+remembered. The `subagent` tool remembers per subagent spec name the same way. Memory
+writes happen only after a plan is accepted or a model resolves; a corrupt settings file
+is treated as empty and replaced by the next save.
+
 ## Semantics (1:1 with the TS dag-orchestrator)
 
 - `failFast=false` (default): a failed node cancels only its downstream closure;
