@@ -8,16 +8,17 @@ Configuration reference for an agent working inside theway: where every config f
 
 - `$THEWAY_DIR` (default `~/.theway`) is the user root. A project layer `<cwd>/.theway/` overlays it per working directory.
 - The primary config file is `<base>/config.toml`. Legacy files `<base>/theme.toml` and `<base>/mcp.toml` remain as fallbacks when `config.toml` has no `[theme]` / `[[server]]` content. The project layer adds `<cwd>/.theway/mcp.toml`, `<cwd>/.theway/skills/`, `<cwd>/.theway/templates/`, and `<cwd>/.theway/extensions/`.
-- Runtime state also lives under `<base>`: `sessions/` (per-cwd hash buckets), `memory/`, `history`, `exports/`, `logs/`, `auth.json`, `models.json`, `skill-overrides.json`, `extensions/trust.json`, `extensions/audit.jsonl`.
+- Runtime state also lives under `<base>`: `sessions/` (per-cwd hash buckets), `memory/`, `history`, `exports/`, `logs/`, `auth.json`, `skill-overrides.json`, `extensions/trust.json`, `extensions/audit.jsonl`.
 
 ## config.toml
 
-Read by the client at startup and provisioned to the daemon as a settings payload; the daemon does not read this file itself. On a fresh install or first client start the file is created with `[executor] kind = "local"` plus a commented-out DeepSeek `[model]` sample; existing files are never overwritten. API keys are never accepted from this file — provider credentials come from environment variables or the credential store. Precedence is CLI flags > config.toml > built-in default.
+Read by the client at startup and provisioned to the daemon as a settings payload; the daemon does not read this file itself. On a fresh install or first client start the file is created with `[executor] kind = "local"` plus commented-out `[model]` / `[[model.custom]]` samples; existing files are never overwritten. `[model] api_key` is a local credential fallback — provider environment variables still win, then `auth.json`. Precedence is CLI flags > config.toml > built-in default.
 
 | Section | Keys | Meaning |
 |---|---|---|
 | `[executor]` | `kind` | Execution environment for executor-backed tools: `local` (default) or `sandbox`. Startup-only; changes require a client restart. |
-| `[model]` | `provider`, `model`, `thinking` | Startup default model pair and thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` when the provider supports it). The TUI writes the last `/model` pick here. |
+| `[model]` | `provider`, `model`, `thinking`, `base_url`, `api_key`, `auto_fetch_models` | Startup default model pair and thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` when the provider supports it). `base_url` points at a local OpenAI-compatible server; `auto_fetch_models = true` imports its catalog from `GET <base_url>/models` and fills an unset `model` from the first entry; `api_key` is the local credential fallback. The TUI writes the last `/model` pick here. |
+| `[[model.custom]]` | `id` (required), `name`, `api`, `provider`, `base_url`, `reasoning`, `thinking_level_map`, `input`, `cost`, `context_window`, `max_tokens`, `headers`, `compat` | Custom model descriptor. Omitted `provider` / `base_url` inherit `[model]`; other defaults are `openai-completions`, 128000 context / 8192 output, text-only input. Replaces the former `models.json` files. |
 | `[builtin_skills]` | `enabled` | Enabled built-in skill names; unioned with `--builtin-skill` flags. |
 | `[triggers]` | `poll_interval_secs` | Local dynamic-trigger poll interval (default 600). |
 | `[tui]` | `max_feed_lines` | TUI feed scrollback cap. |

@@ -73,6 +73,15 @@ use super::*;
         // Issue #135: `[tools] tgrep = false` rides the payload the same way
         // (launch arg `--no-tgrep`).
         assert_eq!(payload.tgrep, Some(false));
+        // Issue #136: endpoint, credential, auto-fetch switch, and custom
+        // descriptors from the same `[model]` section ride the payload.
+        assert_eq!(payload.base_url.as_deref(), Some("http://127.0.0.1:7777/v1"));
+        assert_eq!(payload.api_key.as_deref(), Some("sk-file"));
+        assert_eq!(payload.auto_fetch_models, Some(true));
+        assert_eq!(payload.models.len(), 1);
+        assert_eq!(payload.models[0].id, "warp-9-local");
+        assert_eq!(payload.models[0].provider.0, "acme");
+        assert_eq!(payload.models[0].base_url, "http://127.0.0.1:7777/v1");
         // Persisted `[model] thinking` (the user's last pick) becomes the
         // payload when the CLI flag is at its default.
         assert_eq!(payload.thinking_level.as_deref(), Some("high"));

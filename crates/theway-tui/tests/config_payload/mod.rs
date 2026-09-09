@@ -17,6 +17,12 @@ mod reconcile;
 provider = \"acme\"
 model = \"warp-9\"
 thinking = \"high\"
+base_url = \"http://127.0.0.1:7777/v1\"
+api_key = \"sk-file\"
+auto_fetch_models = true
+
+[[model.custom]]
+id = \"warp-9-local\"
 
 [builtin_skills]
 enabled = [\"debugging\", \"code-review\"]

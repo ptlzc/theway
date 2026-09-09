@@ -33,8 +33,8 @@ fn help_lists_model_catalog_entry_points() {
     assert!(stdout.contains("anthropic-messages"), "{stdout}");
     assert!(stdout.contains("anthropic("), "{stdout}");
     assert!(stdout.contains("openai("), "{stdout}");
-    assert!(stdout.contains("~/.theway/models.json"), "{stdout}");
-    assert!(stdout.contains("<cwd>/.theway/models.json"), "{stdout}");
+    assert!(stdout.contains("[[model.custom]]"), "{stdout}");
+    assert!(stdout.contains("auto_fetch_models"), "{stdout}");
     assert!(
         stdout.contains("/model list") || stdout.contains("model list"),
         "{stdout}"

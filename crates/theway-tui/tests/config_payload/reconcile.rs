@@ -109,6 +109,42 @@ use super::*;
     }
 
     #[test]
+    fn reconcile_pushes_endpoint_credential_autofetch_and_descriptors() {
+        // Built through JSON so this test never names `theway_llm_provider`
+        // types (the TUI must not depend on that crate, even in dev).
+        let desired: WireDaemonConfig = serde_json::from_value(serde_json::json!({
+            "base_url": "http://127.0.0.1:7777/v1",
+            "api_key": "sk-file",
+            "auto_fetch_models": true,
+            "models": [{
+                "id": "warp-9-local",
+                "name": "warp-9-local",
+                "api": "openai-completions",
+                "provider": "acme",
+                "baseUrl": "http://127.0.0.1:7777/v1",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0},
+                "contextWindow": 128000,
+                "maxTokens": 8192
+            }]
+        }))
+        .unwrap();
+        let (patch, notes) = reconcile(&desired, &WireDaemonConfig::default(), true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(patch.base_url.as_deref(), Some("http://127.0.0.1:7777/v1"));
+        assert_eq!(patch.api_key.as_deref(), Some("sk-file"));
+        assert_eq!(patch.auto_fetch_models, Some(true));
+        assert_eq!(patch.models.len(), 1);
+
+        // Issue #136: once applied, the daemon's view matches and nothing is
+        // re-pushed — the catalog is not re-fetched on every reconnect.
+        let (patch, notes) = reconcile(&desired.clone(), &desired, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(patch, WireDaemonConfig::default());
+    }
+
+    #[test]
     fn reconcile_never_pushes_partial_model_pair() {
         let current = WireDaemonConfig::default();
         let desired = WireDaemonConfig {

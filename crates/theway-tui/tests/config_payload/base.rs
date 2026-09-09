@@ -52,6 +52,14 @@ use super::*;
         assert!(text.contains("provider = \"deepseek\""));
         assert!(text.contains("model = \"deepseek-v4-flash\""));
         assert!(text.contains("api_key = \"sk-xxxxxx\""));
+        // Issue #136 samples: auto-fetch and custom descriptors stay
+        // commented, so the parsed model config is empty.
+        let model_config = theway_transport::config::parse_model_config(&text).unwrap();
+        assert!(model_config.provider.is_none());
+        assert!(!model_config.auto_fetch_models);
+        assert!(model_config.custom.is_empty());
+        assert!(text.contains("auto_fetch_models = true"));
+        assert!(text.contains("[[model.custom]]"));
         // The tgrep switch is a commented sample too: the seeded default must
         // keep the backend enabled.
         assert_eq!(

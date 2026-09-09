@@ -93,10 +93,9 @@ pub(crate) fn resolve_config_base_dir(
 
 /// Default `config.toml` seeded on first run / fresh installs so the
 /// runtime-selected `[executor]` section is explicit (issue #123). The model
-/// section is shipped COMMENTED OUT as a DeepSeek sample: missing model values
-/// keep the daemon's env auto-detection, and API keys are never accepted from
-/// this file — the `sk-xxxxxx` placeholder documents that real keys live in
-/// environment variables / the credential store.
+/// sections are shipped COMMENTED OUT as samples: missing model values keep
+/// the daemon model-less until the client selects one, and `[model] api_key`
+/// is a local convenience — provider environment variables still win.
 pub(crate) const DEFAULT_CONFIG_TOML: &str = r#"# theway default configuration.
 # Missing values fall back to built-in defaults; delete this file to reset.
 
@@ -108,14 +107,28 @@ kind = "local"
 # [tools]
 # tgrep = false
 
-# Example model defaults (DeepSeek official, commented out).
-# Uncomment provider/model/thinking and replace with your own values;
-# when they stay commented the daemon keeps environment auto-detection.
+# Example model defaults (DeepSeek official, commented out). Uncomment
+# provider/model/thinking and replace with your own values; environment API
+# keys still win over `api_key`.
 # [model]
 # provider = "deepseek"
 # model = "deepseek-v4-flash"
 # thinking = "medium"
-# api_key = "sk-xxxxxx"  # EXAMPLE ONLY — real keys are read from environment variables, never written here.
+# api_key = "sk-xxxxxx"
+
+# Local OpenAI-compatible server: the daemon imports the catalog from
+# `<base_url>/models`, so `model` may stay unset.
+# [model]
+# provider = "ds4"
+# base_url = "http://127.0.0.1:8000/v1"
+# auto_fetch_models = true
+
+# Custom model descriptors (optional; override a catalog entry by id).
+# [[model.custom]]
+# id = "deepseek-v4-flash"
+# api = "openai-responses"
+# context_window = 100000
+# max_tokens = 384000
 "#;
 
 /// Create the controller-owned `config.toml` when it is missing.
@@ -188,32 +201,44 @@ pub(crate) fn assemble_config_from(
     let mut diagnostics = Vec::new();
     let mut payload = WireDaemonConfig::default();
 
-    // Model selection: CLI flags win. The file's `[model]` default applies
-    // only when NEITHER `--provider` nor `--model` is given — the same rule
-    // the daemon's startup resolution enforced before #73 (a lone CLI flag
-    // keeps the env auto-detection path for the other half).
-    if cli.provider.is_some() || cli.model.is_some() {
-        payload.provider = cli.provider.clone();
-        payload.model = cli.model.clone();
-    } else if let Some(text) = config_toml {
-        match config::parse_model_default(text) {
-            Ok(Some(default)) => {
-                payload.provider = Some(default.provider);
-                payload.model = Some(default.model);
-            }
-            Ok(None) => {}
+    // Model selection (issue #136): CLI flags win. The file's `[model]`
+    // default applies only when NEITHER `--provider` nor `--model` is given —
+    // the same rule the daemon's startup resolution enforced before #73 (a
+    // lone CLI flag keeps the env auto-detection path for the other half).
+    // The same section also carries the endpoint, credential, auto-fetch
+    // switch, and custom model descriptors.
+    let mut file_model = None;
+    if let Some(text) = config_toml {
+        match config::parse_model_config(text) {
+            Ok(model) => file_model = Some(model),
             Err(err) => diagnostics.push(format!(
-                "model: ignoring invalid default in {source}: {err}"
+                "model: ignoring invalid [model] in {source}: {err}"
             )),
         }
     }
+    if cli.provider.is_some() || cli.model.is_some() {
+        payload.provider = cli.provider.clone();
+        payload.model = cli.model.clone();
+    } else if let Some(model) = &file_model {
+        payload.provider = model.provider.clone();
+        payload.model = model.model.clone();
+    }
+    if let Some(model) = &file_model {
+        payload.api_key = model.api_key.clone();
+        payload.auto_fetch_models = model.auto_fetch_models.then_some(true);
+        payload.models = model.custom.clone();
+    }
 
-    // Base URL is a CLI-only setting. Thinking: an explicit CLI `--thinking`
-    // flag wins; otherwise the persisted `[model] thinking` level from
-    // config.toml (the user's last pick) becomes the payload. The legacy wire
-    // toggle (`off` → absent, anything else → enabled) stays derived from the
-    // CLI flag for compatibility.
-    payload.base_url = cli.base_url.clone();
+    // Base URL: CLI wins, then `[model] base_url` (issue #136, needed for
+    // local OpenAI-compatible servers and `auto_fetch_models`). Thinking: an
+    // explicit CLI `--thinking` flag wins; otherwise the persisted `[model]
+    // thinking` level (the user's last pick) becomes the payload. The legacy
+    // wire toggle (`off` → absent, anything else → enabled) stays derived from
+    // the CLI flag for compatibility.
+    payload.base_url = cli
+        .base_url
+        .clone()
+        .or_else(|| file_model.as_ref().and_then(|model| model.base_url.clone()));
     match cli.thinking.as_deref() {
         Some(level) if level != "off" => {
             payload.thinking = Some(true);
@@ -221,14 +246,8 @@ pub(crate) fn assemble_config_from(
         }
         Some("off") => {}
         None => {
-            if let Some(text) = config_toml {
-                match config::parse_model_thinking_default(text) {
-                    Ok(Some(level)) => payload.thinking_level = Some(level),
-                    Ok(None) => {}
-                    Err(err) => diagnostics.push(format!(
-                        "model: ignoring invalid thinking default in {source}: {err}"
-                    )),
-                }
+            if let Some(level) = file_model.as_ref().and_then(|model| model.thinking.clone()) {
+                payload.thinking_level = Some(level);
             }
         }
         _ => unreachable!("thinking level values are clap-validated"),
@@ -400,6 +419,31 @@ pub(crate) fn reconcile(
             clear_field(&mut patch, "base_url");
         }
         _ => {}
+    }
+
+    // Issue #136: the configured provider credential, the auto-fetch switch,
+    // and the custom model descriptors are all runtime-appliable — the daemon
+    // registers descriptors and seeds the credential overlay on `Configure`.
+    match desired.api_key.as_ref() {
+        Some(key) if current.api_key.as_ref() != Some(key) => patch.api_key = Some(key.clone()),
+        None if desired.clears("api_key") && current.api_key.is_some() => {
+            clear_field(&mut patch, "api_key");
+        }
+        _ => {}
+    }
+    match desired.auto_fetch_models {
+        Some(auto_fetch) if current.auto_fetch_models != Some(auto_fetch) => {
+            patch.auto_fetch_models = Some(auto_fetch);
+        }
+        None if desired.clears("auto_fetch_models") && current.auto_fetch_models.is_some() => {
+            clear_field(&mut patch, "auto_fetch_models");
+        }
+        _ => {}
+    }
+    if !desired.models.is_empty() && desired.models != current.models {
+        patch.models = desired.models.clone();
+    } else if desired.clears("models") && !current.models.is_empty() {
+        clear_field(&mut patch, "models");
     }
 
     match desired.thinking {

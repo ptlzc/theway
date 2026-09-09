@@ -8,16 +8,17 @@
 
 - `$THEWAY_DIR`（默认 `~/.theway`）是用户根目录。项目层 `<cwd>/.theway/` 按工作目录叠加覆盖。
 - 主配置文件是 `<base>/config.toml`。旧文件 `<base>/theme.toml` 与 `<base>/mcp.toml` 仍作为回退，仅当 `config.toml` 没有 `[theme]` / `[[server]]` 内容时使用。项目层额外提供 `<cwd>/.theway/mcp.toml`、`<cwd>/.theway/skills/`、`<cwd>/.theway/templates/` 和 `<cwd>/.theway/extensions/`。
-- 运行时状态也在 `<base>` 下：`sessions/`（按 cwd 哈希分桶）、`memory/`、`history`、`exports/`、`logs/`、`auth.json`、`models.json`、`skill-overrides.json`、`extensions/trust.json`、`extensions/audit.jsonl`。
+- 运行时状态也在 `<base>` 下：`sessions/`（按 cwd 哈希分桶）、`memory/`、`history`、`exports/`、`logs/`、`auth.json`、`skill-overrides.json`、`extensions/trust.json`、`extensions/audit.jsonl`。
 
 ## config.toml
 
-由客户端在启动时读取，并作为 settings payload 提供给 daemon；daemon 自己不读这个文件。全新安装或客户端首次启动时会创建默认文件，内容为 `[executor] kind = "local"` 加一段注释掉的 DeepSeek `[model]` 示例；已存在的文件绝不覆盖。API key 从不从本文件读取——provider 凭证来自环境变量或凭证存储。优先级为 CLI 参数 > config.toml > 内置默认值。
+由客户端在启动时读取，并作为 settings payload 提供给 daemon；daemon 自己不读这个文件。全新安装或客户端首次启动时会创建默认文件，内容为 `[executor] kind = "local"` 加注释掉的 `[model]` / `[[model.custom]]` 示例；已存在的文件绝不覆盖。`[model] api_key` 是本地凭证回退——provider 环境变量仍然优先，其次是 `auth.json`。优先级为 CLI 参数 > config.toml > 内置默认值。
 
 | Section | 键 | 含义 |
 |---|---|---|
 | `[executor]` | `kind` | executor 支撑工具的执行环境：`local`（默认）或 `sandbox`。启动时生效，修改后需重启客户端。 |
-| `[model]` | `provider`、`model`、`thinking` | 启动默认模型对与思考等级（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`，provider 支持时含 `max`）。TUI 把最近一次 `/model` 的选择写到这里。 |
+| `[model]` | `provider`、`model`、`thinking`、`base_url`、`api_key`、`auto_fetch_models` | 启动默认模型对与思考等级（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`，provider 支持时含 `max`）。`base_url` 指向本地 OpenAI 兼容服务；`auto_fetch_models = true` 时从 `GET <base_url>/models` 导入模型目录，并在未配 `model` 时取第一个条目；`api_key` 是本地凭证回退。TUI 把最近一次 `/model` 的选择写到这里。 |
+| `[[model.custom]]` | `id`（必填）、`name`、`api`、`provider`、`base_url`、`reasoning`、`thinking_level_map`、`input`、`cost`、`context_window`、`max_tokens`、`headers`、`compat` | 自定义模型描述符。缺省 `provider` / `base_url` 继承 `[model]`；其他默认值为 `openai-completions`、128000 上下文 / 8192 输出、仅文本输入。取代原先的 `models.json` 文件。 |
 | `[builtin_skills]` | `enabled` | 启用的内置 skill 名称；与 `--builtin-skill` 参数取并集。 |
 | `[triggers]` | `poll_interval_secs` | 本地动态 trigger 轮询间隔（默认 600）。 |
 | `[tui]` | `max_feed_lines` | TUI 对话流回看上限。 |
