@@ -137,6 +137,13 @@ pub struct WireDaemonConfig {
     /// starts, so runtime `Configure` changes are rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_kind: Option<String>,
+    /// Trigram-indexed `grep` backend (issue #135): `Some(false)` disables the
+    /// managed `tgrep serve` path so `grep` always walks; `None` keeps the
+    /// daemon default (enabled). Startup-only: the process-scoped registry is
+    /// bound when the daemon starts, so runtime `Configure` changes are
+    /// rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tgrep: Option<bool>,
     /// Enabled builtin skill names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_skills: Vec<String>,
@@ -266,7 +273,7 @@ pub struct WireProvisionedMcpReconnect {
 }
 
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 15] = [
+    pub const FIELDS: [&'static str; 16] = [
         "provider",
         "model",
         "base_url",
@@ -282,6 +289,7 @@ impl WireDaemonConfig {
         "tool_service_addr",
         "storage_service_addr",
         "executor_kind",
+        "tgrep",
     ];
 
     pub fn clears(&self, field: &str) -> bool {
@@ -309,6 +317,7 @@ impl WireDaemonConfig {
                 "thinking" => self.thinking.take().is_some(),
                 "thinking_level" => self.thinking_level.take().is_some(),
                 "executor_kind" => self.executor_kind.take().is_some(),
+                "tgrep" => self.tgrep.take().is_some(),
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
                 "skills" => !std::mem::take(&mut self.skills).is_empty(),
                 "templates" => !std::mem::take(&mut self.templates).is_empty(),
@@ -344,6 +353,10 @@ impl WireDaemonConfig {
         }
         if let Some(kind) = patch.executor_kind.clone() {
             self.executor_kind = Some(kind);
+            touched += 1;
+        }
+        if let Some(tgrep) = patch.tgrep {
+            self.tgrep = Some(tgrep);
             touched += 1;
         }
         if !patch.builtin_skills.is_empty() {

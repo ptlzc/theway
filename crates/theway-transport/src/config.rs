@@ -151,6 +151,16 @@ pub fn parse_executor_kind(toml_text: &str) -> Result<Option<String>, String> {
     Ok(Some(normalized))
 }
 
+/// Parse the `[tools] tgrep = true | false` setting from `config.toml`
+/// (issue #135). Missing section/key → `None` (the daemon default enables the
+/// trigram-indexed `grep` backend). `false` disables the managed `tgrep serve`
+/// path so `grep` always walks.
+pub fn parse_tools_tgrep(toml_text: &str) -> Result<Option<bool>, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    Ok(parsed.tools.and_then(|section| section.tgrep))
+}
+
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     triggers: Option<TriggerConfigSection>,
@@ -159,6 +169,12 @@ struct ConfigFile {
     tui: Option<TuiConfigSection>,
     orchestrator: Option<OrchestratorConfigSection>,
     executor: Option<ExecutorConfigSection>,
+    tools: Option<ToolsConfigSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolsConfigSection {
+    tgrep: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -361,6 +377,23 @@ poll_interval_secs = 0
         );
         assert!(parse_executor_kind("[executor]\nkind = \"docker\"\n").is_err());
         assert!(parse_executor_kind("[executor]\nkind = \"\"\n").is_err());
+    }
+
+    #[test]
+    fn parse_tools_tgrep_reads_boolean_switch() {
+        assert_eq!(parse_tools_tgrep("").unwrap(), None);
+        assert_eq!(parse_tools_tgrep("[tools]\n").unwrap(), None);
+        assert_eq!(
+            parse_tools_tgrep("[tools]\ntgrep = false\n").unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            parse_tools_tgrep("[tools]\ntgrep = true\n").unwrap(),
+            Some(true)
+        );
+        // A non-boolean value is a hard parse error: a typo must not silently
+        // pick a backend.
+        assert!(parse_tools_tgrep("[tools]\ntgrep = \"false\"\n").is_err());
     }
 
     #[test]

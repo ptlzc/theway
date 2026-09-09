@@ -181,6 +181,7 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
         tool_service_addr: config.tool_service_addr.clone(),
         storage_service_addr: config.storage_service_addr.clone(),
         executor_kind: config.executor_kind.clone(),
+        tgrep: config.tgrep,
         clear_fields: config.clear_fields.clone(),
     }
 }
@@ -224,6 +225,7 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         tool_service_addr: config.tool_service_addr.clone(),
         storage_service_addr: config.storage_service_addr.clone(),
         executor_kind: config.executor_kind.clone(),
+        tgrep: config.tgrep,
         clear_fields: config.clear_fields.clone(),
     }
 }

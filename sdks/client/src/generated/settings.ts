@@ -93,6 +93,15 @@ export interface DaemonConfig {
     | string
     | undefined;
   /**
+   * ── built-in tool backends (issue #135) ──
+   * Trigram-indexed `grep` backend (issue #121). `false` disables the managed
+   * `tgrep serve` path so `grep` always uses the built-in walker; absent means
+   * enabled. Startup-only; the daemon rejects runtime changes.
+   */
+  tgrep?:
+    | boolean
+    | undefined;
+  /**
    * ── thinking level (persisted last-choice default) ──
    * Full thinking level string ("off" | "minimal" | "low" | "medium" |
    * "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle
@@ -245,6 +254,7 @@ function createBaseDaemonConfig(): DaemonConfig {
     toolServiceAddr: undefined,
     storageServiceAddr: undefined,
     executorKind: undefined,
+    tgrep: undefined,
     thinkingLevel: undefined,
     skills: [],
     templates: [],
@@ -287,6 +297,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.executorKind !== undefined) {
       writer.uint32(130).string(message.executorKind);
+    }
+    if (message.tgrep !== undefined) {
+      writer.uint32(136).bool(message.tgrep);
     }
     if (message.thinkingLevel !== undefined) {
       writer.uint32(98).string(message.thinkingLevel);
@@ -401,6 +414,14 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.executorKind = reader.string();
           continue;
         }
+        case 17: {
+          if (tag !== 136) {
+            break;
+          }
+
+          message.tgrep = reader.bool();
+          continue;
+        }
         case 12: {
           if (tag !== 98) {
             break;
@@ -495,6 +516,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         : isSet(object.executor_kind)
         ? globalThis.String(object.executor_kind)
         : undefined,
+      tgrep: isSet(object.tgrep) ? globalThis.Boolean(object.tgrep) : undefined,
       thinkingLevel: isSet(object.thinkingLevel)
         ? globalThis.String(object.thinkingLevel)
         : isSet(object.thinking_level)
@@ -554,6 +576,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.executorKind !== undefined) {
       obj.executorKind = message.executorKind;
     }
+    if (message.tgrep !== undefined) {
+      obj.tgrep = message.tgrep;
+    }
     if (message.thinkingLevel !== undefined) {
       obj.thinkingLevel = message.thinkingLevel;
     }
@@ -588,6 +613,7 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.toolServiceAddr = object.toolServiceAddr ?? undefined;
     message.storageServiceAddr = object.storageServiceAddr ?? undefined;
     message.executorKind = object.executorKind ?? undefined;
+    message.tgrep = object.tgrep ?? undefined;
     message.thinkingLevel = object.thinkingLevel ?? undefined;
     message.skills = object.skills?.map((e) => ProvisionedSkill.fromPartial(e)) || [];
     message.templates = object.templates?.map((e) => ProvisionedTemplate.fromPartial(e)) || [];

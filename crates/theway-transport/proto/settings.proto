@@ -59,6 +59,12 @@ message DaemonConfig {
   // or "sandbox". Startup-only; the daemon rejects runtime changes.
   optional string executor_kind = 16;
 
+  // ── built-in tool backends (issue #135) ──
+  // Trigram-indexed `grep` backend (issue #121). `false` disables the managed
+  // `tgrep serve` path so `grep` always uses the built-in walker; absent means
+  // enabled. Startup-only; the daemon rejects runtime changes.
+  optional bool tgrep = 17;
+
   // ── thinking level (persisted last-choice default) ──
   // Full thinking level string ("off" | "minimal" | "low" | "medium" |
   // "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle
