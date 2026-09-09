@@ -16,6 +16,8 @@ The daemon owns session runtime assembly, model-facing tools, local and sandbox 
 
 The execution environment is selected at runtime. `[executor] kind = "local" | "sandbox"` in `config.toml` is carried by `theway-tui` into the spawned daemon as `--executor-kind` (issue #123). `local` is the default and binds `LocalExecutor`; `sandbox` binds `SandboxExecutor`, whose unsupported operations fail with `ExecutorError::UnsupportedKind`, and omits the direct-OS tools. The protocol server can also forward `ToolOps` to a controller-provided gRPC tool endpoint.
 
+The trigram-indexed `grep` backend is opt-out (issue #135): `[tools] tgrep = false` in `config.toml` is carried by `theway-tui` as `--no-tgrep`, which binds `TgrepServerRegistry::disabled()`. Every `grep` query then takes the in-process walker, and no `tgrep serve` process or `.tgrep` index is created. The setting is startup-only and appears in `GetConfig`.
+
 ## Running and validation
 
 ```bash

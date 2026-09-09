@@ -51,6 +51,9 @@ pub struct DaemonOptions {
     pub builtin_skills: Vec<String>,
     pub storage_service_addr: Option<String>,
     pub executor_kind: Option<String>,
+    /// Disable the tgrep-accelerated `grep` backend (issue #135). CLI flag
+    /// `--no-tgrep`, normally supplied by the TUI from `[tools] tgrep`.
+    pub no_tgrep: bool,
 }
 
 const STORAGE_WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -163,6 +166,11 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         startup.executor_kind =
             crate::executor::parse_executor_kind(raw).map_err(anyhow::Error::msg)?;
     }
+    // Issue #135: the `--no-tgrep` flag is the only way to disable the grep
+    // backend at startup — the payload field only feeds the GetConfig view.
+    if options.no_tgrep {
+        startup.tgrep_enabled = false;
+    }
     startup.storage_service_addr = options.storage_service_addr.clone();
     // Issue #86: when the controller provides StorageService, treat the daemon
     // as controller-provisioned and skip local auxiliary-source discovery
@@ -230,7 +238,9 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
             ));
         })
     };
-    let services = DaemonServices::new().with_command_output(command_output);
+    let services = DaemonServices::new()
+        .with_command_output(command_output)
+        .with_tgrep_enabled(startup.tgrep_enabled);
     let dynamic_trigger_registry = services.dynamic_triggers.clone();
     if let Err(err) = dynamic_trigger_registry
         .load_from_storage(storage.clone(), cwd.clone(), session_id.clone())

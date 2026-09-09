@@ -59,6 +59,9 @@ pub struct TgrepServerRegistry {
     inner: Arc<Mutex<RegistryInner>>,
     /// Explicit binary override (tests). `None` = resolve at spawn time.
     binary: Option<PathBuf>,
+    /// Issue #135: `false` disables the backend entirely — no spawn, no index,
+    /// every readiness query reports [`TgrepReadiness::Missing`].
+    enabled: bool,
 }
 
 impl Default for TgrepServerRegistry {
@@ -74,6 +77,16 @@ impl TgrepServerRegistry {
                 entries: HashMap::new(),
             })),
             binary: None,
+            enabled: true,
+        }
+    }
+
+    /// A registry that never spawns a server (issue #135): `grep` falls back
+    /// to its in-process walker for every query.
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            ..Self::new()
         }
     }
 
@@ -84,7 +97,13 @@ impl TgrepServerRegistry {
                 entries: HashMap::new(),
             })),
             binary: Some(binary),
+            enabled: true,
         }
+    }
+
+    /// Whether the tgrep backend is enabled for this registry.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
     }
 
     /// Resolve the `tgrep` binary: sibling of the current exe (installed
@@ -114,13 +133,20 @@ impl TgrepServerRegistry {
 
     /// The resolved `tgrep` binary path (override or sibling/PATH discovery).
     /// Used by the grep tool to spawn client queries with the same resolution.
+    /// `None` when the backend is disabled.
     pub fn binary_path(&self) -> Option<PathBuf> {
+        if !self.enabled {
+            return None;
+        }
         self.binary()
     }
 
     /// Ensure a serve process for `root` and report its readiness. `root`
     /// is canonicalized; failures to canonicalize report [`TgrepReadiness::Missing`].
     pub fn query_root(&self, root: &Path) -> TgrepReadiness {
+        if !self.enabled {
+            return TgrepReadiness::Missing;
+        }
         let Ok(root) = root.canonicalize() else {
             return TgrepReadiness::Missing;
         };
@@ -352,6 +378,17 @@ mod tests {
         // Second call must not re-spawn (still Missing, still one entry).
         assert_eq!(registry.query_root(dir.path()), TgrepReadiness::Missing);
         assert_eq!(registry.len(), 1);
+    }
+
+    #[test]
+    fn disabled_registry_never_spawns_or_resolves() {
+        let registry = TgrepServerRegistry::disabled();
+        assert!(!registry.is_enabled());
+        assert!(registry.binary_path().is_none());
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(registry.query_root(dir.path()), TgrepReadiness::Missing);
+        // No entry is tracked: nothing was spawned and nothing was cached.
+        assert_eq!(registry.len(), 0);
     }
 
     #[test]

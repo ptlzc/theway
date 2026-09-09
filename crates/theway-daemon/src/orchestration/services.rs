@@ -65,4 +65,15 @@ impl DaemonServices {
         self.command_output = command_output;
         self
     }
+
+    /// Disable the tgrep grep backend (issue #135): the registry reports
+    /// `Missing` for every root, so `grep` always takes the walker path and no
+    /// `tgrep serve` process or `.tgrep` index is created.
+    #[must_use]
+    pub(crate) fn with_tgrep_enabled(mut self, enabled: bool) -> Self {
+        if !enabled {
+            self.tgrep = TgrepServerRegistry::disabled();
+        }
+        self
+    }
 }

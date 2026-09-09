@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
         builtin_skills: cli.builtin_skill,
         storage_service_addr: cli.storage_service_addr,
         executor_kind: cli.executor_kind,
+        no_tgrep: cli.no_tgrep,
     })
     .await
 }

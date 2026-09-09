@@ -16,6 +16,8 @@ Daemon 负责会话运行时组装、面向模型的工具、本地与 sandbox e
 
 执行环境在运行时选择。`config.toml` 中的 `[executor] kind = "local" | "sandbox"` 由 `theway-tui` 以 `--executor-kind` 传给新启动的 daemon（issue #123）。默认 `local` 绑定 `LocalExecutor`；`sandbox` 绑定 `SandboxExecutor`，不支持的操作以 `ExecutorError::UnsupportedKind` 失败，并省略直接访问操作系统的工具。协议服务也可以把 `ToolOps` 转发到 controller 提供的 gRPC 工具端点。
 
+基于 trigram 索引的 `grep` 后端可以关闭（issue #135）：`config.toml` 中的 `[tools] tgrep = false` 由 `theway-tui` 以 `--no-tgrep` 传给 daemon，从而绑定 `TgrepServerRegistry::disabled()`。此时每次 `grep` 查询都走进程内 walker，不会创建 `tgrep serve` 进程或 `.tgrep` 索引。该设置仅启动时生效，并出现在 `GetConfig` 视图中。
+
 ## 运行与验证
 
 ```bash

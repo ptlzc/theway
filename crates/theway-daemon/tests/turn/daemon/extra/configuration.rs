@@ -45,6 +45,7 @@ async fn handle_configure_rejections_do_not_publish_unapplied_values() {
             tui_max_feed_lines: Some(0),
             storage_service_addr: Some("http://startup-only".into()),
             executor_kind: Some("sandbox".into()),
+            tgrep: Some(false),
             ..Default::default()
         },
         &mut TurnState::default(),

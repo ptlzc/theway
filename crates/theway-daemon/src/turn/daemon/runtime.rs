@@ -108,6 +108,7 @@ impl TurnHost {
             tool_service_addr: None,
             storage_service_addr: config.startup.storage_service_addr.clone(),
             executor_kind: Some(config.startup.executor_kind.to_string()),
+            tgrep: Some(config.startup.tgrep_enabled),
             clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));

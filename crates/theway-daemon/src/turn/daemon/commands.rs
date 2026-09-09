@@ -709,6 +709,12 @@ impl TurnHost {
             );
         }
 
+        if config.tgrep.is_some() || config.clears("tgrep") {
+            self.error_line(
+                "configure: tgrep is startup-only and cannot be changed at runtime; set `[tools] tgrep` in config.toml and restart the daemon",
+            );
+        }
+
         let touched = self.runtime.config.write().unwrap().merge_from(&applied);
         if touched == 0 {
             self.system_line("configure: no applicable settings changed");

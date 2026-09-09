@@ -66,6 +66,10 @@ pub struct StartupConfig {
     /// Controller StorageService endpoint (`host:port`) for controller-backed
     /// runtime storage (issue #85). `None` = use `LocalRuntimeStorage`.
     pub storage_service_addr: Option<String>,
+    /// Trigram-indexed `grep` backend (issue #135): `false` disables the
+    /// managed `tgrep serve` path so `grep` always walks. Startup-only — the
+    /// process-scoped registry is bound once, before tools are assembled.
+    pub tgrep_enabled: bool,
 }
 
 impl Default for StartupConfig {
@@ -80,6 +84,7 @@ impl Default for StartupConfig {
             thinking_summary: None,
             load_local_sources: true,
             storage_service_addr: None,
+            tgrep_enabled: true,
         }
     }
 }
@@ -140,6 +145,10 @@ impl StartupConfig {
                 }
             }
         }
+        if let Some(tgrep) = patch.tgrep {
+            self.tgrep_enabled = tgrep;
+            touched += 1;
+        }
         // TODO(#73): `base_url` / `thinking` patches already take effect at
         // runtime (`TurnHost::handle_configure` + `SetModel`), but have no
         // startup representation here yet; thinking-summary and
@@ -169,6 +178,7 @@ mod tests {
         assert!(config.thinking_summary.is_none());
         assert!(config.load_local_sources, "local scans stay on by default");
         assert!(config.storage_service_addr.is_none());
+        assert!(config.tgrep_enabled, "tgrep backend stays on by default");
     }
 
     #[test]
@@ -187,6 +197,7 @@ mod tests {
             trigger_poll_secs: Some(30),
             tui_max_feed_lines: Some(8000),
             executor_kind: Some("sandbox".into()),
+            tgrep: Some(false),
             ..Default::default()
         };
         let config = StartupConfig::from_wire(&payload);
@@ -203,6 +214,7 @@ mod tests {
         assert_eq!(config.trigger_poll_secs, 30);
         assert_eq!(config.tui_max_feed_lines, Some(8000));
         assert_eq!(config.executor_kind, ExecutorKind::Sandbox);
+        assert!(!config.tgrep_enabled, "payload disables the tgrep backend");
     }
 
     #[test]

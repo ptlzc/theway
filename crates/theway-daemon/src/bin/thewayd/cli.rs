@@ -78,4 +78,9 @@ struct Cli {
     /// config.toml (issue #123).
     #[arg(long, value_parser = ["local", "sandbox"])]
     executor_kind: Option<String>,
+    /// Disable the tgrep-accelerated `grep` backend (issue #135): `grep`
+    /// always walks instead of using a managed `tgrep serve` index. Usually
+    /// supplied by the TUI from `[tools] tgrep = false` in config.toml.
+    #[arg(long = "no-tgrep")]
+    no_tgrep: bool,
 }
