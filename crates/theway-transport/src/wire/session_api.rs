@@ -23,6 +23,11 @@ pub struct WireActivateSessionRequest {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<WireSessionRuntimeContext>,
+    /// Session-scoped MCP servers (open spec session-scoped-mcp): layered over
+    /// the daemon-level set for this session only; a same-name server replaces
+    /// the daemon entry. Empty = no session layer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<WireProvisionedMcpServer>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

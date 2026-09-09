@@ -235,6 +235,7 @@ fn activation_request(
             base_url: None,
             thinking: Some(false),
         }),
+        mcp_servers: Vec::new(),
     }
 }
 

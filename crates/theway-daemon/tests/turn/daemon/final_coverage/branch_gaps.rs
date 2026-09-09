@@ -178,6 +178,7 @@ async fn activate_turn_with_future(
             base_url: None,
             thinking: Some(false),
         }),
+        mcp_servers: Vec::new(),
     };
     let mut turn = sample_turn_with_future();
     // `handle_activate_session` awaits `apply_activation`, which aborts the

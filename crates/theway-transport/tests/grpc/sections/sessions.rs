@@ -211,6 +211,7 @@ fn activate_request(work_dir: &str) -> theway_grpc::ActivateSessionRequest {
             base_url: None,
             thinking: Some(false),
         }),
+        mcp_servers: Vec::new(),
     }
 }
 
@@ -280,6 +281,7 @@ async fn grpc_activate_session_missing_runtime_maps_invalid_argument() {
             client_key: "client-1".into(),
             name: None,
             runtime: None,
+            mcp_servers: Vec::new(),
         }))
         .await
         .unwrap_err();

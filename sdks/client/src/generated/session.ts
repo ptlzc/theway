@@ -23,6 +23,7 @@ import {
 import { CommandResult, Empty } from "./commands.js";
 import { ExtensionSnapshot } from "./extensions.js";
 import { CollapsedSessionNode, DagRunSnapshot, SessionGraphNode, SubagentJobSnapshot } from "./graph_engine.js";
+import { ProvisionedMcpServer } from "./settings.js";
 
 export const protobufPackage = "theway.grpc.v1";
 
@@ -597,7 +598,15 @@ export interface ActivateSessionRequest {
   sessionId?: string | undefined;
   clientKey: string;
   name?: string | undefined;
-  runtime?: SessionRuntimeContext | undefined;
+  runtime?:
+    | SessionRuntimeContext
+    | undefined;
+  /**
+   * Session-scoped MCP servers: layered over the daemon-level set for this
+   * session only, a same-name server replaces the daemon entry. Credentials
+   * stay in the daemon's auth.json (`token_keychain_ref`), never on the wire.
+   */
+  mcpServers: ProvisionedMcpServer[];
 }
 
 export interface ActivateSessionResponse {
@@ -7534,7 +7543,7 @@ export const SessionRuntimeContext: MessageFns<SessionRuntimeContext> = {
 };
 
 function createBaseActivateSessionRequest(): ActivateSessionRequest {
-  return { sessionId: undefined, clientKey: "", name: undefined, runtime: undefined };
+  return { sessionId: undefined, clientKey: "", name: undefined, runtime: undefined, mcpServers: [] };
 }
 
 export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
@@ -7550,6 +7559,9 @@ export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
     }
     if (message.runtime !== undefined) {
       SessionRuntimeContext.encode(message.runtime, writer.uint32(34).fork()).join();
+    }
+    for (const v of message.mcpServers) {
+      ProvisionedMcpServer.encode(v!, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -7593,6 +7605,14 @@ export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
           message.runtime = SessionRuntimeContext.decode(reader, reader.uint32());
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.mcpServers.push(ProvisionedMcpServer.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -7616,6 +7636,11 @@ export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
         : "",
       name: isSet(object.name) ? globalThis.String(object.name) : undefined,
       runtime: isSet(object.runtime) ? SessionRuntimeContext.fromJSON(object.runtime) : undefined,
+      mcpServers: globalThis.Array.isArray(object?.mcpServers)
+        ? object.mcpServers.map((e: any) => ProvisionedMcpServer.fromJSON(e))
+        : globalThis.Array.isArray(object?.mcp_servers)
+        ? object.mcp_servers.map((e: any) => ProvisionedMcpServer.fromJSON(e))
+        : [],
     };
   },
 
@@ -7633,6 +7658,9 @@ export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
     if (message.runtime !== undefined) {
       obj.runtime = SessionRuntimeContext.toJSON(message.runtime);
     }
+    if (message.mcpServers?.length) {
+      obj.mcpServers = message.mcpServers.map((e) => ProvisionedMcpServer.toJSON(e));
+    }
     return obj;
   },
 
@@ -7647,6 +7675,7 @@ export const ActivateSessionRequest: MessageFns<ActivateSessionRequest> = {
     message.runtime = (object.runtime !== undefined && object.runtime !== null)
       ? SessionRuntimeContext.fromPartial(object.runtime)
       : undefined;
+    message.mcpServers = object.mcpServers?.map((e) => ProvisionedMcpServer.fromPartial(e)) || [];
     return message;
   },
 };
