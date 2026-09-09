@@ -323,6 +323,13 @@ client path), keeping `content` / `files_with_matches` / `count` output
 byte-identical. Serve stderr lands in
 `<base>/logs/tgrep-serve-<slug>.log`.
 
+The backend is opt-out (issue #135): `[tools] tgrep = false` in `config.toml`
+(or `thewayd --no-tgrep`) binds `TgrepServerRegistry::disabled()`, so every
+query takes the walker and no `tgrep serve` process or `.tgrep` index is
+created. Startup-only, like the executor kind: the value rides the daemon
+launch args, appears in the `GetConfig` view, and runtime `Configure` rejects
+it.
+
 ### Trigger / cron / session / DAG runtime
 
 - **Trigger engine** (`trigger_engine` + `triggers`): dynamic trigger rules,

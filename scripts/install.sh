@@ -99,6 +99,11 @@ if [ ! -e "$CONFIG_FILE" ]; then
 [executor]
 kind = "local"
 
+# Built-in tool backends (issue #135). Uncomment to disable the
+# tgrep-accelerated `grep` path; `grep` then always walks the tree.
+# [tools]
+# tgrep = false
+
 # Example model defaults (DeepSeek official, commented out).
 # Uncomment provider/model/thinking and replace with your own values;
 # when they stay commented the daemon keeps environment auto-detection.
