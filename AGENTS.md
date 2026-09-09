@@ -79,12 +79,13 @@ Do not commit API keys or local session data. Provider keys come from environmen
 
 ## Subagent orchestration (DAG / subagent tool)
 
-Operating rules for any orchestrator driving the built-in subagents (`subagent` tool, `dag_*` tools). The built-in specs live in [`crates/theway-daemon/src/agent_specs.rs`](crates/theway-daemon/src/agent_specs.rs).
+Operating rules for any orchestrator driving subagents in this workspace — DSH `subagent` / `workflow` delegation and the built-in `subagent` / `dag_*` tools. The built-in specs live in [`crates/theway-daemon/src/agent_specs.rs`](crates/theway-daemon/src/agent_specs.rs).
 
 1. Multi-directory tasks pin the target directory. The task prompt starts with `cd <absolute target>`, forbids touching the orchestrator's cwd, and names the files it may modify. The orchestrator supplies the concrete path; subagents cannot guess it.
 2. Stalled nodes are the orchestrator's to handle. A node's own idle timeout (default 120s, per-node `timeout` override) fails a stalled node; the orchestrator may instead `dag_skip` it (downstream treats it as done) and take over the remaining work. Verify whatever a stalled node produced.
 3. Only the final publish node writes version control. Subagents run `git add/commit/push` only when the task explicitly authorizes it; the orchestrator owns commits, and a `publish`-style node at the end of the DAG is the single allowed writer.
 4. DAG node task text is the contract. Every non-root node declares `dependsOn` (a missing `dependsOn` runs everything in parallel). Task text carries absolute paths, forbidden operations, and the acceptance check — the node label is not the task.
+5. Subagents do not build, lint, or test. Task text must not ask a subagent to run `cargo build` / `cargo check` / `cargo test` / `cargo clippy` / `cargo fmt` or any other compile, lint, or test command. A subagent edits or inspects the files its task names and reports static evidence (`grep`, `git diff`); the orchestrator runs compilation, lint, and tests once after the DAG settles, because concurrent cargo invocations contend for the target lock and slow every node.
 
 ## Documentation standards
 
