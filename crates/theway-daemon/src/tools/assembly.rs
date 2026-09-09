@@ -35,6 +35,7 @@ use super::set_skill_state;
 use super::skill::{self, SkillHarnessCell};
 use super::skill_builder;
 use super::subagent::{SubagentTool, SubagentToolsFn};
+use crate::subagent_settings::SubagentSettingsStore;
 use theway_core::executor::ExecutorKind;
 use theway_core::multiagent::types::AgentRunResolver;
 
@@ -98,6 +99,7 @@ pub fn engine_tools(
     skill_harness_cell: &SkillHarnessCell,
     session_id: &str,
     reload_runtime: reload::ReloadRuntimeSlot,
+    subagent_settings: Arc<SubagentSettingsStore>,
 ) -> Vec<Arc<dyn AgentTool>> {
     engine_tools_for_kind(
         memory_dir,
@@ -113,6 +115,7 @@ pub fn engine_tools(
         session_id,
         reload_runtime,
         ExecutorKind::Local,
+        subagent_settings,
     )
 }
 
@@ -134,6 +137,7 @@ pub fn engine_tools_for_kind(
     session_id: &str,
     reload_runtime: reload::ReloadRuntimeSlot,
     kind: ExecutorKind,
+    subagent_settings: Arc<SubagentSettingsStore>,
 ) -> Vec<Arc<dyn AgentTool>> {
     let mut tools = Vec::new();
     // DAG tools (session-stamped: dag_* refuse runs owned by another session).
@@ -142,6 +146,7 @@ pub fn engine_tools_for_kind(
         Some(session_id.to_string()),
         spec_names.clone(),
         subagent_registry.clone(),
+        subagent_settings.clone(),
     ));
     // Subagent delegation tool: shares the parent's model + stream backend; jobs are
     // stamped with this session.
@@ -154,7 +159,8 @@ pub fn engine_tools_for_kind(
             spec_names,
             subagent_registry.clone(),
         )
-        .with_session_id(Some(session_id.to_string())),
+        .with_session_id(Some(session_id.to_string()))
+        .with_settings(subagent_settings),
     ));
     // Skill family — each wires a fresh harness cell per harness build. In sandbox
     // mode the direct-FS-write members are left unregistered (see `skill_family`).

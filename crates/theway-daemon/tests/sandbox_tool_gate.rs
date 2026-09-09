@@ -145,6 +145,11 @@ fn engine_tools_omit_direct_fs_writers_but_keep_read_only_skill_surface() {
         "session-sandbox-gate",
         ReloadRuntimeSlot::default(),
         ExecutorKind::Sandbox,
+        Arc::new(
+            theway_daemon::subagent_settings::SubagentSettingsStore::new(std::path::Path::new(
+                "/nonexistent-project",
+            )),
+        ),
     );
     let names = names(&tools);
 

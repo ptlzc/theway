@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use crate::commands::CommandOutput;
 use crate::session_activation::SessionActivator;
 use crate::session_execution::SessionExecutionRegistry;
+use crate::subagent_settings::SubagentSettingsRegistry;
 use crate::tgrep_server::TgrepServerRegistry;
 use crate::tools::assembly::reload::ReloadRuntimeSlot;
 use crate::triggers::cron::CronRegistry;
@@ -23,6 +24,10 @@ pub struct DaemonServices {
     /// Process-scoped `tgrep serve` registry for the built-in grep tool
     /// (issue #121): lazily spawned per project root, shared across sessions.
     pub(crate) tgrep: TgrepServerRegistry,
+    /// Project-level last-set subagent model/thinking memory: one shared
+    /// settings store per project root, injected into every session's
+    /// `dag_plan` / `subagent` tools.
+    pub(crate) subagent_settings: SubagentSettingsRegistry,
 }
 
 impl Default for DaemonServices {
@@ -45,6 +50,7 @@ impl Default for DaemonServices {
             session_execution: SessionExecutionRegistry::default(),
             session_activator: Arc::new(OnceLock::new()),
             tgrep: TgrepServerRegistry::new(),
+            subagent_settings: SubagentSettingsRegistry::new(),
         }
     }
 }

@@ -21,7 +21,7 @@ English | [中文](architecture.zh.md)
 
 [`paths.rs`](../src/paths.rs) resolves base, home, work directory, and additional skill directories at the CLI boundary. Runtime modules receive `DaemonPaths` or explicit paths rather than resolving `HOME`, `THEWAY_DIR`, or the process current directory independently.
 
-[`orchestration/services.rs`](../src/orchestration/services.rs) owns process-lifetime mutable services such as trigger and cron registries, notification hooks, and command output. Tests and embedders replace behavior by constructing `DaemonServices`, not by modifying process globals.
+[`orchestration/services.rs`](../src/orchestration/services.rs) owns process-lifetime mutable services such as trigger and cron registries, notification hooks, command output, and the per-project subagent settings registry ([`subagent_settings.rs`](../src/subagent_settings.rs), the last-set model/thinking memory shared by `dag_plan` and the `subagent` tool). Tests and embedders replace behavior by constructing `DaemonServices`, not by modifying process globals.
 
 ## Session runtime lifecycle
 

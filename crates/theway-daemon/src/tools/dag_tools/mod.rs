@@ -22,6 +22,8 @@ use theway_core::AgentTool;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::jobs::SubagentJobRegistry;
 
+use crate::subagent_settings::SubagentSettingsStore;
+
 // The test mirror (`tests/tools/dag_tools/`, bridged at the bottom of this
 // file) resolves these names through this module's scope via `use super::*`;
 // production code imports them in the tool submodules directly, so the
@@ -71,7 +73,8 @@ const NODE_RESULT_DEFAULT_TAIL: usize = 800;
 
 /// Build the eight `dag_*` tools, all sharing one engine and the owning pi
 /// session id (p3c-wire passes `Some(session_id)` from the harness; `None`
-/// disables session isolation).
+/// disables session isolation). `settings` is the project-level last-set
+/// override memory that `dag_plan` merges into new node definitions.
 pub struct DagTools;
 
 impl DagTools {
@@ -83,12 +86,14 @@ impl DagTools {
         session_id: Option<String>,
         spec_names: Vec<String>,
         registry: SubagentJobRegistry,
+        settings: Arc<SubagentSettingsStore>,
     ) -> Vec<Arc<dyn AgentTool>> {
         vec![
             Arc::new(DagPlanTool {
                 engine: engine.clone(),
                 session_id: session_id.clone(),
                 spec_names: spec_names.clone(),
+                settings: settings.clone(),
             }),
             Arc::new(DagStatusTool {
                 engine: engine.clone(),

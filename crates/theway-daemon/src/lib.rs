@@ -66,6 +66,7 @@ mod stream_auth;
 
 mod runtime_capabilities;
 mod skill_overrides;
+pub mod subagent_settings;
 pub mod templates;
 pub mod tgrep_server;
 pub mod tools;

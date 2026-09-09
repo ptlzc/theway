@@ -121,6 +121,17 @@ async fn dag_plan_wait_status_completes_2_node_dag_with_real_launcher() {
             "general".into(),
         ],
         theway_core::multiagent::jobs::SubagentJobRegistry::new(),
+        Arc::new(
+            theway_daemon::subagent_settings::SubagentSettingsStore::new(
+                &std::env::temp_dir().join(format!(
+                    "theway-graph-tools-e2e-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                )),
+            ),
+        ),
     );
 
     // dag_plan: 2-node mermaid DAG (A → B), both nodes are `explorer` subagents.

@@ -29,6 +29,7 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use theway_contract::subagent_settings::SubagentRunSettings;
 use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::{
     AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, StreamFn, ToolExecutionMode,
@@ -36,12 +37,15 @@ use theway_core::{
 use theway_llm_provider::{Model, Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
+use crate::subagent_settings::SubagentSettingsStore;
 use theway_core::ThinkingLevel;
 use theway_core::multiagent::runner::{
     AgentRunOptions, filter_tool_set, resolve_run_model, run_agent,
 };
 use theway_core::multiagent::types::AgentRunResolver;
 use theway_core::multiagent::types::ToolSetResolver;
+
+use std::sync::Arc;
 
 /// Closure that resolves the tool set a subagent should have access to from its spec
 /// name. Same shape as the DAG node launcher's [`ToolSetResolver`](crate::multiagent::types::ToolSetResolver) — `task` and DAG
@@ -76,6 +80,9 @@ pub struct SubagentTool {
     /// session-less construction (e2e tests); the CLI wires `Some(current)` via
     /// the CLI's session factory.
     session_id: Option<String>,
+    /// Project-level last-set override memory; `None` keeps the pure per-call
+    /// behavior (tests / session-less construction).
+    settings: Option<Arc<SubagentSettingsStore>>,
 }
 
 impl SubagentTool {
@@ -96,6 +103,7 @@ impl SubagentTool {
             spec_names,
             registry,
             session_id: None,
+            settings: None,
         }
     }
 
@@ -108,6 +116,15 @@ impl SubagentTool {
     #[allow(dead_code)]
     pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
         self.session_id = session_id;
+        self
+    }
+
+    /// Wire the project-level last-set override memory: explicit per-call
+    /// `provider` / `model` / `thinking` values merge over the remembered
+    /// record for the chosen `subagent_type`, and successful resolutions
+    /// update it.
+    pub fn with_settings(mut self, settings: Arc<SubagentSettingsStore>) -> Self {
+        self.settings = Some(settings);
         self
     }
 }
@@ -164,7 +181,32 @@ impl AgentTool for SubagentTool {
         let provider = params.get("provider").and_then(|v| v.as_str());
         let model_id = params.get("model").and_then(|v| v.as_str());
         let thinking = params.get("thinking").and_then(|v| v.as_str());
-        if let Some(raw) = thinking {
+        // Merge the caller's explicit overrides with the project-level
+        // remembered record for this subagent type; the merged record is
+        // written back after the model resolves.
+        let remembered: Option<(Arc<SubagentSettingsStore>, String, SubagentRunSettings)> =
+            match &self.settings {
+                Some(store) => {
+                    let effective = store
+                        .merge_agent(subagent_type, provider, model_id, thinking)
+                        .await;
+                    Some((store.clone(), subagent_type.to_string(), effective))
+                }
+                None => None,
+            };
+        let (provider, model_id, thinking) = match &remembered {
+            Some((_, _, effective)) => (
+                effective.provider.clone(),
+                effective.model.clone(),
+                effective.thinking.clone(),
+            ),
+            None => (
+                provider.map(str::to_string),
+                model_id.map(str::to_string),
+                thinking.map(str::to_string),
+            ),
+        };
+        if let Some(raw) = thinking.as_deref() {
             if raw.parse::<ThinkingLevel>().is_err() {
                 return Err(AgentToolError::Message(format!(
                     "invalid thinking level: {raw} (allowed: off, minimal, low, medium, high, xhigh, max)"
@@ -196,7 +238,7 @@ impl AgentTool for SubagentTool {
         // sessions can still delegate); `model` alone keeps the legacy
         // parent-model id rewrite. The owning session has no model at all and
         // no explicit pair was given: fail fast with a clear, retryable message.
-        let model = resolve_run_model(self.model.as_ref(), provider, model_id)
+        let model = resolve_run_model(self.model.as_ref(), provider.as_deref(), model_id.as_deref())
             .map_err(AgentToolError::Message)?
             .ok_or_else(|| {
                 AgentToolError::Message(
@@ -204,6 +246,11 @@ impl AgentTool for SubagentTool {
                         .to_string(),
                 )
             })?;
+        // The model resolved: remember the merged overrides for this subagent
+        // type so later calls inherit them.
+        if let Some((store, name, entry)) = remembered {
+            store.remember_agent(&name, entry).await;
+        }
         let result = run_agent(AgentRunOptions {
             launch,
             tools,
@@ -211,7 +258,7 @@ impl AgentTool for SubagentTool {
             model,
             stream_fn: self.stream_fn.clone(),
             timeout: None,
-            thinking: thinking.map(str::to_string),
+            thinking,
             registry: self.registry.clone(),
             source: "subagent".into(),
             run_id: None,
@@ -259,7 +306,7 @@ fn build_definition(spec_names: &[String]) -> Tool {
         name: "subagent".into(),
         description:
             "Delegate a self-contained task to a fresh sub-agent. The subagent gets its own context window and the uniform subagent tool set (engine tools minus subagent/dag_* plus local tools); this tool returns a single text result from the subagent. Use this when you need to inspect a large surface area (search, file reads) or run a contained change without polluting the main conversation.\n\
-             Model: by default the subagent inherits the parent session's model. Pass provider + model to resolve a concrete model from the loaded catalog (deepseek:deepseek-v4-flash, anthropic:claude-haiku-4-5, …) — this works even when the session has no model set; model without provider keeps the parent provider and only swaps the model id. thinking overrides the reasoning intensity (off, minimal, low, medium, high, xhigh, max).\n\
+             Model: by default the subagent inherits the parent session's model. Pass provider + model to resolve a concrete model from the loaded catalog (deepseek:deepseek-v4-flash, anthropic:claude-haiku-4-5, …) — this works even when the session has no model set; model without provider keeps the parent provider and only swaps the model id. thinking overrides the reasoning intensity (off, minimal, low, medium, high, xhigh, max). The last-set provider/model/thinking per subagent_type are remembered per project: later calls without explicit values inherit them (pass \"\" to clear; provider without model is never remembered).\n\
              Budget: the subagent defaults to 300 LLM-turn attempts — the code-harness budget (compile → fix loops need it). For short, fast tasks (a quick read, a single check) lower max_iterations to a reasonable range like 4-32.\n\
              Tools: by default the subagent gets every orchestrator tool except dag_* and subagent; pass tools: [\"read\", \"bash\"] to restrict it to specific tools (unknown names fail the call).".into(),
         parameters: json!({

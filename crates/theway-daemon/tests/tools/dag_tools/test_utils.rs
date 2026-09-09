@@ -5,15 +5,31 @@
 #![allow(dead_code)]
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::{DagEngine, NodeLauncher, NodeOutcome};
 use theway_core::multiagent::jobs::SubagentJobRegistry;
 use theway_core::{AgentTool, AgentToolError};
+use theway_daemon::subagent_settings::SubagentSettingsStore;
 use theway_llm_provider::UserContentBlock;
 use tokio_util::sync::CancellationToken;
+
+/// A settings store on a fresh temp dir: `dag_plan` reads/writes the project
+/// settings file, so every tool set gets its own dir to stay race-free.
+pub fn settings_store() -> Arc<SubagentSettingsStore> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "theway-dag-tools-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Arc::new(SubagentSettingsStore::new(&dir))
+}
 
 pub fn ok_outcome() -> NodeOutcome {
     NodeOutcome {
@@ -128,6 +144,7 @@ pub fn tools_with_registry(
         session_id.map(String::from),
         spec_names(),
         registry,
+        settings_store(),
     )
 }
 

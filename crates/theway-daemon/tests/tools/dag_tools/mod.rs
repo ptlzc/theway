@@ -1,7 +1,7 @@
 //! Tests for `dag_tools` — split out of dag_tools.rs (issue #11).
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use theway_core::multiagent::graph::engine::{NodeLauncher, NodeOutcome};
@@ -132,7 +132,23 @@ fn tools_with_registry(
             "general".into(),
         ],
         registry,
+        settings_store(),
     )
+}
+
+/// Fresh temp-dir settings store per tool set: `dag_plan` reads/writes the
+/// project settings file, so shared dirs would race between parallel tests.
+fn settings_store() -> Arc<SubagentSettingsStore> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "theway-dag-tools-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Arc::new(SubagentSettingsStore::new(&dir))
 }
 
 fn tool_by<'a>(tools: &'a [Arc<dyn AgentTool>], name: &str) -> &'a dyn AgentTool {

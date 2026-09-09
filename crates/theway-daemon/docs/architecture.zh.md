@@ -21,7 +21,7 @@
 
 [`paths.rs`](../src/paths.rs) 在 CLI 边界解析 base、home、工作目录和额外 skill 目录。运行时模块只接收 `DaemonPaths` 或显式路径，不自行解析 `HOME`、`THEWAY_DIR` 或进程当前目录。
 
-[`orchestration/services.rs`](../src/orchestration/services.rs) 持有 trigger/cron 注册表、notification hook 和命令输出等进程生命周期可变服务。测试与嵌入方通过构造 `DaemonServices` 替换行为，而不是修改进程全局状态。
+[`orchestration/services.rs`](../src/orchestration/services.rs) 持有 trigger/cron 注册表、notification hook、命令输出，以及按项目共享的子代理设置注册表（[`subagent_settings.rs`](../src/subagent_settings.rs)，`dag_plan` 与 `subagent` 工具共享的"最后一次设置"模型/思考强度记忆）等进程生命周期可变服务。测试与嵌入方通过构造 `DaemonServices` 替换行为，而不是修改进程全局状态。
 
 ## 会话运行时生命周期
 

@@ -1,6 +1,22 @@
 //! `execute` parameter parsing: `max_iterations` / `tools` present and absent.
 
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use super::*;
+
+fn settings_store() -> Arc<crate::subagent_settings::SubagentSettingsStore> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir: PathBuf = std::env::temp_dir().join(format!(
+        "theway-subagent-params-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Arc::new(crate::subagent_settings::SubagentSettingsStore::new(&dir))
+}
 
 /// `max_iterations` present wins over the spec budget (16 in the test table):
 /// the looping stream stops at the param cap and the error carries it.
@@ -251,4 +267,92 @@ async fn execute_model_only_without_session_model_fails_with_hint() {
     };
     assert!(msg.contains("no model set for this session"), "{msg}");
     assert!(msg.contains("pass provider + model"), "{msg}");
+}
+
+/// A remembered record merges into calls that pass no explicit overrides: an
+/// invalid remembered thinking fails the call before any subagent spawns.
+#[tokio::test]
+async fn execute_inherits_remembered_agent_settings() {
+    let store = settings_store();
+    store
+        .remember_agent(
+            "general",
+            theway_contract::subagent_settings::SubagentRunSettings {
+                provider: None,
+                model: None,
+                thinking: Some("bogus".into()),
+            },
+        )
+        .await;
+    let tool = subagent_tool(faux_stream("unreachable"), Vec::new()).with_settings(store);
+    let err = tool
+        .execute(
+            "call-1",
+            json!({ "subagent_type": "general", "prompt": "p" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("an invalid remembered thinking must fail the call");
+    let AgentToolError::Message(msg) = err else {
+        panic!("expected Message error, got {err}");
+    };
+    assert!(msg.contains("invalid thinking level: bogus"), "{msg}");
+}
+
+/// A remembered model-only override (same id as the parent faux model)
+/// resolves and the run completes; explicit values win over the memory.
+#[tokio::test]
+async fn execute_remembered_overrides_run_and_explicit_wins() {
+    let store = settings_store();
+    store
+        .remember_agent(
+            "general",
+            theway_contract::subagent_settings::SubagentRunSettings {
+                provider: None,
+                model: Some("faux".into()),
+                thinking: Some("off".into()),
+            },
+        )
+        .await;
+    let tool = subagent_tool(faux_stream("inherited done"), Vec::new()).with_settings(store.clone());
+    let result = tool
+        .execute(
+            "call-1",
+            json!({ "subagent_type": "general", "prompt": "p" }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("remembered overrides must resolve against the parent model");
+    let body = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text content"),
+    };
+    assert_eq!(body, "inherited done");
+
+    // An explicit thinking wins over the remembered one; the call remembers
+    // the merged record for the next call.
+    let tool = subagent_tool(faux_stream("explicit done"), Vec::new()).with_settings(store.clone());
+    let result = tool
+        .execute(
+            "call-1",
+            json!({
+                "subagent_type": "general",
+                "prompt": "p",
+                "thinking": "high",
+            }),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect("explicit thinking must win over the memory");
+    let body = match &result.content[0] {
+        UserContentBlock::Text(t) => t.text.clone(),
+        _ => panic!("expected text content"),
+    };
+    assert_eq!(body, "explicit done");
+    let merged = store.merge_agent("general", None, None, None).await;
+    assert_eq!(merged.thinking.as_deref(), Some("high"));
+    assert_eq!(merged.model.as_deref(), Some("faux"));
 }

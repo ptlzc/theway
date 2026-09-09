@@ -558,6 +558,7 @@ pub fn session_tool_set_for_cwd_with_kind(
         session_id,
         services.reload.clone(),
         kind,
+        services.subagent_settings.store_for(&cwd),
     ));
     // Session graph tools (main-agent only): list/read/status/wait/attach against
     // the Turso-backed session graph.

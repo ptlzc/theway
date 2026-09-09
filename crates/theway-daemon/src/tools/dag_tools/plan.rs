@@ -14,13 +14,17 @@ use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use super::utils::{node_def_from_json, ok_text};
+use crate::subagent_settings::SubagentSettingsStore;
 
 /// `dag_plan` additionally carries the known spec names (app-side table) so the
-/// agent field is validated against the real spec registry.
+/// agent field is validated against the real spec registry, and the
+/// project-level last-set override memory so nodes inherit their previous
+/// `provider` / `model` / `thinking` values when the call does not set them.
 pub struct DagPlanTool {
     pub(super) engine: Arc<DagEngine>,
     pub(super) session_id: Option<String>,
     pub(super) spec_names: Vec<String>,
+    pub(super) settings: Arc<SubagentSettingsStore>,
 }
 
 /// Build a `DagRunDef` from a name + definition string (mermaid text or JSON
@@ -89,7 +93,7 @@ impl DagPlanTool {
         } else {
             return Ok(ok_text("需要 nodes[] 或 mermaid 参数。".to_string()));
         };
-        let def = match plan_from_definition(
+        let mut def = match plan_from_definition(
             name,
             &definition,
             params.get("failFast").and_then(|v| v.as_bool()),
@@ -107,12 +111,33 @@ impl DagPlanTool {
             Err(e) => return Ok(ok_text(e)),
         };
 
+        // Merge the project-level last-set overrides into every node: explicit
+        // values win and are remembered; nodes that set nothing inherit the
+        // previous provider/model/thinking for the same node id. The upsert
+        // entries are written only after the plan is accepted.
+        let settings_updates = self.settings.merge_nodes(&mut def.nodes).await;
+        // Validate merged thinking values at plan time (the launcher re-checks
+        // at launch, so this only surfaces typos / hand-edited memory earlier).
+        for node in &def.nodes {
+            if let Some(raw) = node.thinking.as_deref() {
+                if raw.parse::<theway_core::ThinkingLevel>().is_err() {
+                    return Ok(ok_text(format!(
+                        "节点 {} 的 thinking 值无效: {raw} (allowed: off, minimal, low, medium, high, xhigh, max)",
+                        node.id
+                    )));
+                }
+            }
+        }
+
         match self
             .engine
             .plan(def, Some(&self.spec_names), self.session_id.clone())
         {
             Err(errors) => Ok(ok_text(format!("DAG 校验失败:\n{}", errors.join("\n")))),
             Ok(run) => {
+                // The plan was accepted: remember the effective overrides so
+                // the next plan for the same node ids inherits them.
+                self.settings.remember_nodes(settings_updates).await;
                 let run_id = run.id.clone();
                 let text = format!(
                     "✓ 已创建并自动启动 {} [{}] ({} 节点, 并发 {})\n\n{}\n\n{}\n\n监控: dag_status(dagId) 或查看上方 widget; 收割结果: dag_wait(dagId)。失败时用 dag_inspect 看详情, dag_retry/dag_skip 干预。",
@@ -177,9 +202,9 @@ static PLAN_DEFINITION: Lazy<Tool> = Lazy::new(|| {
                         "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "Prerequisite node ids" },
                         "timeout": { "type": "number", "description": "Idle timeout override (sec)" },
                         "cwd": { "type": "string", "description": "Working directory (absolute path) for the subagent; pinned into its system prompt. Required for multi-repo tasks — without it the subagent operates in the session cwd" },
-                        "provider": { "type": "string", "description": "Provider for an explicit (provider, model) override resolved against the loaded model catalog, independent of the parent session model (e.g. deepseek). Requires model." },
-                        "model": { "type": "string", "description": "Model override: with provider, a catalog model id (works in model-less sessions); without provider, swaps the id while keeping the parent session's provider/base_url and requires a parent session model." },
-                        "thinking": { "type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"], "description": "Reasoning-intensity override. Providers without a thinking_level_map ignore the reasoning option at stream time." },
+                        "provider": { "type": "string", "description": "Provider for an explicit (provider, model) override resolved against the loaded model catalog, independent of the parent session model (e.g. deepseek). Requires model. Persisted per node id: the last-set values are reused by later dag_plan calls for the same node id (pass empty string \"\" to clear; a provider without model is never remembered)." },
+                        "model": { "type": "string", "description": "Model override: with provider, a catalog model id (works in model-less sessions); without provider, swaps the id while keeping the parent session's provider/base_url and requires a parent session model. Persisted per node id like provider (\"\" clears)." },
+                        "thinking": { "type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"], "description": "Reasoning-intensity override. Providers without a thinking_level_map ignore the reasoning option at stream time. Persisted per node id independently of provider/model (\"\" clears)." },
                         "maxIterations": { "type": "number", "description": "Iteration-budget override (LLM-turn attempts) for this node's subagent; defaults to 300 (code-harness budget), lower to 4-32 for short, fast tasks" },
                         "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool allowlist (tool names) for this node's subagent; omitted means the full resolved tool set, unknown tool names fail the node" },
                     },
