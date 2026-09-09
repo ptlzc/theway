@@ -99,20 +99,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: cargo registry cache
-        uses: actions/cache@v4
+      - name: cargo cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: clippy-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: |
-            clippy-${{ runner.os }}-
-      # `--workspace` + `--all-targets` covers every crate's lib/bin/tests/examples. All 10
-      # providers are linted because `theway` already activates the `all-providers`
-      # feature on `theway-llm-provider` (feature unification across the workspace).
+          # One dependency cache shared by clippy/test/bench/feature-gate on
+          # each OS: the old per-job keys each cached a full `target/` and
+          # evicted each other at the 10 GB repo limit.
+          shared-key: theway
+          # PRs restore only; main saves so the cache generation advances
+          # once per merge instead of once per pull request.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -127,16 +123,15 @@ jobs:
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
       - name: cargo cache
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: |
-            test-${{ runner.os }}-
+          # One dependency cache shared by clippy/test/bench/feature-gate on
+          # each OS: the old per-job keys each cached a full `target/` and
+          # evicted each other at the 10 GB repo limit.
+          shared-key: theway
+          # PRs restore only; main saves so the cache generation advances
+          # once per merge instead of once per pull request.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo test --workspace
         # Strip all provider env vars so any test that accidentally hits a real API will
         # self-skip / error cleanly. Mirrors the TS repo's `test.sh` discipline.
@@ -166,17 +161,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
-      - name: cargo registry cache
-        uses: actions/cache@v4
+      - name: cargo cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: |
-            bench-${{ runner.os }}-
+          # One dependency cache shared by clippy/test/bench/feature-gate on
+          # each OS: the old per-job keys each cached a full `target/` and
+          # evicted each other at the 10 GB repo limit.
+          shared-key: theway
+          # PRs restore only; main saves so the cache generation advances
+          # once per merge instead of once per pull request.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo bench -p theway-core --bench dispatch -- --test
 
   # ----------------------------------------------------------------
@@ -194,17 +188,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
-      - name: cargo registry cache
-        uses: actions/cache@v4
+      - name: cargo cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: gate-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: |
-            gate-${{ runner.os }}-
+          # One dependency cache shared by clippy/test/bench/feature-gate on
+          # each OS: the old per-job keys each cached a full `target/` and
+          # evicted each other at the 10 GB repo limit.
+          shared-key: theway
+          # PRs restore only; main saves so the cache generation advances
+          # once per merge instead of once per pull request.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check -p theway-core --no-default-features
       - name: core harness without default providers
         run: cargo check -p theway-core --no-default-features --features harness

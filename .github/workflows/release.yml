@@ -86,6 +86,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Per-target dependency cache: the release matrix builds five
+          # targets from scratch on every tag otherwise.
+          shared-key: theway-release
+          key: ${{ matrix.target }}
+
       - name: build
         run: cargo build --profile dist --target ${{ matrix.target }} --workspace
         shell: bash
