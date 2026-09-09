@@ -29,4 +29,7 @@ max_feed_lines = 8000
 
 [executor]
 kind = \"sandbox\"
+
+[tools]
+tgrep = false
 ";

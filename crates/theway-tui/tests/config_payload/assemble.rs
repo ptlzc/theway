@@ -70,6 +70,9 @@ use super::*;
         // `[executor] kind` rides the payload so `daemon_runtime_args` can
         // pass it to a freshly spawned daemon.
         assert_eq!(payload.executor_kind.as_deref(), Some("sandbox"));
+        // Issue #135: `[tools] tgrep = false` rides the payload the same way
+        // (launch arg `--no-tgrep`).
+        assert_eq!(payload.tgrep, Some(false));
         // Persisted `[model] thinking` (the user's last pick) becomes the
         // payload when the CLI flag is at its default.
         assert_eq!(payload.thinking_level.as_deref(), Some("high"));

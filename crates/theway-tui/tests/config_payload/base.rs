@@ -52,6 +52,14 @@ use super::*;
         assert!(text.contains("provider = \"deepseek\""));
         assert!(text.contains("model = \"deepseek-v4-flash\""));
         assert!(text.contains("api_key = \"sk-xxxxxx\""));
+        // The tgrep switch is a commented sample too: the seeded default must
+        // keep the backend enabled.
+        assert_eq!(
+            theway_transport::config::parse_tools_tgrep(&text).unwrap(),
+            None
+        );
+        assert!(text.contains("# [tools]"));
+        assert!(text.contains("# tgrep = false"));
 
         // Second call is a no-op and never rewrites the file.
         assert!(!ensure_default_config_at(&path).await.unwrap());

@@ -83,6 +83,32 @@ use super::*;
     }
 
     #[test]
+    fn reconcile_reports_tgrep_mismatch_only_on_attach() {
+        let current = WireDaemonConfig {
+            tgrep: Some(true),
+            ..Default::default()
+        };
+        let desired = WireDaemonConfig {
+            tgrep: Some(false),
+            ..Default::default()
+        };
+        let (patch, notes) = reconcile(&desired, &current, true);
+        assert_eq!(patch, WireDaemonConfig::default());
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("tgrep disabled"), "{notes:?}");
+        assert!(notes[0].contains("spawn"), "{notes:?}");
+
+        // Fresh spawn carries the value through the daemon launch args.
+        let (patch, notes) = reconcile(&desired, &current, false);
+        assert_eq!(patch, WireDaemonConfig::default());
+        assert!(notes.is_empty(), "{notes:?}");
+
+        // A matching setting stays quiet.
+        let (_, notes) = reconcile(&current.clone(), &current, true);
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    #[test]
     fn reconcile_never_pushes_partial_model_pair() {
         let current = WireDaemonConfig::default();
         let desired = WireDaemonConfig {

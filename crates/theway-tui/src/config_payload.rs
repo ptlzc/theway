@@ -103,6 +103,11 @@ pub(crate) const DEFAULT_CONFIG_TOML: &str = r#"# theway default configuration.
 [executor]
 kind = "local"
 
+# Built-in tool backends (issue #135). Uncomment to disable the
+# tgrep-accelerated `grep` path; `grep` then always walks the tree.
+# [tools]
+# tgrep = false
+
 # Example model defaults (DeepSeek official, commented out).
 # Uncomment provider/model/thinking and replace with your own values;
 # when they stay commented the daemon keeps environment auto-detection.
@@ -330,6 +335,18 @@ pub(crate) fn assemble_config_from(
         }
     }
 
+    // Built-in tool backends ([tools] tgrep, issue #135). Startup-only like the
+    // executor: it rides the daemon launch args, so the spawned daemon binds
+    // the grep backend before assembling tools.
+    if let Some(text) = config_toml {
+        match config::parse_tools_tgrep(text) {
+            Ok(tgrep) => payload.tgrep = tgrep,
+            Err(err) => {
+                diagnostics.push(format!("tools: ignoring invalid tgrep in {source}: {err}"))
+            }
+        }
+    }
+
     (payload, diagnostics)
 }
 
@@ -466,6 +483,19 @@ pub(crate) fn reconcile(
         if current.executor_kind.as_deref() != Some(kind.as_str()) && attach {
             notes.push(format!(
                 "executor {kind} requested, but the execution environment only changes on daemon (re)spawn"
+            ));
+        }
+    }
+
+    // tgrep grep backend: bound at daemon startup together with the
+    // process-scoped registry, so it is not runtime-reappliable. A fresh spawn
+    // carries it through the launch args; attaching to a mismatched daemon
+    // reports the note.
+    if let Some(tgrep) = desired.tgrep {
+        if current.tgrep != Some(tgrep) && attach {
+            notes.push(format!(
+                "tgrep {} requested, but the grep backend only changes on daemon (re)spawn",
+                if tgrep { "enabled" } else { "disabled" }
             ));
         }
     }

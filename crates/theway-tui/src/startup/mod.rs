@@ -99,6 +99,11 @@ pub(crate) fn daemon_runtime_args(cli: &Cli, config: &WireDaemonConfig) -> Vec<S
         args.push("--executor-kind".to_string());
         args.push(kind.clone());
     }
+    // Issue #135: `[tools] tgrep = false` disables the managed tgrep grep
+    // backend; startup-only, so it rides the spawn args.
+    if config.tgrep == Some(false) {
+        args.push("--no-tgrep".to_string());
+    }
     if let Some(addr) = &config.storage_service_addr {
         args.push("--storage-service-addr".to_string());
         args.push(addr.clone());
@@ -618,6 +623,9 @@ poll_interval_secs = 45
 
 [executor]
 kind = \"sandbox\"
+
+[tools]
+tgrep = false
 ";
         // No CLI config flags at all — every config launch arg is file-derived.
         let cli = Cli::parse_from(["theway"]);
@@ -641,6 +649,7 @@ kind = \"sandbox\"
                 "45",
                 "--executor-kind",
                 "sandbox",
+                "--no-tgrep",
             ]
         );
 
@@ -680,6 +689,7 @@ kind = \"sandbox\"
                 "15",
                 "--executor-kind",
                 "sandbox",
+                "--no-tgrep",
             ]
         );
 
@@ -705,6 +715,7 @@ kind = \"sandbox\"
                 "45",
                 "--executor-kind",
                 "sandbox",
+                "--no-tgrep",
             ]
         );
     }
