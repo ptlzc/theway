@@ -104,14 +104,28 @@ kind = "local"
 # [tools]
 # tgrep = false
 
-# Example model defaults (DeepSeek official, commented out).
-# Uncomment provider/model/thinking and replace with your own values;
-# when they stay commented the daemon keeps environment auto-detection.
+# Example model defaults (DeepSeek official, commented out). Uncomment
+# provider/model/thinking and replace with your own values; environment API
+# keys still win over `api_key`.
 # [model]
 # provider = "deepseek"
 # model = "deepseek-v4-flash"
 # thinking = "medium"
-# api_key = "sk-xxxxxx"  # EXAMPLE ONLY — real keys are read from environment variables, never written here.
+# api_key = "sk-xxxxxx"
+
+# Local OpenAI-compatible server: the daemon imports the catalog from
+# `<base_url>/models`, so `model` may stay unset.
+# [model]
+# provider = "ds4"
+# base_url = "http://127.0.0.1:8000/v1"
+# auto_fetch_models = true
+
+# Custom model descriptors (optional; override a catalog entry by id).
+# [[model.custom]]
+# id = "deepseek-v4-flash"
+# api = "openai-responses"
+# context_window = 100000
+# max_tokens = 384000
 EOF
     echo "==> Initialized default config at $CONFIG_FILE"
 fi

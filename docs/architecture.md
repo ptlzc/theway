@@ -173,7 +173,7 @@ its own process environment to find a running daemon, and the inbox path
 follows the same derivation — both sides must stay identical by
 construction, so the call sites implementing that contract are exempt from
 the CLI-boundary rule. Host surfaces outside the path context (prompt
-templates, `mcp.toml`, `hooks.toml`, `models.json`, LSP config, log /
+templates, `mcp.toml`, `hooks.toml`, LSP config, log /
 bug-report / export destinations, and the `/skills install` / `/skills
 remove` command paths, which construct the tools through their default
 constructors) take their base from the same shared contract derivation.

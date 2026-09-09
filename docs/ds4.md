@@ -6,9 +6,9 @@ gets first-class attention. This document covers the recent round of client-side
 optimizations (PR #209) that make theway's request stream *cache-exact* for DS4's KV
 prefix cache — and what that buys you in practice.
 
-Setup (model descriptor, `--base-url`, `/login ds4`) is covered in the
-[README](../README.md#local-openai-compatible-models); this page is about what happens
-after you're connected.
+Setup (the `[model]` / `[[model.custom]]` descriptor in `config.toml`, `--base-url`,
+`/login ds4`) is covered in [crates/theway-tui/docs/theway-config.md](../crates/theway-tui/docs/theway-config.md);
+this page is about what happens after you're connected.
 
 ## Why this matters: byte-exact prefix caching
 
@@ -104,5 +104,5 @@ gated so other backends are unaffected:
   history (theway's only mode).
 
 If you run a different local server that does byte-exact prefix caching and consumes
-reasoning input items, setting the same compat flag in your `models.json` entry gets
-you the same behavior — nothing here is hard-coded to ds4.
+reasoning input items, setting the same compat flag in your `[[model.custom]]` entry in
+`config.toml` gets you the same behavior — nothing here is hard-coded to ds4.

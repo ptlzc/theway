@@ -70,7 +70,7 @@ theway --thinking high
 theway --provider anthropic --model claude-haiku-4-5
 ```
 
-On first use, `/model` opens the model picker. `/model <provider:model-id>` switches directly and saves the selection as the next startup default. Set an API key with `export <PROVIDER>_API_KEY=...` or `/login <provider> <key>`.
+On first use, `/model` opens the model picker. `/model <provider:model-id>` switches directly and saves the selection as the next startup default. Set an API key with `export <PROVIDER>_API_KEY=...`, `/login <provider> <key>`, or `[model] api_key` in `config.toml` (environment variables win). For a local OpenAI-compatible server, set `[model] base_url` plus `auto_fetch_models = true` and the daemon imports the server's catalog — see [crates/theway-tui/docs/theway-config.md](crates/theway-tui/docs/theway-config.md).
 
 Inside the REPL, `/help` lists every slash command. The most-used ones are `/model`, `/thinking`, `/sessions`, `/compact`, `/triggers`, `/cron`, and `/quit`. See [docs/startup-modes.md](docs/startup-modes.md) for daemon lifecycle and spawn modes.
 
