@@ -340,6 +340,58 @@ async fn set_model_routes_to_parked_session() {
     assert_eq!(current_model_label(host.session.kernel.harness()), "faux:faux");
 }
 
+/// A fresh session with no live runtime receives its configured model as a
+/// persisted `model_change` entry; the bailing fixture factory proves no
+/// runtime build happens on the SetModel RPC path.
+#[tokio::test]
+async fn set_model_persists_to_unbuilt_session_without_building_runtime() {
+    let mut fixture = HostFixture::new();
+    let host = fixture.host();
+    let cwd = host.session.cwd.clone();
+    std::fs::create_dir_all(&cwd).unwrap();
+    let store = host
+        .session
+        .repository
+        .create_with_id(&cwd, Some("fresh-model"))
+        .await
+        .unwrap();
+
+    let model = theway_llm_provider::list_models()
+        .into_iter()
+        .find(|m| SUPPORTED_APIS.contains(&m.api.0.as_str()))
+        .expect("a supported model should exist in the catalog");
+    let spec = format!("{}:{}", model.provider.0, model.id);
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::SetModel {
+            session_id: "fresh-model".into(),
+            spec,
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    assert!(rx.await.unwrap());
+    assert!(
+        !host.sessions.contains("fresh-model"),
+        "the setting must be persisted, not eagerly applied to a built runtime"
+    );
+
+    let session = theway_core::Session::from_store(store);
+    let entries = session.entries().await.unwrap();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            theway_core::SessionTreeEntry::ModelChange {
+                provider,
+                model_id,
+                ..
+            } if provider == &model.provider.0 && model_id == &model.id
+        )),
+        "the transcript must carry the model change: {entries:#?}"
+    );
+}
+
 #[tokio::test]
 async fn set_thinking_routes_to_parked_session() {
     let mut fixture = HostFixture::new();
@@ -371,6 +423,69 @@ async fn set_thinking_routes_to_parked_session() {
     assert_eq!(
         host.session.kernel.harness().agent().state().thinking_level,
         Some(theway_core::ThinkingLevel::Off)
+    );
+}
+
+/// A session that has no live runtime yet (fresh TUI-created session receiving
+/// its configured default) must get the change persisted into its transcript
+/// instead of paying for a full runtime build on the serialized command loop.
+/// The factory in this fixture bails, so any runtime build would fail.
+#[tokio::test]
+async fn set_thinking_persists_to_unbuilt_session_without_building_runtime() {
+    let mut fixture = HostFixture::new();
+    let host = fixture.host();
+    let cwd = host.session.cwd.clone();
+    std::fs::create_dir_all(&cwd).unwrap();
+    let store = host
+        .session
+        .repository
+        .create_with_id(&cwd, Some("fresh"))
+        .await
+        .unwrap();
+
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::SetThinking {
+            session_id: "fresh".into(),
+            level: "high".into(),
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    assert!(rx.await.unwrap());
+    assert!(
+        !host.sessions.contains("fresh"),
+        "the setting must be persisted, not eagerly applied to a built runtime"
+    );
+
+    let session = theway_core::Session::from_store(store);
+    let entries = session.entries().await.unwrap();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            theway_core::SessionTreeEntry::ThinkingLevelChange {
+                thinking_level, ..
+            } if thinking_level == "high"
+        )),
+        "the transcript must carry the thinking-level change: {entries:#?}"
+    );
+
+    // Invalid levels are rejected before any persistence attempt.
+    let (tx, rx) = oneshot::channel();
+    host.handle_web_command(
+        WireCommand::SetThinking {
+            session_id: "fresh".into(),
+            level: "bogus".into(),
+            response: tx,
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+    assert!(!rx.await.unwrap());
+    assert!(
+        !host.sessions.contains("fresh"),
+        "an invalid level must not trigger a runtime build"
     );
 }
 

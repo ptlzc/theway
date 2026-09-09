@@ -37,8 +37,13 @@ impl TurnHost {
         if session_id == self.session.id {
             return self.set_model_from_spec(spec).await;
         }
-        if self.ensure_session_runtime(session_id).await.is_err() {
-            return false;
+        if !self.sessions.contains(session_id) {
+            // Same lazy-build rule as `set_thinking_for_session`: a fresh
+            // TUI-created session receiving its configured default must not
+            // pay for a full runtime build on the serialized command loop.
+            // Persist the model change in the transcript; the build on first
+            // submit rehydrates it and refreshes the DAG launcher.
+            return self.persist_model_for_session(session_id, spec).await;
         }
         let Some(incoming) = self.sessions.remove(session_id) else {
             return false;
@@ -50,12 +55,60 @@ impl TurnHost {
         ok
     }
 
+    /// Persist a model change directly into a session that has no live
+    /// runtime. The next build rehydrates the transcript, exactly like a
+    /// resumed session, and `assemble_opened` refreshes the DAG launcher with
+    /// the rehydrated model.
+    async fn persist_model_for_session(&mut self, session_id: &str, spec: &str) -> bool {
+        let model = match self.resolve_model_from_spec(spec) {
+            Ok(model) => model,
+            Err(message) => {
+                self.error_line(message);
+                return false;
+            }
+        };
+        let store = match self.session.repository.open(session_id).await {
+            Ok(Some(store)) => store,
+            Ok(None) => {
+                self.error_line(format!("set model: no session matches id {session_id}"));
+                return false;
+            }
+            Err(error) => {
+                self.error_line(format!("set model for session {session_id}: {error:#}"));
+                return false;
+            }
+        };
+        let provider = model.provider.0.clone();
+        let model_id = model.id.clone();
+        let session = theway_core::Session::from_store(store);
+        match session.append_model_change(&provider, &model_id).await {
+            Ok(_) => {
+                self.system_line(format!(
+                    "selected {provider}:{model_id} for session {session_id}"
+                ));
+                true
+            }
+            Err(error) => {
+                self.error_line(format!("set model for session {session_id}: {error}"));
+                false
+            }
+        }
+    }
+
     async fn set_thinking_for_session(&mut self, session_id: &str, level: &str) -> bool {
         if session_id == self.session.id {
             return self.set_thinking_level(level).await;
         }
-        if self.ensure_session_runtime(session_id).await.is_err() {
-            return false;
+        if !self.sessions.contains(session_id) {
+            // The session has no live runtime yet (e.g. a TUI-created fresh
+            // session receiving its configured default). Building the full
+            // runtime here just to flip one flag can take longer than the
+            // client's 15s RPC bound and wedges the serialized command loop.
+            // Persist the change in the session transcript instead; the lazy
+            // build on first submit rehydrates it into agent state.
+            return self
+                .persist_thinking_level_for_session(session_id, level)
+                .await;
         }
         let Some(incoming) = self.sessions.remove(session_id) else {
             return false;
@@ -65,6 +118,55 @@ impl TurnHost {
         let restored = std::mem::replace(&mut self.session, old);
         self.sessions.insert(restored);
         ok
+    }
+
+    /// Persist a thinking-level change directly into a session that has no
+    /// live runtime. The next `SessionRuntimeBuilder` build rehydrates the
+    /// transcript and applies the level, exactly like a resumed session.
+    async fn persist_thinking_level_for_session(&mut self, session_id: &str, level: &str) -> bool {
+        let parsed = match parse_thinking_level(level) {
+            Ok(level) => level,
+            Err(message) => {
+                self.error_line(message);
+                return false;
+            }
+        };
+        let store = match self.session.repository.open(session_id).await {
+            Ok(Some(store)) => store,
+            Ok(None) => {
+                self.error_line(format!(
+                    "set thinking level: no session matches id {session_id}"
+                ));
+                return false;
+            }
+            Err(error) => {
+                self.error_line(format!(
+                    "set thinking level for session {session_id}: {error:#}"
+                ));
+                return false;
+            }
+        };
+        let session = theway_core::Session::from_store(store);
+        match session.append_thinking_level_change(parsed.as_str()).await {
+            Ok(_) => {
+                self.system_line(format!(
+                    "thinking level (session {session_id}): {}",
+                    parsed.as_str()
+                ));
+                // Keep the shared GetConfig view in sync with the runtime, as
+                // the parked-runtime path does through `set_thinking_level`.
+                let mut view = self.runtime.config.write().unwrap();
+                view.thinking_level = Some(parsed.as_str().to_string());
+                drop(view);
+                true
+            }
+            Err(error) => {
+                self.error_line(format!(
+                    "set thinking level for session {session_id}: {error}"
+                ));
+                false
+            }
+        }
     }
 
     fn cancel_session(&mut self, session_id: &str) {
@@ -110,10 +212,23 @@ impl TurnHost {
     }
 
     async fn set_model_from_spec(&mut self, spec: &str) -> bool {
+        match self.resolve_model_from_spec(spec) {
+            Ok(model) => self.apply_model(model).await,
+            Err(message) => {
+                self.error_line(message);
+                false
+            }
+        }
+    }
+
+    /// Resolve a model spec against the registered catalog without applying
+    /// it. Accepts `provider:model` / `provider/model` pairs and unambiguous
+    /// bare model ids (the daemon's base URL disambiguates when set).
+    fn resolve_model_from_spec(&self, spec: &str) -> Result<theway_llm_provider::Model, String> {
         if let Some((provider, id)) = commands::parse_model_spec(spec) {
             let provider_obj = theway_llm_provider::Provider::from(provider);
             if let Some(model) = theway_llm_provider::get_model(&provider_obj, id) {
-                return self.apply_model(model).await;
+                return Ok(model);
             }
             // A slash-separated string may be either `provider/model` or a bare
             // model id that itself contains `/` (e.g. Cloudflare model ids).
@@ -124,8 +239,7 @@ impl TurnHost {
                     .iter()
                     .any(|model| model.provider.0 == provider);
             if looks_like_provider_spec {
-                self.error_line(format!("unknown model: {provider}:{id}"));
-                return false;
+                return Err(format!("unknown model: {provider}:{id}"));
             }
         }
 
@@ -160,18 +274,15 @@ impl TurnHost {
             }
         };
         if candidates.len() == 1 {
-            return self
-                .apply_model(candidates.into_iter().next().unwrap())
-                .await;
+            return Ok(candidates.into_iter().next().unwrap());
         }
         if candidates.len() > 1 {
-            self.error_line(format!(
+            Err(format!(
                 "ambiguous model id: {id}; use provider:model to disambiguate"
-            ));
+            ))
         } else {
-            self.error_line(format!("invalid model spec: {spec}"));
+            Err(format!("invalid model spec: {spec}"))
         }
-        false
     }
 
     async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {
@@ -208,13 +319,10 @@ impl TurnHost {
     /// `/thinking` slash command). Returns `true` when the level parsed and
     /// the harness accepted it.
     async fn set_thinking_level(&mut self, level: &str) -> bool {
-        let parsed: theway_core::ThinkingLevel = match level.trim().parse() {
+        let parsed = match parse_thinking_level(level) {
             Ok(level) => level,
-            Err(_) => {
-                self.error_line(format!(
-                    "invalid thinking level: {level} (expected one of {})",
-                    theway_transport::commands::THINKING_LEVEL_VALUES.join(", ")
-                ));
+            Err(message) => {
+                self.error_line(message);
                 return false;
             }
         };
@@ -488,6 +596,18 @@ impl TurnHost {
                 .push_plain_untimed(line, Level::System);
         }
         prompt.resolve(decision);
+    }
+}
+
+/// Parse and validate a wire thinking level, returning the shared error line
+/// text on failure.
+fn parse_thinking_level(level: &str) -> Result<theway_core::ThinkingLevel, String> {
+    match level.trim().parse() {
+        Ok(level) => Ok(level),
+        Err(_) => Err(format!(
+            "invalid thinking level: {level} (expected one of {})",
+            theway_transport::commands::THINKING_LEVEL_VALUES.join(", ")
+        )),
     }
 }
 

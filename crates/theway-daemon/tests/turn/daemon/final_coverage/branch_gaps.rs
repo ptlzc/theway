@@ -541,7 +541,8 @@ async fn ensure_session_runtime_and_set_thinking_error_paths() {
     let err = host.ensure_session_runtime("missing").await.unwrap_err();
     assert!(err.contains("build runtime for session missing"));
 
-    // set_thinking_for_session with a bailing factory -> false.
+    // set_thinking_for_session with no persisted session -> false (no
+    // runtime build is attempted for an unbuilt session).
     assert!(!host.set_thinking_for_session("missing", "high").await);
 }
 
