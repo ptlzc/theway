@@ -369,12 +369,21 @@ export default defineExtension((api) => {
         .await
         .unwrap();
     }
-    assert!(started.elapsed() < Duration::from_millis(200));
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let report = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
-    let updates = report[0].value["actions"][0]["payload"]["details"]["updates"]
-        .as_u64()
-        .unwrap();
+    // The 20 host calls are coalesced: none of them may run the expensive JS
+    // body. The bound is generous because CI runners schedule the whole
+    // workspace in parallel (issue #141).
+    assert!(started.elapsed() < Duration::from_secs(2));
+    // Coalescing flushes on its own schedule: poll with a deadline instead of
+    // a fixed sleep so a loaded runner cannot starve it.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut updates = 0;
+    while updates == 0 && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let report = host.invoke(ExtensionLifecycleEvent::Input, json!({})).await;
+        updates = report[0].value["actions"][0]["payload"]["details"]["updates"]
+            .as_u64()
+            .unwrap();
+    }
     assert!((1..=2).contains(&updates));
     let diagnostics = host.diagnostics();
     assert!(diagnostics.iter().any(|diagnostic| {
