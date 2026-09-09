@@ -144,6 +144,19 @@ pub struct WireDaemonConfig {
     /// rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tgrep: Option<bool>,
+    /// API key for the configured provider (issue #136). Environment variables
+    /// still win at request time; this fills the gap between the environment
+    /// and the interactive credential store. An empty string clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Fetch `GET {base_url}/models` at daemon startup (issue #136) and fill an
+    /// unset model id from the first entry. Startup-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_fetch_models: Option<bool>,
+    /// Custom model descriptors from `[[model.custom]]` (issue #136),
+    /// registered before model resolution. Replaces `models.json`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<theway_llm_provider::Model>,
     /// Enabled builtin skill names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_skills: Vec<String>,
@@ -273,7 +286,7 @@ pub struct WireProvisionedMcpReconnect {
 }
 
 impl WireDaemonConfig {
-    pub const FIELDS: [&'static str; 16] = [
+    pub const FIELDS: [&'static str; 19] = [
         "provider",
         "model",
         "base_url",
@@ -290,6 +303,9 @@ impl WireDaemonConfig {
         "storage_service_addr",
         "executor_kind",
         "tgrep",
+        "api_key",
+        "auto_fetch_models",
+        "models",
     ];
 
     pub fn clears(&self, field: &str) -> bool {
@@ -318,6 +334,9 @@ impl WireDaemonConfig {
                 "thinking_level" => self.thinking_level.take().is_some(),
                 "executor_kind" => self.executor_kind.take().is_some(),
                 "tgrep" => self.tgrep.take().is_some(),
+                "api_key" => self.api_key.take().is_some(),
+                "auto_fetch_models" => self.auto_fetch_models.take().is_some(),
+                "models" => !std::mem::take(&mut self.models).is_empty(),
                 "builtin_skills" => !std::mem::take(&mut self.builtin_skills).is_empty(),
                 "skills" => !std::mem::take(&mut self.skills).is_empty(),
                 "templates" => !std::mem::take(&mut self.templates).is_empty(),
@@ -357,6 +376,18 @@ impl WireDaemonConfig {
         }
         if let Some(tgrep) = patch.tgrep {
             self.tgrep = Some(tgrep);
+            touched += 1;
+        }
+        if let Some(api_key) = patch.api_key.clone() {
+            self.api_key = Some(api_key);
+            touched += 1;
+        }
+        if let Some(auto_fetch_models) = patch.auto_fetch_models {
+            self.auto_fetch_models = Some(auto_fetch_models);
+            touched += 1;
+        }
+        if !patch.models.is_empty() {
+            self.models = patch.models.clone();
             touched += 1;
         }
         if !patch.builtin_skills.is_empty() {

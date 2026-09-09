@@ -357,7 +357,7 @@ pub fn model_help_summary_lines() -> Vec<String> {
         "  OpenAI-compatible APIs: openai-completions and openai-responses; Anthropic API: anthropic-messages."
             .into(),
         "  Full list: /help models or /model list [provider]".into(),
-        "  Custom models: ~/.theway/models.json and <cwd>/.theway/models.json".into(),
+        "  Custom models: `[[model.custom]]` in config.toml; `[model] auto_fetch_models = true` imports the provider catalog".into(),
         "  Credentials: set provider env vars or run /login <provider>.".into(),
     ]
 }

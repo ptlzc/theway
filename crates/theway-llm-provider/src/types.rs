@@ -547,7 +547,7 @@ pub enum InputModality {
     Image,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModelCost {
     /// USD per million tokens.
     pub input: f64,
@@ -561,7 +561,7 @@ pub struct ModelCost {
 /// Static model descriptor. `Compat` is the union of OpenAI-completions/OpenAI-responses/
 /// Anthropic-messages compat overrides on the TS side; we keep it as a free-form JSON value so
 /// callers can plug provider-specific shapes without churning this struct.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
     pub id: String,
     pub name: String,

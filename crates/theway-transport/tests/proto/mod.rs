@@ -482,6 +482,23 @@ fn daemon_config_round_trips_wire_and_proto() {
         storage_service_addr: None,
         executor_kind: Some("sandbox".into()),
         tgrep: Some(false),
+        api_key: Some("sk-config".into()),
+        auto_fetch_models: Some(true),
+        models: vec![theway_llm_provider::Model {
+            id: "qwen3-local".into(),
+            name: "Qwen3 local".into(),
+            api: theway_llm_provider::Api::from("openai-completions"),
+            provider: theway_llm_provider::Provider::from("ds4"),
+            base_url: "http://127.0.0.1:8000/v1".into(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![theway_llm_provider::InputModality::Text],
+            cost: theway_llm_provider::ModelCost::default(),
+            context_window: 128_000,
+            max_tokens: 8_192,
+            headers: None,
+            compat: Some(serde_json::json!({"supportsStore": false})),
+        }],
         clear_fields: vec!["tool_service_addr".into()],
     };
     let proto = daemon_config_to_proto(&config);
@@ -496,6 +513,10 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert_eq!(proto.thinking_level.as_deref(), Some("high"));
     assert_eq!(proto.executor_kind.as_deref(), Some("sandbox"));
     assert_eq!(proto.tgrep, Some(false));
+    assert_eq!(proto.api_key.as_deref(), Some("sk-config"));
+    assert_eq!(proto.auto_fetch_models, Some(true));
+    assert_eq!(proto.models.len(), 1);
+    assert!(proto.models[0].contains("\"qwen3-local\""), "{}", proto.models[0]);
     assert_eq!(proto.clear_fields, vec!["tool_service_addr"]);
 
     assert_eq!(proto.skills.len(), 1);
@@ -550,6 +571,9 @@ fn daemon_config_round_trips_wire_and_proto() {
     assert!(proto_empty.thinking_level.is_none());
     assert!(proto_empty.executor_kind.is_none());
     assert!(proto_empty.tgrep.is_none());
+    assert!(proto_empty.api_key.is_none());
+    assert!(proto_empty.auto_fetch_models.is_none());
+    assert!(proto_empty.models.is_empty());
     assert!(proto_empty.builtin_skills.is_empty());
     assert!(proto_empty.skills.is_empty());
     assert!(proto_empty.templates.is_empty());

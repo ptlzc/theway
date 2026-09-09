@@ -65,6 +65,17 @@ message DaemonConfig {
   // enabled. Startup-only; the daemon rejects runtime changes.
   optional bool tgrep = 17;
 
+  // ── model endpoint, credential, and custom models (issue #136) ──
+  // API key for the configured provider. Environment variables still win at
+  // request time; an empty string clears it.
+  optional string api_key = 18;
+  // Fetch `GET {base_url}/models` at daemon startup and fill an unset model id
+  // from the first entry. Startup-only; the daemon rejects runtime changes.
+  optional bool auto_fetch_models = 19;
+  // Custom model descriptors from `[[model.custom]]`, each a JSON-serialized
+  // `theway_llm_provider::Model`. Registered before model resolution.
+  repeated string models = 20;
+
   // ── thinking level (persisted last-choice default) ──
   // Full thinking level string ("off" | "minimal" | "low" | "medium" |
   // "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle

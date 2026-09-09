@@ -182,6 +182,13 @@ pub fn daemon_config_to_proto(config: &crate::wire::WireDaemonConfig) -> wire::D
         storage_service_addr: config.storage_service_addr.clone(),
         executor_kind: config.executor_kind.clone(),
         tgrep: config.tgrep,
+        api_key: config.api_key.clone(),
+        auto_fetch_models: config.auto_fetch_models,
+        models: config
+            .models
+            .iter()
+            .filter_map(|model| serde_json::to_string(model).ok())
+            .collect(),
         clear_fields: config.clear_fields.clone(),
     }
 }
@@ -226,6 +233,13 @@ pub fn daemon_config_from_proto(config: &wire::DaemonConfig) -> crate::wire::Wir
         storage_service_addr: config.storage_service_addr.clone(),
         executor_kind: config.executor_kind.clone(),
         tgrep: config.tgrep,
+        api_key: config.api_key.clone(),
+        auto_fetch_models: config.auto_fetch_models,
+        models: config
+            .models
+            .iter()
+            .filter_map(|model| serde_json::from_str(model).ok())
+            .collect(),
         clear_fields: config.clear_fields.clone(),
     }
 }

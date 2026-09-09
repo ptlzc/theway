@@ -8,6 +8,8 @@
 //! parsing helpers, which are transport-client surface.
 
 use serde::Deserialize;
+use std::collections::HashMap;
+use theway_llm_provider::{Api, InputModality, Model, ModelCost, Provider, ThinkingLevelMap};
 
 pub use theway_contract::config::{base_dir, cwd_hash, memory_dir, sessions_dir_for_cwd};
 
@@ -99,6 +101,92 @@ pub fn parse_model_thinking_default(toml_text: &str) -> Result<Option<String>, S
         ));
     }
     Ok(Some(normalized))
+}
+
+/// Effective `[model]` configuration from `config.toml` (issue #136): the
+/// startup default pair, the endpoint and credential used to reach it, the
+/// auto-fetch switch for OpenAI-compatible servers, and the custom model
+/// descriptors that replaced `models.json`.
+#[derive(Debug, Clone, Default)]
+pub struct ModelConfig {
+    /// Default provider, applied when the CLI specifies neither side of the pair.
+    pub provider: Option<String>,
+    /// Default model id. Absent when `auto_fetch_models` fills it from the server.
+    pub model: Option<String>,
+    /// Persisted thinking level (the user's last pick).
+    pub thinking: Option<String>,
+    /// Provider endpoint override (local OpenAI-compatible servers).
+    pub base_url: Option<String>,
+    /// API key for `provider`. Environment variables still win at request time.
+    pub api_key: Option<String>,
+    /// When true, the daemon fetches `GET {base_url}/models` at startup and
+    /// fills an unset `model` from the first entry.
+    pub auto_fetch_models: bool,
+    /// `[[model.custom]]` descriptors, registered before model resolution.
+    pub custom: Vec<Model>,
+}
+
+/// Parse the whole `[model]` section from `config.toml` (issue #136).
+///
+/// Rules:
+/// - `provider` + `model` normally come together. With `auto_fetch_models =
+///   true` a lone `provider` is accepted; the daemon fills the id from `GET
+///   {base_url}/models` at startup.
+/// - `thinking` must be one of the accepted levels.
+/// - `base_url` / `api_key` are trimmed; an empty value counts as absent.
+/// - `[[model.custom]]` entries default `name` to `id`, `api` to
+///   `openai-completions`, `provider` / `base_url` to the `[model]` values,
+///   `context_window` / `max_tokens` to 128000 / 8192, and `input` to text.
+pub fn parse_model_config(toml_text: &str) -> Result<ModelConfig, String> {
+    let parsed: ConfigFile =
+        toml::from_str(toml_text).map_err(|e| format!("parse config.toml: {e}"))?;
+    let Some(section) = parsed.model else {
+        return Ok(ModelConfig::default());
+    };
+    let provider = clean(section.provider);
+    let model = clean(section.model);
+    let auto_fetch_models = section.auto_fetch_models.unwrap_or(false);
+    let half_pair_ok = auto_fetch_models && provider.is_some() && model.is_none();
+    if provider.is_none() != model.is_none() && !half_pair_ok {
+        return Err(
+            "`[model]` requires both `provider` and `model` (or `auto_fetch_models = true` with `provider`)"
+                .into(),
+        );
+    }
+    let thinking = match section.thinking {
+        Some(raw) => {
+            let normalized = raw.trim().to_lowercase();
+            if !crate::commands::THINKING_LEVEL_VALUES.contains(&normalized.as_str()) {
+                return Err(format!(
+                    "invalid `[model] thinking` value {raw:?}: expected one of {}",
+                    crate::commands::THINKING_LEVEL_VALUES.join(", ")
+                ));
+            }
+            Some(normalized)
+        }
+        None => None,
+    };
+    let base_url = clean(section.base_url);
+    let api_key = clean(section.api_key);
+    let mut custom = Vec::with_capacity(section.custom.len());
+    for (index, entry) in section.custom.into_iter().enumerate() {
+        custom.push(entry.into_model(provider.as_deref(), base_url.as_deref(), index)?);
+    }
+    Ok(ModelConfig {
+        provider,
+        model,
+        thinking,
+        base_url,
+        api_key,
+        auto_fetch_models,
+        custom,
+    })
+}
+
+fn clean(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Default public relay endpoint for `/web-connect` (issue #22). Override with
@@ -225,6 +313,88 @@ struct ModelConfigSection {
     provider: Option<String>,
     model: Option<String>,
     thinking: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+    auto_fetch_models: Option<bool>,
+    #[serde(default)]
+    custom: Vec<CustomModelSection>,
+}
+
+/// One `[[model.custom]]` entry (issue #136). Every field except `id` is
+/// optional; omitted values inherit `[model]` or documented defaults.
+#[derive(Debug, Deserialize)]
+struct CustomModelSection {
+    id: String,
+    name: Option<String>,
+    api: Option<String>,
+    provider: Option<String>,
+    base_url: Option<String>,
+    reasoning: Option<bool>,
+    thinking_level_map: Option<ThinkingLevelMap>,
+    input: Option<Vec<InputModality>>,
+    cost: Option<CustomModelCost>,
+    context_window: Option<u32>,
+    max_tokens: Option<u32>,
+    headers: Option<HashMap<String, String>>,
+    compat: Option<serde_json::Value>,
+}
+
+/// `[[model.custom]] cost` table with TOML-style snake_case keys (the wire
+/// `ModelCost` shape uses `cacheRead`/`cacheWrite`).
+#[derive(Debug, Default, Deserialize)]
+struct CustomModelCost {
+    #[serde(default)]
+    input: f64,
+    #[serde(default)]
+    output: f64,
+    #[serde(default, alias = "cacheRead")]
+    cache_read: f64,
+    #[serde(default, alias = "cacheWrite")]
+    cache_write: f64,
+}
+
+impl CustomModelSection {
+    fn into_model(
+        self,
+        default_provider: Option<&str>,
+        default_base_url: Option<&str>,
+        index: usize,
+    ) -> Result<Model, String> {
+        let id = self.id.trim().to_string();
+        if id.is_empty() {
+            return Err(format!(
+                "`[[model.custom]]` entry #{index} has an empty `id`"
+            ));
+        }
+        let provider = clean(self.provider)
+            .or_else(|| default_provider.map(ToOwned::to_owned))
+            .ok_or_else(|| {
+                format!("`[[model.custom]]` entry {id:?} needs `provider` or a `[model] provider`")
+            })?;
+        let base_url = clean(self.base_url)
+            .or_else(|| default_base_url.map(ToOwned::to_owned))
+            .unwrap_or_default();
+        Ok(Model {
+            name: clean(self.name).unwrap_or_else(|| id.clone()),
+            id,
+            api: Api::from(clean(self.api).as_deref().unwrap_or("openai-completions")),
+            provider: Provider::from(provider.as_str()),
+            base_url,
+            reasoning: self.reasoning.unwrap_or(false),
+            thinking_level_map: self.thinking_level_map,
+            input: self.input.unwrap_or_else(|| vec![InputModality::Text]),
+            cost: self.cost.map_or_else(ModelCost::default, |cost| ModelCost {
+                input: cost.input,
+                output: cost.output,
+                cache_read: cost.cache_read,
+                cache_write: cost.cache_write,
+            }),
+            context_window: self.context_window.unwrap_or(128_000),
+            max_tokens: self.max_tokens.unwrap_or(8_192),
+            headers: self.headers,
+            compat: self.compat,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,6 +445,111 @@ poll_interval_secs = 15
 poll_interval_secs = 0
 "#;
         assert!(parse_trigger_poll_interval_secs(text).is_err());
+    }
+
+    #[test]
+    fn parse_model_config_reads_endpoint_credential_and_auto_fetch() {
+        let text = r#"
+[model]
+provider = "ds4"
+base_url = "http://127.0.0.1:8000/v1"
+api_key = "  sk-local  "
+auto_fetch_models = true
+thinking = "High"
+"#;
+        let config = parse_model_config(text).unwrap();
+        assert_eq!(config.provider.as_deref(), Some("ds4"));
+        assert_eq!(config.model, None);
+        assert_eq!(config.base_url.as_deref(), Some("http://127.0.0.1:8000/v1"));
+        assert_eq!(config.api_key.as_deref(), Some("sk-local"));
+        assert!(config.auto_fetch_models);
+        assert_eq!(config.thinking.as_deref(), Some("high"));
+        assert!(config.custom.is_empty());
+    }
+
+    #[test]
+    fn parse_model_config_rejects_lone_model_without_auto_fetch() {
+        let err = parse_model_config("[model]\nmodel = \"deepseek-v4-flash\"\n").unwrap_err();
+        assert!(err.contains("both `provider` and `model`"), "{err}");
+    }
+
+    #[test]
+    fn parse_model_config_builds_custom_models_with_defaults() {
+        let text = r#"
+[model]
+provider = "ds4"
+base_url = "http://127.0.0.1:8000/v1"
+model = "deepseek-v4-flash"
+
+[[model.custom]]
+id = "qwen3-local"
+
+[[model.custom]]
+id = "deepseek-v4-flash"
+name = "DeepSeek V4 Flash (local)"
+api = "openai-responses"
+reasoning = true
+context_window = 100000
+max_tokens = 384000
+thinking_level_map = { off = "low", high = "high" }
+input = ["text", "image"]
+headers = { "X-Tenant" = "dev" }
+cost = { input = 1.5, output = 2.5, cache_read = 0.1 }
+
+[model.custom.compat]
+supportsStore = false
+supportsReasoningEffort = true
+"#;
+        let config = parse_model_config(text).unwrap();
+        assert_eq!(config.custom.len(), 2);
+        let first = &config.custom[0];
+        assert_eq!(first.id, "qwen3-local");
+        assert_eq!(first.name, "qwen3-local", "name defaults to the id");
+        assert_eq!(first.api.0, "openai-completions");
+        assert_eq!(first.provider.0, "ds4");
+        assert_eq!(first.base_url, "http://127.0.0.1:8000/v1");
+        assert!(!first.reasoning);
+        assert_eq!(first.context_window, 128_000);
+        assert_eq!(first.max_tokens, 8_192);
+        assert_eq!(first.input, vec![InputModality::Text]);
+
+        let second = &config.custom[1];
+        assert_eq!(second.api.0, "openai-responses");
+        assert!(second.reasoning);
+        assert_eq!(second.context_window, 100_000);
+        assert_eq!(second.max_tokens, 384_000);
+        assert_eq!(
+            second.input,
+            vec![InputModality::Text, InputModality::Image]
+        );
+        assert_eq!(
+            second
+                .headers
+                .as_ref()
+                .and_then(|h| h.get("X-Tenant"))
+                .map(String::as_str),
+            Some("dev")
+        );
+        assert_eq!(second.cost.input, 1.5);
+        assert_eq!(second.cost.cache_read, 0.1);
+        assert_eq!(
+            second
+                .thinking_level_map
+                .as_ref()
+                .and_then(|m| m.get(&theway_llm_provider::ModelThinkingLevel::High))
+                .and_then(|v| v.as_deref()),
+            Some("high")
+        );
+        assert_eq!(
+            second.compat.as_ref().and_then(|c| c.get("supportsStore")),
+            Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn parse_model_config_custom_model_needs_provider() {
+        let err = parse_model_config("[[model.custom]]\nid = \"x\"\n").unwrap_err();
+        assert!(err.contains("needs `provider`"), "{err}");
     }
 
     #[test]

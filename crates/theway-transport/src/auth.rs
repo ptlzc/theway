@@ -141,12 +141,27 @@ impl AuthStore {
     /// Resolve a credential for `provider`. Env var wins; auth.json is the fallback. Returns
     /// the bare API-key string for `api_key` and the access token for `oauth`.
     pub fn resolve_for_provider(&self, provider: &str) -> Option<String> {
+        self.resolve_for_provider_with(provider, None)
+    }
+
+    /// Resolve a credential with a controller-provided key (issue #136,
+    /// `config.toml [model] api_key`) between the environment and the
+    /// credential store. Precedence: env var > configured key > auth.json.
+    /// An empty/whitespace configured value counts as absent.
+    pub fn resolve_for_provider_with(
+        &self,
+        provider: &str,
+        configured: Option<&str>,
+    ) -> Option<String> {
         for env_var in theway_llm_provider::env_api_keys::env_var_names(provider) {
             if let Ok(v) = std::env::var(env_var) {
                 if !v.trim().is_empty() {
                     return Some(v);
                 }
             }
+        }
+        if let Some(key) = configured.map(str::trim).filter(|key| !key.is_empty()) {
+            return Some(key.to_string());
         }
         match self.providers.get(provider)? {
             ProviderCredential::ApiKey { value } => Some(value.clone()),
@@ -347,6 +362,41 @@ mod tests {
         drop(_deepseek);
         let _deepseek_removed = EnvGuard::remove("DEEPSEEK_API_KEY");
         assert_eq!(store.resolve_for_provider("deepseek"), None);
+    }
+
+    #[test]
+    fn configured_key_sits_between_env_and_auth_store() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _removed = EnvGuard::remove("DEEPSEEK_API_KEY");
+        let mut store = AuthStore::default();
+        store.set(
+            "deepseek",
+            ProviderCredential::ApiKey {
+                value: "sk-login".into(),
+            },
+        );
+        // No env var: the configured key wins over auth.json.
+        assert_eq!(
+            store
+                .resolve_for_provider_with("deepseek", Some("  sk-config  "))
+                .as_deref(),
+            Some("sk-config")
+        );
+        // A blank configured value falls through to auth.json.
+        assert_eq!(
+            store
+                .resolve_for_provider_with("deepseek", Some("   "))
+                .as_deref(),
+            Some("sk-login")
+        );
+        // The environment still wins over both.
+        let _env = EnvGuard::set("DEEPSEEK_API_KEY", "sk-env");
+        assert_eq!(
+            store
+                .resolve_for_provider_with("deepseek", Some("sk-config"))
+                .as_deref(),
+            Some("sk-env")
+        );
     }
 
     #[cfg(unix)]

@@ -102,6 +102,26 @@ export interface DaemonConfig {
     | boolean
     | undefined;
   /**
+   * ── model endpoint, credential, and custom models (issue #136) ──
+   * API key for the configured provider. Environment variables still win at
+   * request time; an empty string clears it.
+   */
+  apiKey?:
+    | string
+    | undefined;
+  /**
+   * Fetch `GET {base_url}/models` at daemon startup and fill an unset model id
+   * from the first entry. Startup-only; the daemon rejects runtime changes.
+   */
+  autoFetchModels?:
+    | boolean
+    | undefined;
+  /**
+   * Custom model descriptors from `[[model.custom]]`, each a JSON-serialized
+   * `theway_llm_provider::Model`. Registered before model resolution.
+   */
+  models: string[];
+  /**
    * ── thinking level (persisted last-choice default) ──
    * Full thinking level string ("off" | "minimal" | "low" | "medium" |
    * "high" | "xhigh"). Finer-grained than the `thinking` toggle; the toggle
@@ -255,6 +275,9 @@ function createBaseDaemonConfig(): DaemonConfig {
     storageServiceAddr: undefined,
     executorKind: undefined,
     tgrep: undefined,
+    apiKey: undefined,
+    autoFetchModels: undefined,
+    models: [],
     thinkingLevel: undefined,
     skills: [],
     templates: [],
@@ -300,6 +323,15 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     }
     if (message.tgrep !== undefined) {
       writer.uint32(136).bool(message.tgrep);
+    }
+    if (message.apiKey !== undefined) {
+      writer.uint32(146).string(message.apiKey);
+    }
+    if (message.autoFetchModels !== undefined) {
+      writer.uint32(152).bool(message.autoFetchModels);
+    }
+    for (const v of message.models) {
+      writer.uint32(162).string(v!);
     }
     if (message.thinkingLevel !== undefined) {
       writer.uint32(98).string(message.thinkingLevel);
@@ -422,6 +454,30 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
           message.tgrep = reader.bool();
           continue;
         }
+        case 18: {
+          if (tag !== 146) {
+            break;
+          }
+
+          message.apiKey = reader.string();
+          continue;
+        }
+        case 19: {
+          if (tag !== 152) {
+            break;
+          }
+
+          message.autoFetchModels = reader.bool();
+          continue;
+        }
+        case 20: {
+          if (tag !== 162) {
+            break;
+          }
+
+          message.models.push(reader.string());
+          continue;
+        }
         case 12: {
           if (tag !== 98) {
             break;
@@ -517,6 +573,19 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
         ? globalThis.String(object.executor_kind)
         : undefined,
       tgrep: isSet(object.tgrep) ? globalThis.Boolean(object.tgrep) : undefined,
+      apiKey: isSet(object.apiKey)
+        ? globalThis.String(object.apiKey)
+        : isSet(object.api_key)
+        ? globalThis.String(object.api_key)
+        : undefined,
+      autoFetchModels: isSet(object.autoFetchModels)
+        ? globalThis.Boolean(object.autoFetchModels)
+        : isSet(object.auto_fetch_models)
+        ? globalThis.Boolean(object.auto_fetch_models)
+        : undefined,
+      models: globalThis.Array.isArray(object?.models)
+        ? object.models.map((e: any) => globalThis.String(e))
+        : [],
       thinkingLevel: isSet(object.thinkingLevel)
         ? globalThis.String(object.thinkingLevel)
         : isSet(object.thinking_level)
@@ -579,6 +648,15 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     if (message.tgrep !== undefined) {
       obj.tgrep = message.tgrep;
     }
+    if (message.apiKey !== undefined) {
+      obj.apiKey = message.apiKey;
+    }
+    if (message.autoFetchModels !== undefined) {
+      obj.autoFetchModels = message.autoFetchModels;
+    }
+    if (message.models?.length) {
+      obj.models = message.models;
+    }
     if (message.thinkingLevel !== undefined) {
       obj.thinkingLevel = message.thinkingLevel;
     }
@@ -614,6 +692,9 @@ export const DaemonConfig: MessageFns<DaemonConfig> = {
     message.storageServiceAddr = object.storageServiceAddr ?? undefined;
     message.executorKind = object.executorKind ?? undefined;
     message.tgrep = object.tgrep ?? undefined;
+    message.apiKey = object.apiKey ?? undefined;
+    message.autoFetchModels = object.autoFetchModels ?? undefined;
+    message.models = object.models?.map((e) => e) || [];
     message.thinkingLevel = object.thinkingLevel ?? undefined;
     message.skills = object.skills?.map((e) => ProvisionedSkill.fromPartial(e)) || [];
     message.templates = object.templates?.map((e) => ProvisionedTemplate.fromPartial(e)) || [];
