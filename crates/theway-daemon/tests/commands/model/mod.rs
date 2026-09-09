@@ -57,6 +57,9 @@ fn explicit_model_not_found_message_lists_sorted_candidates_and_more_hint() {
 
 #[test]
 fn explicit_model_not_found_message_handles_unknown_provider_with_ds4_hint() {
+    // The process model catalog is shared: serialize with the DS4
+    // registration tests so no concurrent registration makes ds4 look known.
+    let _lock = crate::test_env::ENV_LOCK.lock().unwrap();
     // Arrange: ensure no custom ds4 models make ds4 look known.
     unregister_all_ds4_custom_models();
 

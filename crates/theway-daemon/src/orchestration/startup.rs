@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use theway_core::executor::ExecutorKind;
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::{PermissionPolicy, ThinkingLevel};
+use theway_transport::config::ModelDefault;
 
 use super::session::SessionProjectResources;
 use super::{
@@ -54,6 +55,12 @@ pub struct DaemonOptions {
     /// Disable the tgrep-accelerated `grep` backend (issue #135). CLI flag
     /// `--no-tgrep`, normally supplied by the TUI from `[tools] tgrep`.
     pub no_tgrep: bool,
+    /// API key for the configured provider (issue #136). Headless equivalent
+    /// of `[model] api_key`; the TUI provisions it through the settings RPC.
+    pub api_key: Option<String>,
+    /// Fetch the provider model catalog at startup (issue #136). Headless
+    /// equivalent of `[model] auto_fetch_models`.
+    pub auto_fetch_models: bool,
 }
 
 const STORAGE_WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -171,6 +178,15 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     if options.no_tgrep {
         startup.tgrep_enabled = false;
     }
+    // Issue #136: headless equivalents of `[model] api_key` /
+    // `[model] auto_fetch_models`; the TUI provisions both through the
+    // settings RPC instead.
+    if let Some(api_key) = options.api_key.as_deref() {
+        startup.api_key = Some(api_key.to_string());
+    }
+    if options.auto_fetch_models {
+        startup.auto_fetch_models = true;
+    }
     startup.storage_service_addr = options.storage_service_addr.clone();
     // Issue #86: when the controller provides StorageService, treat the daemon
     // as controller-provisioned and skip local auxiliary-source discovery
@@ -187,8 +203,18 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
         startup.load_local_sources = false;
     }
 
+    // Issue #136: register controller-provisioned custom models, seed the
+    // credential overlay, and fetch the provider catalog when requested —
+    // before the startup model is resolved.
+    let configured_api_keys = crate::stream_auth::ConfiguredApiKeys::default();
+    provision_model_catalog(
+        &mut startup,
+        options.base_url.as_deref(),
+        &configured_api_keys,
+    )
+    .await;
+
     let model = resolve_startup_model(
-        &cwd,
         options.provider.as_deref(),
         options.model.as_deref(),
         options.base_url.as_deref(),
@@ -224,7 +250,7 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     let (feed_tx, feed_rx) =
         tokio::sync::mpsc::unbounded_channel::<(String, theway_transport::feed::FeedUpdate)>();
 
-    let stream_fn = stream_fn_with_auth_store();
+    let stream_fn = stream_fn_with_auth_store(configured_api_keys.clone());
     let command_output = {
         let tx = feed_tx.clone();
         let session_id = session_id.clone();
@@ -240,7 +266,8 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     };
     let services = DaemonServices::new()
         .with_command_output(command_output)
-        .with_tgrep_enabled(startup.tgrep_enabled);
+        .with_tgrep_enabled(startup.tgrep_enabled)
+        .with_configured_api_keys(configured_api_keys.clone());
     let dynamic_trigger_registry = services.dynamic_triggers.clone();
     if let Err(err) = dynamic_trigger_registry
         .load_from_storage(storage.clone(), cwd.clone(), session_id.clone())
@@ -604,36 +631,90 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     result
 }
 
+/// Register the controller-provisioned model catalog, seed the credential
+/// overlay, and optionally fetch the provider catalog (issue #136).
+///
+/// Runs before [`resolve_startup_model`] so a `[[model.custom]]` entry or an
+/// auto-fetched id resolves. Failures are logged and never abort startup: the
+/// daemon falls back to the configured pair or stays model-less.
+async fn provision_model_catalog(
+    startup: &mut StartupConfig,
+    cli_base_url: Option<&str>,
+    configured_api_keys: &crate::stream_auth::ConfiguredApiKeys,
+) {
+    crate::model_defaults::register_models(&startup.models);
+    match (startup.provider.as_deref(), startup.api_key.as_deref()) {
+        (Some(provider), Some(api_key)) => {
+            configured_api_keys
+                .write()
+                .expect("configured api keys poisoned")
+                .insert(provider.to_string(), api_key.to_string());
+        }
+        (None, Some(_)) => tracing::warn!(
+            target: "model",
+            "`[model] api_key` is set without `[model] provider`; the key is ignored"
+        ),
+        _ => {}
+    }
+    if !startup.auto_fetch_models {
+        return;
+    }
+    let Some(provider) = startup.provider.clone() else {
+        tracing::warn!(target: "model", "auto-fetch models: `[model] provider` is required");
+        return;
+    };
+    let Some(base_url) = cli_base_url
+        .map(str::to_string)
+        .or_else(|| startup.base_url.clone())
+    else {
+        tracing::warn!(
+            target: "model",
+            "auto-fetch models: `[model] base_url` (or --base-url) is required"
+        );
+        return;
+    };
+    let api_key = theway_transport::auth::AuthStore::load()
+        .unwrap_or_default()
+        .resolve_for_provider_with(&provider, startup.api_key.as_deref());
+    match crate::model_fetch::fetch_models(&base_url, api_key.as_deref(), &provider).await {
+        Ok(models) if !models.is_empty() => {
+            let first = models[0].id.clone();
+            crate::model_defaults::register_models(&models);
+            tracing::info!(
+                target: "model",
+                "auto-fetched {} model(s) from {base_url}",
+                models.len()
+            );
+            if startup.model_default.is_none() {
+                startup.model_default = Some(ModelDefault {
+                    provider,
+                    model: first,
+                });
+            }
+        }
+        Ok(_) => {
+            tracing::warn!(target: "model", "auto-fetch models from {base_url}: empty catalog")
+        }
+        Err(err) => tracing::warn!(target: "model", "auto-fetch models from {base_url}: {err}"),
+    }
+}
+
 /// Resolve the startup model, if any. Model is session-level (injected by the
 /// client per-session via `SetModel`), so startup does NOT auto-detect from
 /// environment variables or fail when none is configured. The daemon therefore
 /// starts model-less when neither the CLI flags nor a settings-provided default
 /// is present; the client later injects a model for each session.
 async fn resolve_startup_model(
-    cwd: &std::path::Path,
     cli_provider: Option<&str>,
     cli_model: Option<&str>,
     cli_base_url: Option<&str>,
     startup: &StartupConfig,
 ) -> Result<Option<theway_llm_provider::Model>> {
-    // TODO(#73): custom model definitions are still read from local
-    // `models.json` files; once the settings RPC provisions custom models,
-    // this local read goes away. A controller-provided StorageService owns
-    // persistence only; it must not hide models selected by the controller
-    // from the daemon that resolves them.
-    let local_models = crate::local_models::load_all(cwd, cli_base_url).await?;
-    if !local_models.models.is_empty() {
-        tracing::info!(
-            "loaded {} local model(s): {}",
-            local_models.models.len(),
-            local_models
-                .models
-                .iter()
-                .map(|m| format!("{}:{}", m.provider.0, m.id))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
+    // Issue #136: `models.json` file loading is gone; the built-in DS4 default
+    // is still registered when a base URL is explicit, and controller-
+    // provisioned `[[model.custom]]` entries were registered by
+    // [`provision_model_catalog`] before this call.
+    crate::model_defaults::register_ds4_default(cli_base_url);
 
     // Issue #73: the default provider/model comes from the in-memory
     // StartupConfig (settings RPC), not a `[model]` config.toml read. A lone
@@ -657,7 +738,11 @@ async fn resolve_startup_model(
         return Ok(None);
     };
     let mut model = crate::model::auto_detect_model(Some(provider), Some(id))?;
-    if let Some(base_url) = cli_base_url.map(str::trim).filter(|url| !url.is_empty()) {
+    if let Some(base_url) = cli_base_url
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .or(startup.base_url.as_deref())
+    {
         model.base_url = base_url.to_string();
     }
     Ok(Some(model))

@@ -65,7 +65,7 @@ fn user_message_builds_text_user_message() {
 
 #[test]
 fn stream_fn_with_auth_store_returns_callable_stream_fn() {
-    let stream_fn = stream_fn_with_auth_store();
+    let stream_fn = stream_fn_with_auth_store(crate::stream_auth::ConfiguredApiKeys::default());
     let context = theway_llm_provider::Context::default();
     let options = theway_llm_provider::SimpleStreamOptions::default();
 

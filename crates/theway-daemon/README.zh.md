@@ -18,6 +18,8 @@ Daemon 负责会话运行时组装、面向模型的工具、本地与 sandbox e
 
 基于 trigram 索引的 `grep` 后端可以关闭（issue #135）：`config.toml` 中的 `[tools] tgrep = false` 由 `theway-tui` 以 `--no-tgrep` 传给 daemon，从而绑定 `TgrepServerRegistry::disabled()`。此时每次 `grep` 查询都走进程内 walker，不会创建 `tgrep serve` 进程或 `.tgrep` 索引。该设置仅启动时生效，并出现在 `GetConfig` 视图中。
 
+模型目录由 controller 提供（issue #136）。`theway-tui` 解析 `config.toml` 的 `[model]`（`provider`、`model`、`base_url`、`api_key`、`auto_fetch_models`）与 `[[model.custom]]`，经 settings RPC 下发；daemon 在解析模型前注册这些描述符，并按「provider 环境变量 → `api_key` → `auth.json`」的顺序解析凭证。`auto_fetch_models = true` 时 daemon 从 `GET <base_url>/models` 导入目录，并在未配 model 时取第一个条目。headless 等价参数为 `--api-key` 与 `--auto-fetch-models`；原先的 `models.json` 文件不再读取。
+
 ## 运行与验证
 
 ```bash

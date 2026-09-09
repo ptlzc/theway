@@ -153,8 +153,8 @@ fn model_help_summary_lists_builtin_providers_without_secrets() {
     assert!(text.contains("anthropic-messages"), "{text}");
     assert!(text.contains("anthropic("), "{text}");
     assert!(text.contains("openai("), "{text}");
-    assert!(text.contains("~/.theway/models.json"), "{text}");
-    assert!(text.contains("<cwd>/.theway/models.json"), "{text}");
+    assert!(text.contains("[[model.custom]]"), "{text}");
+    assert!(text.contains("auto_fetch_models"), "{text}");
     assert!(!text.contains("API_KEY"), "{text}");
     assert!(!text.contains("auth.json"), "{text}");
 }

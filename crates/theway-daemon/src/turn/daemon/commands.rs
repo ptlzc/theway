@@ -310,7 +310,7 @@ impl TurnHost {
     /// Apply a configuration patch on the serialized event loop. Only values
     /// whose runtime applier succeeds are committed to the shared GetConfig
     /// view; transport admission never mutates that view optimistically.
-    async fn handle_configure(&mut self, config: WireDaemonConfig, turn: &mut TurnState) {
+    async fn handle_configure(&mut self, mut config: WireDaemonConfig, turn: &mut TurnState) {
         tracing::info!(
             target: "mcp",
             "configure received: mcp_servers={} clear={:?}",
@@ -327,6 +327,119 @@ impl TurnHost {
         }
 
         let mut applied = WireDaemonConfig::default();
+
+        // Issue #136: register controller-provisioned custom models before the
+        // model pair is resolved, then seed the credential overlay.
+        if !config.models.is_empty() {
+            crate::model_defaults::register_models(&config.models);
+            applied.models = config.models.clone();
+            self.runtime.model_catalog = model_catalog();
+        }
+        if let Some(raw_key) = config.api_key.as_deref() {
+            let provider = config
+                .provider
+                .as_deref()
+                .map(str::trim)
+                .filter(|provider| !provider.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    self.session
+                        .kernel
+                        .harness()
+                        .agent()
+                        .state()
+                        .model
+                        .as_ref()
+                        .map(|model| model.provider.0.clone())
+                });
+            match provider {
+                Some(provider) => {
+                    let key = raw_key.trim();
+                    let mut keys = self
+                        .automation
+                        .services
+                        .configured_api_keys
+                        .write()
+                        .expect("configured api keys poisoned");
+                    if key.is_empty() {
+                        keys.remove(&provider);
+                        drop(keys);
+                        applied.clear_fields.push("api_key".into());
+                    } else {
+                        keys.insert(provider, key.to_string());
+                        drop(keys);
+                        applied.api_key = Some(raw_key.to_string());
+                    }
+                }
+                None => self.error_line("configure: api_key requires a provider"),
+            }
+        }
+        // Issue #136: `auto_fetch_models = true` fetches the provider catalog
+        // and fills an unset model from the first entry. Bounded by the fetch
+        // timeout; a failure is reported without failing the rest of the patch.
+        if config.auto_fetch_models == Some(true) {
+            let provider = config
+                .provider
+                .as_deref()
+                .map(str::trim)
+                .filter(|provider| !provider.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    self.session
+                        .kernel
+                        .harness()
+                        .agent()
+                        .state()
+                        .model
+                        .as_ref()
+                        .map(|model| model.provider.0.clone())
+                });
+            let base_url = config.base_url.clone().or_else(|| {
+                self.runtime
+                    .config
+                    .read()
+                    .expect("daemon config poisoned")
+                    .base_url
+                    .clone()
+            });
+            match (provider, base_url) {
+                (Some(provider), Some(base_url)) => {
+                    let api_key = self
+                        .automation
+                        .services
+                        .configured_api_keys
+                        .read()
+                        .expect("configured api keys poisoned")
+                        .get(&provider)
+                        .cloned();
+                    match crate::model_fetch::fetch_models(&base_url, api_key.as_deref(), &provider)
+                        .await
+                    {
+                        Ok(models) if !models.is_empty() => {
+                            let first = models[0].id.clone();
+                            crate::model_defaults::register_models(&models);
+                            self.runtime.model_catalog = model_catalog();
+                            if config.provider.is_none() && config.model.is_none() {
+                                config.provider = Some(provider);
+                                config.model = Some(first);
+                            }
+                            applied.auto_fetch_models = Some(true);
+                        }
+                        Ok(_) => self
+                            .error_line("configure: auto-fetch models returned an empty catalog"),
+                        Err(err) => {
+                            self.error_line(format!("configure: auto-fetch models: {err}"));
+                        }
+                    }
+                }
+                (None, _) => {
+                    self.error_line("configure: auto-fetch models requires a provider")
+                }
+                (_, None) => {
+                    self.error_line("configure: auto-fetch models requires a base_url")
+                }
+            }
+        }
 
         if (config.clears("provider") && config.provider.is_none())
             || (config.clears("model") && config.model.is_none())

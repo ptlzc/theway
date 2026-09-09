@@ -4,44 +4,42 @@ use crate::test_env::{ENV_LOCK, EnvGuard};
 use tempfile::TempDir;
 
 use super::{
-    canonical_work_dir, monitor_controller_storage, resolve_startup_model,
-    supervise_controller_storage,
+    canonical_work_dir, monitor_controller_storage, provision_model_catalog,
+    resolve_startup_model, supervise_controller_storage,
 };
 
 #[tokio::test]
-async fn controller_backing_keeps_user_custom_models_available() {
+async fn controller_provisioned_custom_models_resolve_at_startup() {
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
     let provider = "controller-custom-model-test";
     let model_id = "model-a";
-    std::fs::write(
-        base.path().join("models.json"),
-        format!(
-            r#"{{
-  "models": [{{
-    "id": "{model_id}",
-    "name": "Controller Custom Model",
-    "api": "openai-responses",
-    "provider": "{provider}",
-    "baseUrl": "http://127.0.0.1:9/v1",
-    "reasoning": false,
-    "input": ["text"],
-    "cost": {{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}},
-    "contextWindow": 128000,
-    "maxTokens": 8192
-  }}]
-}}"#
-        ),
-    )
-    .unwrap();
 
     let mut startup = crate::startup_config::StartupConfig::default();
     startup.load_local_sources = false;
     startup.storage_service_addr = Some("http://controller-storage".into());
+    // Issue #136: the controller provisions descriptors through the settings
+    // RPC instead of writing a local `models.json`.
+    startup.models = vec![theway_llm_provider::Model {
+        id: model_id.into(),
+        name: "Controller Custom Model".into(),
+        api: theway_llm_provider::Api::from("openai-responses"),
+        provider: theway_llm_provider::Provider::from(provider),
+        base_url: "http://127.0.0.1:9/v1".into(),
+        reasoning: false,
+        thinking_level_map: None,
+        input: vec![theway_llm_provider::InputModality::Text],
+        cost: theway_llm_provider::ModelCost::default(),
+        context_window: 128_000,
+        max_tokens: 8_192,
+        headers: None,
+        compat: None,
+    }];
+    let keys = crate::stream_auth::ConfiguredApiKeys::default();
+    provision_model_catalog(&mut startup, None, &keys).await;
 
-    let model = resolve_startup_model(cwd.path(), Some(provider), Some(model_id), None, &startup)
+    let model = resolve_startup_model(Some(provider), Some(model_id), None, &startup)
         .await
         .unwrap()
         .expect("explicit provider/model should resolve a model");
@@ -133,7 +131,6 @@ async fn supervise_controller_storage_monitor_can_shutdown_server() {
 async fn resolve_startup_model_uses_startup_default_when_no_cli_override() {
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
 
     let mut startup = crate::startup_config::StartupConfig::default();
@@ -142,7 +139,7 @@ async fn resolve_startup_model_uses_startup_default_when_no_cli_override() {
         model: "claude-haiku-4-5".into(),
     });
 
-    let model = resolve_startup_model(cwd.path(), None, None, None, &startup)
+    let model = resolve_startup_model(None, None, None, &startup)
         .await
         .unwrap()
         .expect("startup default should resolve a model");
@@ -155,11 +152,9 @@ async fn resolve_startup_model_uses_startup_default_when_no_cli_override() {
 async fn resolve_startup_model_applies_cli_base_url() {
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
 
     let model = resolve_startup_model(
-        cwd.path(),
         Some("anthropic"),
         Some("claude-haiku-4-5"),
         Some("http://example.test/v1"),
@@ -179,7 +174,6 @@ async fn resolve_startup_model_returns_none_without_credentials() {
     // no credential is present: it starts model-less and returns `None`.
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
     let _guards = [
         EnvGuard::remove("ANTHROPIC_API_KEY"),
@@ -193,7 +187,6 @@ async fn resolve_startup_model_returns_none_without_credentials() {
     ];
 
     let model = resolve_startup_model(
-        cwd.path(),
         None,
         None,
         None,
@@ -209,11 +202,9 @@ async fn resolve_startup_model_returns_none_without_credentials() {
 async fn resolve_startup_model_rejects_unknown_override() {
     let _lock = ENV_LOCK.lock().unwrap();
     let base = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
     let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
 
     let err = resolve_startup_model(
-        cwd.path(),
         Some("definitely-not-a-provider"),
         Some("does-not-exist"),
         None,

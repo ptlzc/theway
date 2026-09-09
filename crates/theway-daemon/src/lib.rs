@@ -33,13 +33,14 @@ mod forwarding_tool_ops;
 pub mod hook_executors;
 pub mod hooks;
 mod job_transcripts;
-mod local_models;
 mod logging;
 mod lsp;
 mod lsp_supervisor;
 mod mcp_loader;
 mod mcp_server;
 mod model;
+mod model_defaults;
+mod model_fetch;
 mod observability;
 mod orchestration;
 // Daemon path context (issue #66): one CLI-boundary resolution of every host
@@ -77,7 +78,7 @@ pub mod ts_extensions;
 mod triggers;
 
 // Test-only env serialization lock shared by every bridged unit-test module
-// that mutates process env (commands, local_models, …) — see the file header
+// that mutates process env (commands, model_defaults, …) — see the file header
 // for the issue #16 race it fixes.
 #[cfg(test)]
 #[path = "../tests/common/env_lock.rs"]

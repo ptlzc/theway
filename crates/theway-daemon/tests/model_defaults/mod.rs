@@ -1,117 +1,77 @@
-//! Tests for `local_models` — split out of src (see docs/rust-test-files.md).
+//! Tests for `model_defaults` (issue #136): the built-in DS4 default and
+//! direct custom-model registration. The former `models.json` file loading is
+//! gone — custom descriptors arrive through `[[model.custom]]` / the settings
+//! RPC and land in the same process catalog.
 
-use super::*;
+use crate::model_defaults::{register_ds4_default, register_models};
 use crate::test_env::EnvGuard;
 use futures::StreamExt;
 use tempfile::TempDir;
 use theway_llm_provider::{
-    AssistantMessageEvent, Context as AiContext, DoneReason, Message, Tool, UserContent,
-    UserMessage, UserRole,
+    Api, AssistantMessageEvent, Context as AiContext, DoneReason, InputModality, Message, Model,
+    ModelCost, Provider, Tool, UserContent, UserMessage, UserRole,
 };
-use theway_transport::auth::{AuthStore, ProviderCredential};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-/// Alias for the process-wide test env lock shared with the `commands` tests.
-/// Issue #16: these two modules used to hold separate locks (a local TokioMutex
-/// here, a local `std::sync::Mutex` there) and raced on `THEWAY_DIR` inside the
-/// same lib test binary.
+/// Alias for the process-wide test env lock shared with the `commands` tests
+/// (issue #16): DS4 registration reads `DS4_*` env vars.
 fn env_lock() -> &'static std::sync::Mutex<()> {
     &crate::test_env::ENV_LOCK
 }
 
 fn unregister_ds4_default() {
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from("ds4"),
-        "deepseek-v4-flash",
-    );
+    theway_llm_provider::unregister_custom_model(&Provider::from("ds4"), "deepseek-v4-flash");
 }
 
-fn model_json(provider: &str, id: &str, api: &str, base_url: &str) -> String {
-    format!(
-        r#"{{
-  "models": [
-    {{
-      "id": "{id}",
-      "name": "Local {id}",
-      "api": "{api}",
-      "provider": "{provider}",
-      "baseUrl": "{base_url}",
-      "reasoning": true,
-      "thinkingLevelMap": {{
-        "off": null,
-        "minimal": "low",
-        "low": "low",
-        "medium": "medium",
-        "high": "high",
-        "xhigh": "xhigh"
-      }},
-      "input": ["text"],
-      "cost": {{ "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }},
-      "contextWindow": 100000,
-      "maxTokens": 384000,
-      "compat": {{
-        "supportsStore": false,
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": true,
-        "supportsUsageInStreaming": true,
-        "maxTokensField": "max_tokens",
-        "supportsStrictMode": false,
-        "thinkingFormat": "deepseek",
-        "requiresReasoningContentOnAssistantMessages": true
-      }}
-    }}
-  ]
-}}"#
-    )
+/// A local OpenAI-compatible descriptor equivalent to the former `models.json`
+/// fixture: responses API, DS4 compat flags, 100k/384k budgets.
+fn test_model(provider: &str, id: &str, api: &str, base_url: &str) -> Model {
+    Model {
+        id: id.to_string(),
+        name: format!("Local {id}"),
+        api: Api::from(api),
+        provider: Provider::from(provider),
+        base_url: base_url.to_string(),
+        reasoning: true,
+        thinking_level_map: None,
+        input: vec![InputModality::Text],
+        cost: ModelCost::default(),
+        context_window: 100_000,
+        max_tokens: 384_000,
+        headers: None,
+        compat: Some(serde_json::json!({
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true,
+            "maxTokensField": "max_tokens",
+            "supportsStrictMode": false,
+            "thinkingFormat": "deepseek",
+            "requiresReasoningContentOnAssistantMessages": true
+        })),
+    }
 }
 
 #[tokio::test]
-async fn registers_ds4_model_from_explicit_env_url_and_allows_user_override() {
+async fn registers_ds4_model_from_explicit_env_url() {
     let _lock = env_lock().lock().unwrap();
     let _base_url = EnvGuard::set("DS4_BASE_URL", "http://127.0.0.1:8000/v1");
     let _legacy_url = EnvGuard::remove("DS4_URL");
     unregister_ds4_default();
-    load_all_from_paths(&[]).unwrap();
+    register_ds4_default(None);
 
-    let model = theway_llm_provider::get_model(
-        &theway_llm_provider::Provider::from("ds4"),
-        "deepseek-v4-flash",
-    )
-    .expect("ds4 default model registered");
+    let model =
+        theway_llm_provider::get_model(&Provider::from("ds4"), "deepseek-v4-flash")
+            .expect("ds4 default model registered");
     assert_eq!(model.api.0, "openai-responses");
     assert_eq!(model.base_url, "http://127.0.0.1:8000/v1");
     assert_eq!(model.max_tokens, 384_000);
 
     let resolved = crate::model::auto_detect_model(Some("ds4"), Some("deepseek-v4-flash")).unwrap();
-    assert_eq!(
-        resolved.provider,
-        theway_llm_provider::Provider::from("ds4")
-    );
+    assert_eq!(resolved.provider, Provider::from("ds4"));
     assert_eq!(resolved.id, "deepseek-v4-flash");
-
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(
-            "ds4",
-            "deepseek-v4-flash",
-            "openai-responses",
-            "http://127.0.0.1:7777/v1",
-        ),
-    )
-    .unwrap();
-
-    load_all_from_paths(&[path]).unwrap();
-
-    let model = theway_llm_provider::get_model(
-        &theway_llm_provider::Provider::from("ds4"),
-        "deepseek-v4-flash",
-    )
-    .expect("ds4 model registered");
-    assert_eq!(model.base_url, "http://127.0.0.1:7777/v1");
 
     unregister_ds4_default();
 }
@@ -123,13 +83,11 @@ async fn ds4_url_env_alias_registers_model() {
     let _legacy_url = EnvGuard::set("DS4_URL", "http://127.0.0.1:8123/v1");
     unregister_ds4_default();
 
-    load_all_from_paths(&[]).unwrap();
+    register_ds4_default(None);
 
-    let model = theway_llm_provider::get_model(
-        &theway_llm_provider::Provider::from("ds4"),
-        "deepseek-v4-flash",
-    )
-    .expect("ds4 model registered");
+    let model =
+        theway_llm_provider::get_model(&Provider::from("ds4"), "deepseek-v4-flash")
+            .expect("ds4 model registered");
     assert_eq!(model.base_url, "http://127.0.0.1:8123/v1");
 
     unregister_ds4_default();
@@ -142,159 +100,30 @@ async fn cli_base_url_registers_ds4_model_and_overrides_env_url() {
     let _legacy_url = EnvGuard::remove("DS4_URL");
     unregister_ds4_default();
 
-    load_all_from_paths_with_base_url(&[], Some("http://127.0.0.1:9999/v1")).unwrap();
+    register_ds4_default(Some("http://127.0.0.1:9999/v1"));
 
-    let model = theway_llm_provider::get_model(
-        &theway_llm_provider::Provider::from("ds4"),
-        "deepseek-v4-flash",
-    )
-    .expect("ds4 model registered");
+    let model =
+        theway_llm_provider::get_model(&Provider::from("ds4"), "deepseek-v4-flash")
+            .expect("ds4 model registered");
     assert_eq!(model.base_url, "http://127.0.0.1:9999/v1");
 
     unregister_ds4_default();
 }
 
 #[test]
-fn loads_and_registers_custom_model() {
-    // load_all_from_paths registers the ds4 default from DS4_* env vars, so every test
-    // that calls it must hold env_lock or it races the env-guarded ds4 tests.
-    let _lock = env_lock().lock().unwrap();
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(
-            "local-test-register",
-            "deepseek-v4-flash",
-            "openai-responses",
-            "http://127.0.0.1:9999/v1",
-        ),
-    )
-    .unwrap();
-
-    let loaded = load_all_from_paths(&[path]).unwrap();
-    assert_eq!(loaded.models.len(), 1);
-    let resolved = theway_llm_provider::get_model(
-        &theway_llm_provider::Provider::from("local-test-register"),
-        "deepseek-v4-flash",
-    )
-    .unwrap();
-    assert_eq!(resolved.api.0, "openai-responses");
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from("local-test-register"),
-        "deepseek-v4-flash",
-    );
-}
-
-#[test]
-fn auto_detect_prefers_models_json_and_auth_json_provider_over_builtin_default() {
-    let _lock = env_lock().lock().unwrap();
-    let base = TempDir::new().unwrap();
-    let _theway_dir = EnvGuard::set("THEWAY_DIR", base.path());
-    let _cleanup: Vec<_> = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "DS4_API_KEY",
-        "OPENROUTER_API_KEY",
-        "GROQ_API_KEY",
-        "MISTRAL_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-    ]
-    .iter()
-    .map(|name| EnvGuard::remove(name))
-    .collect();
-
-    let provider = "local-pref";
-    let id = "preferred-model";
-    let path = base.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(
-            provider,
-            id,
-            "openai-responses",
-            "http://127.0.0.1:9/v1",
-        ),
-    )
-    .unwrap();
-    let mut store = AuthStore::default();
-    store.set(
-        provider,
-        ProviderCredential::ApiKey {
-            value: "local-key".into(),
-        },
-    );
-    store.save().unwrap();
-
-    load_all_from_paths(&[path]).unwrap();
-
-    // The daemon no longer auto-detects a model from auth.json / env at startup;
-    // it only resolves an explicit pair. The custom model from models.json is
-    // registered by `load_all_from_paths`, so an explicit override resolves it.
-    let model = crate::model::auto_detect_model(Some(provider), Some(id)).unwrap();
-    assert_eq!(model.provider.0, provider);
-    assert_eq!(model.id, id);
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from(provider),
-        id,
-    );
-}
-
-#[test]
-fn project_model_overrides_user_model_with_same_provider_and_id() {
-    let _lock = env_lock().lock().unwrap();
-    let dir = TempDir::new().unwrap();
-    let user = dir.path().join("user.json");
-    let project = dir.path().join("project.json");
-    std::fs::write(
-        &user,
-        model_json(
-            "local-test-override",
-            "same",
-            "openai-completions",
-            "http://127.0.0.1:1/v1",
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        &project,
-        model_json(
-            "local-test-override",
-            "same",
-            "openai-responses",
-            "http://127.0.0.1:2/v1",
-        ),
-    )
-    .unwrap();
-
-    let loaded = load_all_from_paths(&[user, project]).unwrap();
-    assert_eq!(loaded.models.len(), 1);
-    assert_eq!(loaded.models[0].api.0, "openai-responses");
-    assert_eq!(loaded.models[0].base_url, "http://127.0.0.1:2/v1");
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from("local-test-override"),
-        "same",
-    );
-}
-
-#[test]
-fn malformed_config_fails_closed_without_registering() {
-    let _lock = env_lock().lock().unwrap();
-    let dir = TempDir::new().unwrap();
-    let bad = dir.path().join("bad.json");
-    std::fs::write(&bad, r#"{ "models": [ { "provider": "broken" } ] }"#).unwrap();
-
-    let err = load_all_from_paths(&[bad]).unwrap_err().to_string();
-    assert!(err.contains("parse"));
-    assert!(
-        theway_llm_provider::get_model(&theway_llm_provider::Provider::from("broken"), "")
-            .is_none()
-    );
+fn register_models_replaces_same_key_entries() {
+    let first = test_model("replace-test", "m", "openai-responses", "http://127.0.0.1:1/v1");
+    let second = test_model("replace-test", "m", "openai-responses", "http://127.0.0.1:2/v1");
+    register_models(&[first]);
+    register_models(&[second]);
+    let model =
+        theway_llm_provider::get_model(&Provider::from("replace-test"), "m").expect("registered");
+    assert_eq!(model.base_url, "http://127.0.0.1:2/v1");
+    theway_llm_provider::unregister_custom_model(&Provider::from("replace-test"), "m");
 }
 
 #[tokio::test]
-async fn loaded_openai_responses_model_streams_text_from_local_fixture() {
+async fn registered_openai_responses_model_streams_text_from_local_fixture() {
     let _lock = env_lock().lock().unwrap();
     let body = r#"data: {"type":"response.created","response":{"id":"resp_test","model":"model","output":[]}}
 
@@ -310,17 +139,9 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
     let base_url = serve_once(body).await;
     let provider = "local-test-text";
     let id = "text";
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(provider, id, "openai-responses", &base_url),
-    )
-    .unwrap();
-    load_all_from_paths(&[path]).unwrap();
+    register_models(&[test_model(provider, id, "openai-responses", &base_url)]);
 
-    let model =
-        theway_llm_provider::get_model(&theway_llm_provider::Provider::from(provider), id).unwrap();
+    let model = theway_llm_provider::get_model(&Provider::from(provider), id).unwrap();
     let mut stream = theway_llm_provider::stream(
         &model,
         &context(None),
@@ -342,14 +163,11 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
         }
     }
     assert_eq!(text, "OK");
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from(provider),
-        id,
-    );
+    theway_llm_provider::unregister_custom_model(&Provider::from(provider), id);
 }
 
 #[tokio::test]
-async fn loaded_openai_responses_model_streams_tool_call_from_local_fixture() {
+async fn registered_openai_responses_model_streams_tool_call_from_local_fixture() {
     let _lock = env_lock().lock().unwrap();
     let body = r#"data: {"type":"response.created","response":{"id":"resp_test","model":"model","output":[]}}
 
@@ -365,17 +183,9 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
     let base_url = serve_once(body).await;
     let provider = "local-test-tool";
     let id = "tool";
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(provider, id, "openai-responses", &base_url),
-    )
-    .unwrap();
-    load_all_from_paths(&[path]).unwrap();
+    register_models(&[test_model(provider, id, "openai-responses", &base_url)]);
 
-    let model =
-        theway_llm_provider::get_model(&theway_llm_provider::Provider::from(provider), id).unwrap();
+    let model = theway_llm_provider::get_model(&Provider::from(provider), id).unwrap();
     let mut stream = theway_llm_provider::stream(
         &model,
         &context(Some(vec![Tool {
@@ -416,10 +226,7 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
     }
     assert_eq!(tool_name.as_deref(), Some("get_weather"));
     assert_eq!(done_reason, Some(DoneReason::ToolUse));
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from(provider),
-        id,
-    );
+    theway_llm_provider::unregister_custom_model(&Provider::from(provider), id);
 }
 
 #[tokio::test]
@@ -445,17 +252,9 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
     let (base_url, request_rx) = serve_once_capture_request(body).await;
     let provider = "ds4";
     let id = "deepseek-v4-flash-env-fixture";
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(provider, id, "openai-responses", &base_url),
-    )
-    .unwrap();
-    load_all_from_paths(&[path]).unwrap();
+    register_models(&[test_model(provider, id, "openai-responses", &base_url)]);
 
-    let model =
-        theway_llm_provider::get_model(&theway_llm_provider::Provider::from(provider), id).unwrap();
+    let model = theway_llm_provider::get_model(&Provider::from(provider), id).unwrap();
     let mut stream = theway_llm_provider::stream(&model, &context(None), None);
     while let Some(event) = stream.next().await {
         match event {
@@ -474,10 +273,7 @@ data: {"type":"response.completed","response":{"id":"resp_test","status":"comple
         "{request}"
     );
     assert!(!request.contains("real-openai-should-not-leak"));
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from(provider),
-        id,
-    );
+    theway_llm_provider::unregister_custom_model(&Provider::from(provider), id);
 }
 
 #[tokio::test]
@@ -505,7 +301,7 @@ async fn ds4_env_without_url_reports_base_url_config() {
     assert!(explicit_err.contains("provider=ds4"), "{explicit_err}");
     assert!(explicit_err.contains("--base-url"), "{explicit_err}");
     assert!(explicit_err.contains("DS4_BASE_URL"), "{explicit_err}");
-    assert!(explicit_err.contains("models.json"), "{explicit_err}");
+    assert!(explicit_err.contains("config.toml"), "{explicit_err}");
 }
 
 #[tokio::test]
@@ -519,17 +315,14 @@ async fn ds4_responses_model_fails_closed_without_ds4_env_even_when_openai_env_e
 
     let provider = "ds4";
     let id = "deepseek-v4-flash-missing-key";
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("models.json");
-    std::fs::write(
-        &path,
-        model_json(provider, id, "openai-responses", "http://127.0.0.1:9/v1"),
-    )
-    .unwrap();
-    load_all_from_paths(&[path]).unwrap();
+    register_models(&[test_model(
+        provider,
+        id,
+        "openai-responses",
+        "http://127.0.0.1:9/v1",
+    )]);
 
-    let model =
-        theway_llm_provider::get_model(&theway_llm_provider::Provider::from(provider), id).unwrap();
+    let model = theway_llm_provider::get_model(&Provider::from(provider), id).unwrap();
     let mut stream = theway_llm_provider::stream(&model, &context(None), None);
     let mut error = None;
     while let Some(event) = stream.next().await {
@@ -542,10 +335,7 @@ async fn ds4_responses_model_fails_closed_without_ds4_env_even_when_openai_env_e
     assert!(error.contains("DS4_API_KEY"), "{error}");
     assert!(!error.contains("real-openai-should-not-leak"));
     assert!(!error.contains("HTTP"), "{error}");
-    theway_llm_provider::unregister_custom_model(
-        &theway_llm_provider::Provider::from(provider),
-        id,
-    );
+    theway_llm_provider::unregister_custom_model(&Provider::from(provider), id);
 }
 
 fn context(tools: Option<Vec<Tool>>) -> AiContext {

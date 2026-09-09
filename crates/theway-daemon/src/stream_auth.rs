@@ -1,16 +1,30 @@
 //! The auth-store-backed stream function wrapper for LLM calls.
 
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
 #[cfg(test)]
 use theway_core::AgentMessage;
 #[cfg(test)]
 use theway_llm_provider::Message as PiMessage;
 
-pub fn stream_fn_with_auth_store() -> theway_core::StreamFn {
-    std::sync::Arc::new(|model, context, options| {
+/// Controller-provided API keys (issue #136, `config.toml [model] api_key`),
+/// keyed by provider. Shared with the settings applier so a runtime
+/// `Configure` update takes effect on the next stream call.
+pub type ConfiguredApiKeys = Arc<RwLock<HashMap<String, String>>>;
+
+pub fn stream_fn_with_auth_store(configured: ConfiguredApiKeys) -> theway_core::StreamFn {
+    Arc::new(move |model, context, options| {
+        let configured_key = configured
+            .read()
+            .ok()
+            .and_then(|keys| keys.get(&model.provider.0).cloned());
         let merged = apply_auth_to_simple_options(model, options, |provider| {
             theway_transport::auth::AuthStore::load()
                 .ok()
-                .and_then(|store| store.resolve_for_provider(provider))
+                .and_then(|store| {
+                    store.resolve_for_provider_with(provider, configured_key.as_deref())
+                })
         });
         theway_llm_provider::stream_simple(model, context, Some(&merged))
     })

@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use crate::commands::CommandOutput;
 use crate::session_activation::SessionActivator;
 use crate::session_execution::SessionExecutionRegistry;
+use crate::stream_auth::ConfiguredApiKeys;
 use crate::subagent_settings::SubagentSettingsRegistry;
 use crate::tgrep_server::TgrepServerRegistry;
 use crate::tools::assembly::reload::ReloadRuntimeSlot;
@@ -28,6 +29,10 @@ pub struct DaemonServices {
     /// settings store per project root, injected into every session's
     /// `dag_plan` / `subagent` tools.
     pub(crate) subagent_settings: SubagentSettingsRegistry,
+    /// Controller-provided API keys (issue #136, `config.toml [model]
+    /// api_key`), keyed by provider. Consulted by the stream wrapper between
+    /// the environment and `auth.json`; `Configure` updates it at runtime.
+    pub(crate) configured_api_keys: ConfiguredApiKeys,
 }
 
 impl Default for DaemonServices {
@@ -51,6 +56,7 @@ impl Default for DaemonServices {
             session_activator: Arc::new(OnceLock::new()),
             tgrep: TgrepServerRegistry::new(),
             subagent_settings: SubagentSettingsRegistry::new(),
+            configured_api_keys: ConfiguredApiKeys::default(),
         }
     }
 }
@@ -58,6 +64,14 @@ impl Default for DaemonServices {
 impl DaemonServices {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Share the controller-provided API-key overlay (issue #136) with the
+    /// stream wrapper and the settings applier.
+    #[must_use]
+    pub(crate) fn with_configured_api_keys(mut self, keys: ConfiguredApiKeys) -> Self {
+        self.configured_api_keys = keys;
+        self
     }
 
     #[must_use]

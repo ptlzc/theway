@@ -32,6 +32,81 @@ async fn handle_configure_applies_feed_history_limit() {
 }
 
 #[tokio::test]
+async fn handle_configure_registers_custom_models_and_seeds_api_key() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    let model = theway_llm_provider::Model {
+        id: "configure-custom-model".into(),
+        name: "Configured custom".into(),
+        api: theway_llm_provider::Api::from("openai-completions"),
+        provider: theway_llm_provider::Provider::from("configure-test"),
+        base_url: "http://127.0.0.1:9/v1".into(),
+        reasoning: false,
+        thinking_level_map: None,
+        input: vec![theway_llm_provider::InputModality::Text],
+        cost: theway_llm_provider::ModelCost::default(),
+        context_window: 128_000,
+        max_tokens: 8_192,
+        headers: None,
+        compat: None,
+    };
+    host.handle_configure(
+        WireDaemonConfig {
+            provider: Some("configure-test".into()),
+            model: Some("configure-custom-model".into()),
+            models: vec![model.clone()],
+            api_key: Some("sk-configured".into()),
+            ..Default::default()
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    // Issue #136: the descriptor was registered before the pair resolved.
+    assert!(theway_llm_provider::get_model(&model.provider, &model.id).is_some());
+    // The credential overlay holds the configured key for the provider.
+    assert_eq!(
+        host.automation
+            .services
+            .configured_api_keys
+            .read()
+            .unwrap()
+            .get("configure-test")
+            .map(String::as_str),
+        Some("sk-configured")
+    );
+    let view = host.runtime.config.read().unwrap().clone();
+    assert_eq!(view.api_key.as_deref(), Some("sk-configured"));
+    assert_eq!(view.models.len(), 1);
+    assert_eq!(view.provider.as_deref(), Some("configure-test"));
+    theway_llm_provider::unregister_custom_model(&model.provider, &model.id);
+}
+
+#[tokio::test]
+async fn handle_configure_auto_fetch_without_base_url_is_reported_not_applied() {
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+
+    host.handle_configure(
+        WireDaemonConfig {
+            provider: Some("fetch-test".into()),
+            auto_fetch_models: Some(true),
+            ..Default::default()
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    // No base_url: the fetch is reported as an error and never enters the view
+    // (the seeded view keeps the startup default).
+    assert_eq!(
+        host.runtime.config.read().unwrap().auto_fetch_models,
+        Some(false)
+    );
+}
+
+#[tokio::test]
 async fn handle_configure_rejections_do_not_publish_unapplied_values() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();

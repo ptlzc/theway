@@ -125,10 +125,7 @@ pub(super) fn model_catalog_text(provider_filter: Option<&str>) -> Result<String
                 groups.len(),
                 total
             ));
-            out.push(
-                "Custom models are loaded from ~/.theway/models.json and <cwd>/.theway/models.json."
-                    .into(),
-            );
+            out.push("Custom models are declared in `[[model.custom]]` in config.toml.".into());
             for (provider, models) in &groups {
                 out.push(format!("  {provider} ({})", models.len()));
                 append_model_lines(&mut out, models);

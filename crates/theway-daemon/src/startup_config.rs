@@ -70,6 +70,21 @@ pub struct StartupConfig {
     /// managed `tgrep serve` path so `grep` always walks. Startup-only — the
     /// process-scoped registry is bound once, before tools are assembled.
     pub tgrep_enabled: bool,
+    /// Configured default provider (issue #136). May be present without
+    /// `model_default` when `auto_fetch_models` fills the id from the server.
+    pub provider: Option<String>,
+    /// Provider endpoint override (`[model] base_url`, issue #136). Used by
+    /// startup auto-fetch and as the base URL for a resolved default model.
+    pub base_url: Option<String>,
+    /// API key for `provider` (`[model] api_key`, issue #136). Environment
+    /// variables still win at request time.
+    pub api_key: Option<String>,
+    /// Fetch `GET {base_url}/models` at startup (issue #136) and fill an unset
+    /// model id from the first entry.
+    pub auto_fetch_models: bool,
+    /// Controller-provisioned custom model descriptors (issue #136),
+    /// registered before model resolution.
+    pub models: Vec<theway_llm_provider::Model>,
 }
 
 impl Default for StartupConfig {
@@ -85,6 +100,11 @@ impl Default for StartupConfig {
             load_local_sources: true,
             storage_service_addr: None,
             tgrep_enabled: true,
+            provider: None,
+            base_url: None,
+            api_key: None,
+            auto_fetch_models: false,
+            models: Vec::new(),
         }
     }
 }
@@ -108,12 +128,44 @@ impl StartupConfig {
         let mut touched = 0;
         // The model default requires the provider/model PAIR — the same rule
         // the legacy `[model]` parse enforced (`parse_model_default` rejects
-        // a half-configured default rather than guessing).
+        // a half-configured default rather than guessing). Issue #136: a lone
+        // provider is kept as the configured provider so `auto_fetch_models`
+        // can fill the id from the server catalog.
+        if let Some(provider) = patch
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|provider| !provider.is_empty())
+        {
+            self.provider = Some(provider.to_string());
+            touched += 1;
+        }
         if let (Some(provider), Some(model)) = (patch.provider.as_deref(), patch.model.as_deref()) {
             self.model_default = Some(ModelDefault {
                 provider: provider.to_string(),
                 model: model.to_string(),
             });
+            touched += 1;
+        }
+        if let Some(base_url) = patch
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+        {
+            self.base_url = Some(base_url.to_string());
+            touched += 1;
+        }
+        if let Some(api_key) = patch.api_key.as_deref() {
+            self.api_key = Some(api_key.trim().to_string()).filter(|key| !key.is_empty());
+            touched += 1;
+        }
+        if let Some(auto_fetch) = patch.auto_fetch_models {
+            self.auto_fetch_models = auto_fetch;
+            touched += 1;
+        }
+        if !patch.models.is_empty() {
+            self.models = patch.models.clone();
             touched += 1;
         }
         if let Some(raw) = patch.thinking_level.as_deref() {
@@ -179,6 +231,11 @@ mod tests {
         assert!(config.load_local_sources, "local scans stay on by default");
         assert!(config.storage_service_addr.is_none());
         assert!(config.tgrep_enabled, "tgrep backend stays on by default");
+        assert!(config.provider.is_none());
+        assert!(config.base_url.is_none());
+        assert!(config.api_key.is_none());
+        assert!(!config.auto_fetch_models);
+        assert!(config.models.is_empty());
     }
 
     #[test]
@@ -198,6 +255,24 @@ mod tests {
             tui_max_feed_lines: Some(8000),
             executor_kind: Some("sandbox".into()),
             tgrep: Some(false),
+            base_url: Some("http://127.0.0.1:7777/v1".into()),
+            api_key: Some("sk-file".into()),
+            auto_fetch_models: Some(true),
+            models: vec![theway_llm_provider::Model {
+                id: "warp-9-local".into(),
+                name: "warp-9-local".into(),
+                api: theway_llm_provider::Api::from("openai-completions"),
+                provider: theway_llm_provider::Provider::from("acme"),
+                base_url: "http://127.0.0.1:7777/v1".into(),
+                reasoning: false,
+                thinking_level_map: None,
+                input: vec![theway_llm_provider::InputModality::Text],
+                cost: theway_llm_provider::ModelCost::default(),
+                context_window: 128_000,
+                max_tokens: 8_192,
+                headers: None,
+                compat: None,
+            }],
             ..Default::default()
         };
         let config = StartupConfig::from_wire(&payload);
@@ -215,6 +290,11 @@ mod tests {
         assert_eq!(config.tui_max_feed_lines, Some(8000));
         assert_eq!(config.executor_kind, ExecutorKind::Sandbox);
         assert!(!config.tgrep_enabled, "payload disables the tgrep backend");
+        assert_eq!(config.base_url.as_deref(), Some("http://127.0.0.1:7777/v1"));
+        assert_eq!(config.api_key.as_deref(), Some("sk-file"));
+        assert!(config.auto_fetch_models);
+        assert_eq!(config.models.len(), 1);
+        assert_eq!(config.models[0].id, "warp-9-local");
     }
 
     #[test]
@@ -241,16 +321,17 @@ mod tests {
 
     #[test]
     fn half_configured_model_pair_is_ignored() {
-        // A lone provider (no model id) is not a usable default — same rule
-        // the legacy `[model]` parse enforced; the env auto-detection keeps
-        // applying.
+        // Issue #136: a lone provider is kept as the configured provider (so
+        // `auto_fetch_models` can fill the id), but it is not a usable
+        // provider/model default.
         let payload = WireDaemonConfig {
             provider: Some("anthropic".into()),
             ..Default::default()
         };
         let mut config = StartupConfig::default();
-        assert_eq!(config.apply_wire(&payload), 0);
+        assert_eq!(config.apply_wire(&payload), 1);
         assert!(config.model_default.is_none());
+        assert_eq!(config.provider.as_deref(), Some("anthropic"));
     }
 
     #[test]
@@ -269,8 +350,11 @@ mod tests {
             trigger_poll_secs: Some(15),
             ..Default::default()
         };
-        assert_eq!(config.apply_wire(&second), 2);
+        // provider + model_default + trigger_poll_secs (issue #136 counts the
+        // configured provider separately from the pair).
+        assert_eq!(config.apply_wire(&second), 3);
         assert_eq!(config.trigger_poll_secs, 15);
+        assert_eq!(config.provider.as_deref(), Some("openai"));
         assert_eq!(
             config.model_default.as_ref().map(|d| d.model.as_str()),
             Some("gpt-x")

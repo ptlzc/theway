@@ -43,7 +43,7 @@ fn explicit_model_not_found_message(provider: &str, id: &str, show_local_hint: b
             .collect::<Vec<_>>()
             .join(", ");
         let hint = if show_local_hint && provider == "ds4" {
-            " For local DS4, pass --base-url http://127.0.0.1:8000/v1, set DS4_BASE_URL, or add ds4 to ~/.theway/models.json."
+            " For local DS4, pass --base-url http://127.0.0.1:8000/v1, set DS4_BASE_URL, or declare it in `[model]` / `[[model.custom]]` in config.toml."
         } else {
             ""
         };

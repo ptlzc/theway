@@ -83,4 +83,14 @@ struct Cli {
     /// supplied by the TUI from `[tools] tgrep = false` in config.toml.
     #[arg(long = "no-tgrep")]
     no_tgrep: bool,
+    /// API key for the configured provider (issue #136). Headless equivalent
+    /// of `[model] api_key` in config.toml; the TUI provisions it through the
+    /// settings RPC instead.
+    #[arg(long = "api-key")]
+    api_key: Option<String>,
+    /// Fetch the provider model catalog from `--base-url` at startup (issue
+    /// #136) and fill an unset `--model` from the first entry. Headless
+    /// equivalent of `[model] auto_fetch_models`.
+    #[arg(long = "auto-fetch-models")]
+    auto_fetch_models: bool,
 }

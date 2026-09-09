@@ -49,6 +49,8 @@ async fn main() -> Result<()> {
         storage_service_addr: cli.storage_service_addr,
         executor_kind: cli.executor_kind,
         no_tgrep: cli.no_tgrep,
+        api_key: cli.api_key,
+        auto_fetch_models: cli.auto_fetch_models,
     })
     .await
 }

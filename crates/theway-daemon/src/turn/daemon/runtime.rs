@@ -109,6 +109,9 @@ impl TurnHost {
             storage_service_addr: config.startup.storage_service_addr.clone(),
             executor_kind: Some(config.startup.executor_kind.to_string()),
             tgrep: Some(config.startup.tgrep_enabled),
+            api_key: config.startup.api_key.clone(),
+            auto_fetch_models: Some(config.startup.auto_fetch_models),
+            models: config.startup.models.clone(),
             clear_fields: Vec::new(),
         }));
         let tool_ops: Arc<dyn ToolOps> = Arc::new(ForwardingToolOps::new(daemon_config.clone()));

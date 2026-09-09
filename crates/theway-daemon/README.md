@@ -18,6 +18,8 @@ The execution environment is selected at runtime. `[executor] kind = "local" | "
 
 The trigram-indexed `grep` backend is opt-out (issue #135): `[tools] tgrep = false` in `config.toml` is carried by `theway-tui` as `--no-tgrep`, which binds `TgrepServerRegistry::disabled()`. Every `grep` query then takes the in-process walker, and no `tgrep serve` process or `.tgrep` index is created. The setting is startup-only and appears in `GetConfig`.
 
+The model catalog is controller-provisioned (issue #136). `theway-tui` parses `[model]` (`provider`, `model`, `base_url`, `api_key`, `auto_fetch_models`) and `[[model.custom]]` from `config.toml` and pushes them through the settings RPC; the daemon registers the descriptors before resolving a model and resolves `api_key` after provider environment variables and before `auth.json`. With `auto_fetch_models = true` the daemon imports `GET <base_url>/models` and fills an unset model id from the first entry. Headless equivalents are `--api-key` and `--auto-fetch-models`; the former `models.json` files are no longer read.
+
 ## Running and validation
 
 ```bash
