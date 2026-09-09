@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 use theway_transport::auth::AuthStore;
 
 mod load_all;
+mod merge;
 mod streamable_http;
 
 fn test_paths() -> (tempfile::TempDir, tempfile::TempDir, crate::DaemonPaths) {
@@ -46,6 +47,13 @@ async fn stdio_err(server: &ServerConfig, cwd: &Path) -> String {
     }
 }
 
+/// A notification hook for a named server; the sender is dropped immediately,
+/// which is fine because these tests never run the hook.
+fn hook_for(name: &str) -> Arc<McpNotificationHook> {
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    Arc::new(McpNotificationHook::new(name, rx))
+}
+
 async fn streamable_http_err(server: &ServerConfig, auth_path: &Path) -> String {
     match connect_streamable_http(server, auth_path).await {
         Ok(_) => panic!("streamable_http server should fail"),
@@ -70,22 +78,29 @@ fn http_server(endpoint: &str) -> ServerConfig {
     }
 }
 
-/// Two configured servers both fail to start (executable does not exist). Verify
-/// `client_count` reports 0 (not 2), and each failure surfaces a diagnostic. Pinned
-/// behavior for code-review item #9: the TUI startup banner reads from this field.
+/// Two configured servers both fail to start (executable does not exist). Verify the
+/// layer reports 0 connected servers (not 2), and each failure surfaces a diagnostic.
+/// Pinned behavior for code-review item #9: the TUI startup banner reads the layer.
 #[tokio::test]
 async fn client_count_reflects_successful_connections_not_attempts() {
     let configs = vec![stdio_server("broken-a"), stdio_server("broken-b")];
     let (_work, _base, paths) = test_paths();
-    let (tools, hooks, diagnostics, client_count, server_names) =
+    let (layer, diagnostics) =
         connect_servers(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
-    assert_eq!(client_count, 0, "no server should be reported as connected");
-    assert!(server_names.is_empty());
-    assert!(tools.is_empty(), "no tools should load from failed servers");
     assert!(
-        hooks.is_empty(),
+        layer.servers.is_empty(),
+        "no server should be reported as connected"
+    );
+    assert!(layer.server_names().is_empty());
+    assert!(
+        layer.tools().is_empty(),
+        "no tools should load from failed servers"
+    );
+    assert!(
+        layer.hooks().is_empty(),
         "no notification hooks should be created for failed servers"
     );
+    assert_eq!(layer.errors.len(), 2);
     assert_eq!(
         diagnostics.len(),
         2,
@@ -106,13 +121,14 @@ async fn client_count_reflects_successful_connections_not_attempts() {
 #[tokio::test]
 async fn empty_configs_reports_zero() {
     let (_work, _base, paths) = test_paths();
-    let (tools, hooks, diagnostics, client_count, server_names) =
+    let (layer, diagnostics) =
         connect_servers(&[], &paths.work_dir, &paths.base.join("auth.json")).await;
-    assert!(tools.is_empty());
-    assert!(hooks.is_empty());
+    assert!(layer.servers.is_empty());
+    assert!(layer.tools().is_empty());
+    assert!(layer.hooks().is_empty());
     assert!(diagnostics.is_empty());
-    assert_eq!(client_count, 0);
-    assert!(server_names.is_empty());
+    assert!(layer.errors.is_empty());
+    assert!(layer.server_names().is_empty());
 }
 
 #[test]
@@ -442,14 +458,14 @@ async fn connect_all_returns_tools_and_hook_for_fake_stdio_server() {
     let configs = vec![fake, stdio_server("broken-after-fake")];
     let (_work, _base, paths) = test_paths();
 
-    let (tools, hooks, diagnostics, client_count, server_names) =
+    let (layer, diagnostics) =
         connect_servers(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
 
-    assert_eq!(client_count, 1);
-    assert_eq!(server_names, vec!["fake-success".to_string()]);
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0].definition().name, "fake_tool");
-    assert_eq!(hooks.len(), 1);
+    assert_eq!(layer.servers.len(), 1);
+    assert_eq!(layer.server_names(), vec!["fake-success".to_string()]);
+    assert_eq!(layer.tools().len(), 1);
+    assert_eq!(layer.tools()[0].definition().name, "fake_tool");
+    assert_eq!(layer.hooks().len(), 1);
     assert_eq!(diagnostics.len(), 1);
     assert!(
         diagnostics[0].contains("broken-after-fake"),
@@ -477,10 +493,9 @@ fn validate_unique_names_rejects_empty_and_duplicates() {
     assert!(err.contains("duplicate server name 'dup'"), "{err}");
 }
 
-/// Issue #73: a fresh connection result replaces the slot state — errors
-/// come from the loader diagnostics with the server name attached, inject
-/// sets derive from the applied configs, and `registered_labels` resets
-/// because the hooks are new instances.
+/// Issue #73: a fresh connection layer replaces the slot state — errors,
+/// inject sets, grouped servers, and `registered_labels` (reset because the
+/// hooks are new instances).
 #[test]
 fn replace_connection_result_recomputes_slot_state() {
     let mut state = crate::mcp_loader::McpProvisionState::default();
@@ -490,21 +505,23 @@ fn replace_connection_result_recomputes_slot_state() {
     let mut broken = stdio_server("broken");
     broken.inject_and_run = true;
     let configs = vec![ok, broken];
-    let result: (
-        Vec<Arc<dyn theway_core::AgentTool>>,
-        Vec<Arc<McpNotificationHook>>,
-        Vec<String>,
-        usize,
-        Vec<String>,
-    ) = (
-        Vec::new(),
-        Vec::new(),
-        vec!["mcp server 'broken' failed: spawn failed".into()],
-        1,
-        vec!["ok".into()],
+    let layer = crate::mcp_loader::McpLayer {
+        servers: vec![crate::mcp_loader::ConnectedMcpServer {
+            name: "ok".into(),
+            tools: Vec::new(),
+            hook: hook_for("ok"),
+        }],
+        inject_summary: ["ok".to_string()].into_iter().collect(),
+        inject_and_run: ["broken".to_string()].into_iter().collect(),
+        errors: vec![("broken".into(), "spawn failed".into())],
+    };
+    state.replace_connection_result(
+        configs,
+        (layer, vec!["mcp server 'broken' failed: spawn failed".into()]),
     );
-    state.replace_connection_result(configs, result);
     assert_eq!(state.server_names, vec!["ok".to_string()]);
+    assert_eq!(state.servers.len(), 1);
+    assert_eq!(state.hooks.len(), 1);
     assert_eq!(state.errors.len(), 1);
     assert_eq!(state.errors[0].0, "broken");
     assert!(state.errors[0].1.contains("spawn failed"));

@@ -83,3 +83,9 @@ mod triggers;
 #[cfg(test)]
 #[path = "../tests/common/env_lock.rs"]
 pub(crate) mod test_env;
+
+// Test-only stdio MCP fixtures shared by the bridged `turn/daemon` suites;
+// one crate-level include so the same file is never loaded as two modules.
+#[cfg(test)]
+#[path = "../tests/common/mcp_fixture.rs"]
+pub(crate) mod mcp_test_fixture;

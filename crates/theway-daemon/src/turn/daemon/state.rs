@@ -483,9 +483,19 @@ impl TurnHost {
             context,
             ..
         } = activation;
+        // Session-level MCP overlay (session-scoped-mcp): the activated context
+        // carries the per-session slot the harness was just built from. Keep it
+        // on the session state so snapshots, `/reload`, and a later `Configure`
+        // address this session's MCP state rather than the daemon's.
+        let mcp_overlay = context.mcp.overlay.clone();
+        let mcp_capabilities = context.mcp.capabilities();
+        if let Some(overlay) = mcp_overlay.as_ref() {
+            // The build that just ran registered exactly the slot's hooks.
+            overlay.slot.write().unwrap().mark_hooks_registered();
+        }
         let cwd = runtime.cwd.clone();
         let old_projection = self.take_active_projection();
-        let new_state = SessionRuntimeState::from_runtime(
+        let mut new_state = SessionRuntimeState::from_runtime(
             runtime,
             self.session.factory.clone(),
             repository,
@@ -496,6 +506,9 @@ impl TurnHost {
                 self.projection.thinking_summary.clone(),
             ),
         );
+        new_state.mcp_overlay = mcp_overlay;
+        apply_mcp_capabilities(&mut new_state.projection.capabilities, &mcp_capabilities);
+        apply_mcp_capabilities(&mut self.projection.capabilities, &mcp_capabilities);
         let mut old = std::mem::replace(&mut self.session, new_state);
         old.projection = old_projection;
         self.sessions.insert(old);
@@ -597,6 +610,127 @@ impl TurnHost {
         }
         prompt.resolve(decision);
     }
+
+    /// Re-merge the active session's MCP overlay after the daemon-level
+    /// provision slot changed (`Configure`): recompute the per-session slot
+    /// with same-name daemon entries replaced, swap the live harness's MCP
+    /// tools, and register the hooks that are new instances. Sessions whose
+    /// daemon layer is the local `mcp.toml` scan are left alone — `Configure`
+    /// does not govern that layer.
+    pub(crate) fn remerge_active_session_mcp(&mut self) {
+        let Some(overlay) = self.session.mcp_overlay.clone() else {
+            return;
+        };
+        if !overlay.from_global_slot {
+            return;
+        }
+        let (daemon, daemon_configs) = {
+            let slot = self.runtime.mcp_provision.read().unwrap();
+            (slot.layer(), slot.configs.clone())
+        };
+        let overlay_names: std::collections::HashSet<String> = overlay
+            .configs
+            .iter()
+            .map(|config| config.name.clone())
+            .collect();
+        // Read the session layer back out of its own slot rather than the
+        // activation-time connection result: `/reload` replaces those
+        // instances, and re-merging stale ones would resurrect dead clients.
+        let session_layer = {
+            let slot = overlay.slot.read().unwrap();
+            crate::mcp_loader::McpLayer {
+                servers: slot
+                    .servers
+                    .iter()
+                    .filter(|server| overlay_names.contains(&server.name))
+                    .cloned()
+                    .collect(),
+                inject_summary: slot
+                    .inject_summary
+                    .iter()
+                    .filter(|name| overlay_names.contains(*name))
+                    .cloned()
+                    .collect(),
+                inject_and_run: slot
+                    .inject_and_run
+                    .iter()
+                    .filter(|name| overlay_names.contains(*name))
+                    .cloned()
+                    .collect(),
+                errors: slot
+                    .errors
+                    .iter()
+                    .filter(|(name, _)| overlay_names.contains(name))
+                    .cloned()
+                    .collect(),
+            }
+        };
+        let merged = crate::mcp_loader::merge_mcp_layers(&daemon, &overlay_names, &session_layer);
+        let effective_configs: Vec<_> = daemon_configs
+            .into_iter()
+            .filter(|config| !overlay_names.contains(&config.name))
+            .chain(overlay.configs.iter().cloned())
+            .collect();
+        let (old_tools, new_tools, new_hooks, capabilities) = {
+            use crate::trigger_engine::notification_hook::NotificationHook;
+            let mut slot = overlay.slot.write().unwrap();
+            let old_tools = slot.tools.clone();
+            slot.replace_connection_result(effective_configs, (merged, Vec::new()));
+            // Session-level hooks were registered by the session build and are
+            // still the same instances; every other hook is a new instance.
+            slot.registered_labels = session_layer
+                .hooks()
+                .iter()
+                .map(|hook| hook.label().to_string())
+                .collect();
+            let capabilities = crate::orchestration::SessionMcpCapabilities {
+                servers: slot.server_names.len(),
+                tools: slot.tool_names.len(),
+                notification_hooks: slot.hooks.len(),
+                server_names: slot.server_names.clone(),
+                tool_names: slot.tool_names.clone(),
+                errors: slot.errors.clone(),
+            };
+            (
+                old_tools,
+                slot.tools.clone(),
+                slot.hooks.clone(),
+                capabilities,
+            )
+        };
+        self.session
+            .kernel
+            .harness()
+            .replace_mcp_tools(&old_tools, new_tools);
+        {
+            use crate::orchestration::session::NotificationHookSink;
+            use crate::trigger_engine::notification_hook::NotificationHook;
+            let executor = self.session.kernel.trigger_executor().clone();
+            let mut slot = overlay.slot.write().unwrap();
+            for hook in &new_hooks {
+                let label = hook.label().to_string();
+                if slot.registered_labels.insert(label) {
+                    executor.register(hook.clone());
+                }
+            }
+        }
+        apply_mcp_capabilities(&mut self.projection.capabilities, &capabilities);
+        apply_mcp_capabilities(&mut self.session.projection.capabilities, &capabilities);
+    }
+}
+
+/// Copy the MCP fields of an activated session's capability view into a
+/// projection's runtime capabilities.
+fn apply_mcp_capabilities(
+    target: &mut RuntimeCapabilities,
+    mcp: &crate::orchestration::SessionMcpCapabilities,
+) {
+    target.mcp_servers = mcp.servers;
+    target.mcp_tools = mcp.tools;
+    target.mcp_notification_hooks = mcp.notification_hooks;
+    target.mcp_server_names = mcp.server_names.clone();
+    target.mcp_tool_names = mcp.tool_names.clone();
+    target.mcp_server_errors = mcp.errors.clone();
 }
 
 /// Parse and validate a wire thinking level, returning the shared error line

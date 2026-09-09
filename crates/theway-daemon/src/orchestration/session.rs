@@ -20,8 +20,9 @@ pub(crate) use activation_build::load_persisted_dag_runs;
 #[allow(unused_imports)]
 // Public API re-exports; some are used only by external embedders/tests.
 pub use resources::{
-    SessionExecutionContext, SessionExtensionResources, SessionHookResources, SessionMcpResources,
-    SessionProjectResources, parse_mcp_diagnostic,
+    SessionExecutionContext, SessionExtensionResources, SessionHookResources,
+    SessionMcpCapabilities, SessionMcpOverlay, SessionMcpResources, SessionProjectResources,
+    parse_mcp_diagnostic,
 };
 
 /// session-resource-model: rebuilds a fully-wired [`AgentHarness`] for any session id —

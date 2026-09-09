@@ -6,6 +6,7 @@
 //! Failure is non-fatal at the load level: a server that fails to start emits a startup
 //! diagnostic and is skipped. The agent runs without it.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -20,6 +21,7 @@ use theway_mcp::{
 use crate::triggers::McpNotificationHook;
 use theway_daemon::tools::mcp_adapter::McpAgentTool;
 use theway_transport::auth::AuthStore;
+use theway_transport::wire::WireProvisionedMcpServer;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct McpConfig {
@@ -76,23 +78,139 @@ pub struct ReconnectConfig {
     pub max_attempts: Option<usize>,
 }
 
-/// Output of loading. Holds tools (to register with the agent), diagnostics (startup
-/// failures to print to the user), and notification hooks (one per MCP server that
-/// successfully connected — the caller is expected to register each with
-/// `AgentHarness::register_notification_hook` once the harness is built so MCP server
-/// pushes drive the runtime trigger pipeline).
-pub struct LoadedMcp {
+/// One successfully connected MCP server: the config name it was connected
+/// under, the tools it exposed, and its notification hook. Grouping tools and
+/// hook under the server name is what lets a session-level layer replace a
+/// daemon-level server without reconnecting anything.
+#[derive(Clone)]
+pub struct ConnectedMcpServer {
+    pub name: String,
     pub tools: Vec<Arc<dyn AgentTool>>,
+    pub hook: Arc<McpNotificationHook>,
+}
+
+/// One MCP layer: connected servers plus the inject policy and per-server
+/// failures that belong with them. The daemon layer comes from `mcp.toml` or
+/// the settings `Configure` path; the session layer comes from
+/// `ActivateSession.mcp_servers`.
+#[derive(Clone, Default)]
+pub struct McpLayer {
+    pub servers: Vec<ConnectedMcpServer>,
+    pub inject_summary: HashSet<String>,
+    pub inject_and_run: HashSet<String>,
+    /// Per-server failures as `(name, message)`.
+    pub errors: Vec<(String, String)>,
+}
+
+impl McpLayer {
+    pub fn tools(&self) -> Vec<Arc<dyn AgentTool>> {
+        self.servers
+            .iter()
+            .flat_map(|server| server.tools.iter().cloned())
+            .collect()
+    }
+
+    pub fn hooks(&self) -> Vec<Arc<McpNotificationHook>> {
+        self.servers
+            .iter()
+            .map(|server| server.hook.clone())
+            .collect()
+    }
+
+    pub fn server_names(&self) -> Vec<String> {
+        self.servers
+            .iter()
+            .map(|server| server.name.clone())
+            .collect()
+    }
+
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools()
+            .iter()
+            .map(|tool| tool.definition().name.clone())
+            .collect()
+    }
+}
+
+/// Layer `overlay` over `daemon`: an overlay server name replaces the daemon
+/// entry with the same name (tools, hook, inject flags, failure row) so one
+/// session never runs two servers under one name. `overlay_names` comes from
+/// the requested configs, not from successful connections — a session server
+/// that failed to connect still shadows the daemon entry instead of silently
+/// falling back to it.
+pub fn merge_mcp_layers(
+    daemon: &McpLayer,
+    overlay_names: &HashSet<String>,
+    overlay: &McpLayer,
+) -> McpLayer {
+    let mut servers: Vec<ConnectedMcpServer> = daemon
+        .servers
+        .iter()
+        .filter(|server| !overlay_names.contains(&server.name))
+        .cloned()
+        .collect();
+    servers.extend(overlay.servers.iter().cloned());
+    let mut inject_summary = daemon.inject_summary.clone();
+    inject_summary.retain(|name| !overlay_names.contains(name));
+    inject_summary.extend(overlay.inject_summary.iter().cloned());
+    let mut inject_and_run = daemon.inject_and_run.clone();
+    inject_and_run.retain(|name| !overlay_names.contains(name));
+    inject_and_run.extend(overlay.inject_and_run.iter().cloned());
+    let mut errors: Vec<(String, String)> = daemon
+        .errors
+        .iter()
+        .filter(|(name, _)| !overlay_names.contains(name))
+        .cloned()
+        .collect();
+    errors.extend(overlay.errors.iter().cloned());
+    McpLayer {
+        servers,
+        inject_summary,
+        inject_and_run,
+        errors,
+    }
+}
+
+/// Convert one wire-provisioned server (settings `Configure` or
+/// `ActivateSession.mcp_servers`) into the loader's config shape.
+pub(crate) fn server_config_from_wire(server: &WireProvisionedMcpServer) -> ServerConfig {
+    ServerConfig {
+        name: server.name.clone(),
+        kind: match server.kind.as_str() {
+            "streamable_http" => ServerKind::StreamableHttp,
+            _ => ServerKind::Stdio,
+        },
+        command: server.command.clone(),
+        args: server.args.clone(),
+        endpoint: server.endpoint.clone(),
+        auth: server.auth.as_ref().map(|auth| HttpAuthConfig {
+            kind: auth.kind.clone(),
+            token_keychain_ref: auth.token_keychain_ref.clone(),
+        }),
+        request_timeout_ms: server.request_timeout_ms,
+        sse_idle_timeout_ms: server.sse_idle_timeout_ms,
+        body_cap_bytes: server.body_cap_bytes.map(|bytes| bytes as usize),
+        reconnect: server.reconnect.as_ref().map(|reconnect| ReconnectConfig {
+            initial_ms: reconnect.initial_ms,
+            max_ms: reconnect.max_ms,
+            max_attempts: reconnect.max_attempts.map(|attempts| attempts as usize),
+        }),
+        inject_summary: server.inject_summary,
+        inject_and_run: server.inject_and_run,
+    }
+}
+
+/// Output of loading. Holds the applied configs, the connected-server layer
+/// (tools + notification hooks + inject policy + failures), and diagnostics
+/// (startup failures to print to the user). Hooks are one per successfully
+/// connected server — the caller registers each with the harness once it is
+/// built so MCP server pushes drive the runtime trigger pipeline.
+pub struct LoadedMcp {
+    /// Configs applied in connect order (project entries override user ones).
+    pub configs: Vec<ServerConfig>,
+    /// Connected servers with their inject policy and per-server failures.
+    pub layer: McpLayer,
     pub diagnostics: Vec<String>,
-    pub client_count: usize,
-    pub server_names: Vec<String>,
-    pub notification_hooks: Vec<Arc<McpNotificationHook>>,
-    /// Names of servers configured with `inject_summary = true`. The caller wires these into
-    /// `triggers::direct_inject_action_hook` so their pushes bypass the sub-agent.
-    pub inject_summary_servers: std::collections::HashSet<String>,
-    /// Names of servers configured with `inject_and_run = true` — injected summary plus one
-    /// model turn in the parent context.
-    pub inject_and_run_servers: std::collections::HashSet<String>,
 }
 
 impl LoadedMcp {
@@ -103,13 +221,9 @@ impl LoadedMcp {
     /// the [`McpProvisionState`] slot below.
     pub fn empty() -> Self {
         Self {
-            tools: Vec::new(),
+            configs: Vec::new(),
+            layer: McpLayer::default(),
             diagnostics: Vec::new(),
-            client_count: 0,
-            server_names: Vec::new(),
-            notification_hooks: Vec::new(),
-            inject_summary_servers: std::collections::HashSet::new(),
-            inject_and_run_servers: std::collections::HashSet::new(),
         }
     }
 }
@@ -133,83 +247,60 @@ pub async fn load_all(paths: &theway_daemon::DaemonPaths) -> LoadedMcp {
             }
         }
     }
-    let inject_summary_servers: std::collections::HashSet<String> = configs
-        .iter()
-        .filter(|c| c.inject_summary)
-        .map(|c| c.name.clone())
-        .collect();
-    let inject_and_run_servers: std::collections::HashSet<String> = configs
-        .iter()
-        .filter(|c| c.inject_and_run)
-        .map(|c| c.name.clone())
-        .collect();
 
-    let (tools, notification_hooks, connect_diagnostics, client_count, server_names) =
+    let (layer, connect_diagnostics) =
         connect_servers(&configs, &paths.work_dir, &paths.base.join("auth.json")).await;
     diagnostics.extend(connect_diagnostics);
     LoadedMcp {
-        tools,
+        configs,
+        layer,
         diagnostics,
-        client_count,
-        server_names,
-        notification_hooks,
-        inject_summary_servers,
-        inject_and_run_servers,
     }
 }
 
-/// Connect to each configured server. Returns the tools collected, the
-/// `McpNotificationHook` per successful connection, per-server failure diagnostics, and
-/// the number of servers that actually connected.
+/// Connect to each configured server and return the resulting layer plus the
+/// raw per-server failure diagnostics.
 ///
-/// `client_count` reports **successful** connections, not attempted ones. The TUI startup
-/// banner prints "connected to N server(s)" using this field; previously it reported
-/// `configs.len()`, so the user saw "connected to 3" alongside two error diagnostics when
-/// 2 of 3 servers failed to start. See code-review item #9 (2026-05-22).
-/// Connect to each configured server. Returns the tools collected, the
-/// `McpNotificationHook` per successful connection, per-server failure diagnostics, and
-/// the number of servers that actually connected.
-///
-/// `client_count` reports **successful** connections, not attempted ones. The TUI startup
-/// banner prints "connected to N server(s)" using this field; previously it reported
-/// `configs.len()`, so the user saw "connected to 3" alongside two error diagnostics when
-/// 2 of 3 servers failed to start. See code-review item #9 (2026-05-22).
+/// `layer.servers` reports **successful** connections, not attempted ones: the TUI
+/// startup banner prints "connected to N server(s)" from it, and a server that
+/// failed to start contributes an error row instead.
 pub(crate) async fn connect_servers(
     configs: &[ServerConfig],
     cwd: &Path,
     auth_path: &Path,
-) -> (
-    Vec<Arc<dyn AgentTool>>,
-    Vec<Arc<McpNotificationHook>>,
-    Vec<String>,
-    usize,
-    Vec<String>,
-) {
-    let mut tools: Vec<Arc<dyn AgentTool>> = Vec::new();
-    let mut notification_hooks: Vec<Arc<McpNotificationHook>> = Vec::new();
+) -> (McpLayer, Vec<String>) {
+    let mut servers: Vec<ConnectedMcpServer> = Vec::new();
     let mut diagnostics: Vec<String> = Vec::new();
-    let mut client_count = 0usize;
-    let mut server_names = Vec::new();
     for s in configs.iter() {
         match connect_one(s, cwd, auth_path).await {
-            Ok((server_tools, hook)) => {
-                tools.extend(server_tools);
-                notification_hooks.push(hook);
-                client_count += 1;
-                server_names.push(s.name.clone());
-            }
+            Ok((tools, hook)) => servers.push(ConnectedMcpServer {
+                name: s.name.clone(),
+                tools,
+                hook,
+            }),
             Err(e) => {
                 diagnostics.push(format!("mcp server '{}' failed: {e}", s.name));
             }
         }
     }
-    (
-        tools,
-        notification_hooks,
-        diagnostics,
-        client_count,
-        server_names,
-    )
+    let layer = McpLayer {
+        servers,
+        inject_summary: configs
+            .iter()
+            .filter(|config| config.inject_summary)
+            .map(|config| config.name.clone())
+            .collect(),
+        inject_and_run: configs
+            .iter()
+            .filter(|config| config.inject_and_run)
+            .map(|config| config.name.clone())
+            .collect(),
+        errors: diagnostics
+            .iter()
+            .map(|diagnostic| parse_mcp_diagnostic(diagnostic))
+            .collect(),
+    };
+    (layer, diagnostics)
 }
 
 async fn read_config(path: &Path, diagnostics: &mut Vec<String>, label: &str) -> Option<McpConfig> {
@@ -391,7 +482,10 @@ tests_bridge_macro::tests_bridge!("mcp_loader");
 pub struct McpProvisionState {
     /// The last applied server configs — reconnect source for `/reload`.
     pub configs: Vec<ServerConfig>,
-    /// Tools from the currently connected servers.
+    /// Connected servers, grouped by name so a session-level layer can replace
+    /// a same-name daemon server without reconnecting anything.
+    pub servers: Vec<ConnectedMcpServer>,
+    /// Tools from the currently connected servers (flat view of `servers`).
     pub tools: Vec<Arc<dyn AgentTool>>,
     /// Notification hooks (one per connected server).
     pub hooks: Vec<Arc<McpNotificationHook>>,
@@ -414,48 +508,58 @@ pub struct McpProvisionState {
 }
 
 impl McpProvisionState {
-    /// Replace the state from a fresh connection result. Errors are derived
-    /// from the loader diagnostics (server failures carry the server name);
-    /// inject sets come from the applied configs; `registered_labels`
+    /// Replace the state from a fresh connection result. `registered_labels`
     /// resets because the hooks are new instances.
     pub(crate) fn replace_connection_result(
         &mut self,
         configs: Vec<ServerConfig>,
-        result: (
-            Vec<Arc<dyn AgentTool>>,
-            Vec<Arc<McpNotificationHook>>,
-            Vec<String>,
-            usize,
-            Vec<String>,
-        ),
+        result: (McpLayer, Vec<String>),
     ) {
-        let (tools, hooks, diagnostics, _client_count, server_names) = result;
+        let (layer, _diagnostics) = result;
         self.configs = configs;
-        self.tools = tools;
-        self.hooks = hooks;
-        self.server_names = server_names;
+        self.servers = layer.servers;
+        self.inject_summary = layer.inject_summary;
+        self.inject_and_run = layer.inject_and_run;
+        self.errors = layer.errors;
+        self.server_names = self.servers.iter().map(|s| s.name.clone()).collect();
+        self.tools = self
+            .servers
+            .iter()
+            .flat_map(|server| server.tools.iter().cloned())
+            .collect();
+        self.hooks = self
+            .servers
+            .iter()
+            .map(|server| server.hook.clone())
+            .collect();
         self.tool_names = self
             .tools
             .iter()
             .map(|tool| tool.definition().name.clone())
             .collect();
-        self.errors = diagnostics
-            .iter()
-            .map(|diagnostic| parse_mcp_diagnostic(diagnostic))
-            .collect();
-        self.inject_summary = self
-            .configs
-            .iter()
-            .filter(|c| c.inject_summary)
-            .map(|c| c.name.clone())
-            .collect();
-        self.inject_and_run = self
-            .configs
-            .iter()
-            .filter(|c| c.inject_and_run)
-            .map(|c| c.name.clone())
-            .collect();
         self.registered_labels.clear();
+    }
+
+    /// The connected-server layer, for merging a session-level overlay over it.
+    pub fn layer(&self) -> McpLayer {
+        McpLayer {
+            servers: self.servers.clone(),
+            inject_summary: self.inject_summary.clone(),
+            inject_and_run: self.inject_and_run.clone(),
+            errors: self.errors.clone(),
+        }
+    }
+
+    /// Mark the current hooks as registered on the owning session executor.
+    /// A per-session slot installed at activation is followed by exactly one
+    /// build that registers these hooks, so the labels can be seeded up front
+    /// and a later `Configure` re-merge only registers genuinely new hooks.
+    pub(crate) fn mark_hooks_registered(&mut self) {
+        use crate::trigger_engine::notification_hook::NotificationHook;
+        for hook in &self.hooks {
+            let label = hook.label().to_string();
+            self.registered_labels.insert(label);
+        }
     }
 }
 

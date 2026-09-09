@@ -386,15 +386,18 @@ pub async fn run(options: DaemonOptions) -> Result<()> {
     });
     services
         .session_activator
-        .set(Arc::new(SessionActivator::new(
-            &session_runtime_builder,
-            storage.clone(),
-            paths.clone(),
-            thinking,
-            options.builtin_skills.clone(),
-            startup.builtin_skills.clone(),
-            startup.load_local_sources,
-        )))
+        .set(Arc::new(
+            SessionActivator::new(
+                &session_runtime_builder,
+                storage.clone(),
+                paths.clone(),
+                thinking,
+                options.builtin_skills.clone(),
+                startup.builtin_skills.clone(),
+                startup.load_local_sources,
+            )
+            .with_mcp_provision(mcp_provision.clone()),
+        ))
         .map_err(|_| anyhow::anyhow!("session activator already installed"))?;
     let initial_runtime = session_runtime_builder
         .build_opened(&session_context, store, resumed)

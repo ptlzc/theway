@@ -9,13 +9,13 @@ fn loaded_mcp_empty_returns_empty_fields() {
     let loaded = LoadedMcp::empty();
 
     // Assert
-    assert!(loaded.tools.is_empty());
+    assert!(loaded.configs.is_empty());
+    assert!(loaded.layer.servers.is_empty());
+    assert!(loaded.layer.tools().is_empty());
+    assert!(loaded.layer.hooks().is_empty());
+    assert!(loaded.layer.inject_summary.is_empty());
+    assert!(loaded.layer.inject_and_run.is_empty());
     assert!(loaded.diagnostics.is_empty());
-    assert_eq!(loaded.client_count, 0);
-    assert!(loaded.server_names.is_empty());
-    assert!(loaded.notification_hooks.is_empty());
-    assert!(loaded.inject_summary_servers.is_empty());
-    assert!(loaded.inject_and_run_servers.is_empty());
 }
 
 #[tokio::test]
@@ -64,10 +64,13 @@ inject_and_run = true
     let loaded = load_all(&paths).await;
 
     // Assert
-    assert_eq!(loaded.client_count, 0, "no broken server should connect");
-    assert!(loaded.server_names.is_empty());
-    assert!(loaded.tools.is_empty());
-    assert!(loaded.notification_hooks.is_empty());
+    assert!(
+        loaded.layer.servers.is_empty(),
+        "no broken server should connect"
+    );
+    assert!(loaded.layer.server_names().is_empty());
+    assert!(loaded.layer.tools().is_empty());
+    assert!(loaded.layer.hooks().is_empty());
     assert_eq!(loaded.diagnostics.len(), 4, "{:?}", loaded.diagnostics);
     assert!(
         loaded
@@ -86,11 +89,12 @@ inject_and_run = true
         loaded.diagnostics
     );
 
-    assert_eq!(loaded.inject_summary_servers.len(), 1);
-    assert!(loaded.inject_summary_servers.contains("user-summary"));
-    assert_eq!(loaded.inject_and_run_servers.len(), 2);
-    assert!(loaded.inject_and_run_servers.contains("shared"));
-    assert!(loaded.inject_and_run_servers.contains("project-runner"));
+    assert_eq!(loaded.layer.inject_summary.len(), 1);
+    assert!(loaded.layer.inject_summary.contains("user-summary"));
+    assert_eq!(loaded.layer.inject_and_run.len(), 2);
+    assert!(loaded.layer.inject_and_run.contains("shared"));
+    assert!(loaded.layer.inject_and_run.contains("project-runner"));
+    assert_eq!(loaded.configs.len(), 4);
 }
 
 #[tokio::test]

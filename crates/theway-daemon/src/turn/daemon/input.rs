@@ -211,7 +211,15 @@ impl TurnHost {
                 tool_count: self.session.tool_count,
                 cwd: &self.runtime.cwd,
                 inherit_slot: &self.runtime.inherit_slot,
-                mcp_provision: Some(&self.runtime.mcp_provision),
+                // session-scoped-mcp: `/reload` reconnects this session's own
+                // slot when an overlay is installed, so the session servers
+                // stay in the set instead of being replaced by the daemon's.
+                mcp_provision: Some(
+                    self.session
+                        .mcp_overlay
+                        .as_ref()
+                        .map_or(&self.runtime.mcp_provision, |overlay| &overlay.slot),
+                ),
                 auth_base: Some(&self.runtime.paths.base),
                 collapse_unload_slot: &self.runtime.collapse_unload_slot,
             };
@@ -380,7 +388,12 @@ impl TurnHost {
                 tool_count: session.tool_count,
                 cwd: &session.cwd,
                 inherit_slot: &self.runtime.inherit_slot,
-                mcp_provision: Some(&self.runtime.mcp_provision),
+                mcp_provision: Some(
+                    session
+                        .mcp_overlay
+                        .as_ref()
+                        .map_or(&self.runtime.mcp_provision, |overlay| &overlay.slot),
+                ),
                 auth_base: Some(&self.runtime.paths.base),
                 collapse_unload_slot: &self.runtime.collapse_unload_slot,
             };

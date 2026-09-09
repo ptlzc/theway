@@ -21,10 +21,11 @@ use crate::commands::Registry;
 use crate::paths::DaemonPaths;
 use crate::session_ops::SessionFactory;
 use crate::trigger_engine::execution::TriggerExecutor;
+use crate::mcp_test_fixture::{bogus_stdio_server, thewayd_stdio_server};
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 use crate::turn::kernel::TurnState;
 use theway_storage::sqlite_repo::SqliteSessionRepo;
-use theway_transport::wire::{WireDaemonConfig, WireProvisionedMcpServer};
+use theway_transport::wire::WireDaemonConfig;
 
 fn faux_model() -> theway_llm_provider::Model {
     theway_llm_provider::Model {
@@ -145,49 +146,6 @@ impl HostFixture {
 
     fn tool_count(&self) -> usize {
         self.host.session.kernel.harness().agent().state().tools.len()
-    }
-}
-
-/// A real stdio MCP server: the `thewayd --mcp` binary answers
-/// initialize/tools-list over stdio (see `tests/mcp_e2e.rs`). The lib-test
-/// target cannot use `CARGO_BIN_EXE_thewayd`, so the binary is located as a
-/// sibling of the test executable (`$target/debug/thewayd` next to
-/// `$target/debug/deps/`).
-fn thewayd_stdio_server(scratch: &TempDir, name: &str) -> WireProvisionedMcpServer {
-    let bin = std::env::current_exe()
-        .expect("current_exe")
-        .parent()
-        .expect("deps dir")
-        .parent()
-        .expect("target debug dir")
-        .join("thewayd")
-        .to_string_lossy()
-        .into_owned();
-    let dir = scratch.path().to_string_lossy().into_owned();
-    WireProvisionedMcpServer {
-        name: name.into(),
-        kind: "stdio".into(),
-        command: Some(bin),
-        args: vec![
-            "--mcp".into(),
-            "--cwd".into(),
-            dir.clone(),
-            "--home".into(),
-            dir.clone(),
-            "--theway-dir".into(),
-            dir,
-        ],
-        ..Default::default()
-    }
-}
-
-/// A stdio server that fails instantly (no such binary).
-fn bogus_stdio_server(name: &str) -> WireProvisionedMcpServer {
-    WireProvisionedMcpServer {
-        name: name.into(),
-        kind: "stdio".into(),
-        command: Some(format!("/definitely/not/a/real/path/for/mcp/{name}")),
-        ..Default::default()
     }
 }
 
