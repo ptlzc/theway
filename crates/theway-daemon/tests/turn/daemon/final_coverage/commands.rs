@@ -360,8 +360,11 @@ async fn dispatch_web_slash_queues_template_and_compaction_when_busy() {
 
 #[tokio::test]
 async fn wire_sidebar_snapshot_maps_cron_jobs() {
-    static CRON_LOCK: Mutex<()> = Mutex::new(());
-    let _cron_guard = CRON_LOCK.lock().unwrap();
+    // Shared with every bridged module that mutates the process-global cron
+    // registry (issue #141).
+    let _cron_guard = crate::triggers::CRON_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let built = build_host(harness_with_input(Vec::new()));
     let (mut host, _scratch, _repo) = built.into_parts();

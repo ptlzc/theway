@@ -17,6 +17,13 @@ pub mod tool_assembly;
 
 #[cfg(test)]
 pub use cron::global_cron_registry;
+
+/// Serializes tests that mutate the process-global cron registry: bridged
+/// unit-test modules share one registry, so per-module locks do not exclude
+/// each other (issue #141).
+#[cfg(test)]
+pub(crate) static CRON_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[allow(unused_imports)]
 pub use cron::{
     CronJob, CronNotificationHook, ListCronJobsTool, NewCronJobTool, RemoveCronJobTool,

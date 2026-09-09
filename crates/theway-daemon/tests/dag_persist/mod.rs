@@ -207,9 +207,11 @@ async fn run_loop_debounces_dirty_notifications_and_saves() {
     let handle = DagPersistHandle::spawn(engine.clone(), cwd.clone());
 
     // Act: wake the background loop; it should coalesce and save within the
-    // 500 ms debounce window.
+    // 500 ms debounce window. The deadline is generous because the full-suite
+    // run schedules ~2k tests in parallel (issue #141); the loop returns as
+    // soon as the run lands, so a passing run costs no extra time.
     handle.notify_dirty();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
     let mut runs = load_session_runs(&cwd, "sess-1").await;
     while runs.is_empty() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;

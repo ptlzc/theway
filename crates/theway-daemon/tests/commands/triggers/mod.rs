@@ -23,7 +23,6 @@ use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::runtime::TriggerRuntimeConfig;
 
 static DYNAMIC_TRIGGER_LOCK: Mutex<()> = Mutex::new(());
-static CRON_LOCK: Mutex<()> = Mutex::new(());
 
 pub(super) fn faux_model() -> Model {
     Model {
@@ -103,7 +102,11 @@ pub(super) fn dynamic_trigger_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 pub(super) fn cron_lock() -> std::sync::MutexGuard<'static, ()> {
-    CRON_LOCK.lock().unwrap()
+    // Shared with every bridged module that mutates the process-global cron
+    // registry (issue #141).
+    crate::triggers::CRON_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct FailingAppendTriggerSession {
@@ -402,6 +405,9 @@ async fn cron_add_validates_args() {
 #[tokio::test]
 async fn cron_add_and_remove_roundtrip() {
     let _guard = cron_lock();
+    // The registry is process-global across bridged test modules: start from
+    // an empty one and remove the job this test actually added (issue #141).
+    crate::triggers::global_cron_registry().clear_for_tests();
 
     let session = new_session();
     let harness = harness_with(session.clone());
@@ -412,6 +418,11 @@ async fn cron_add_and_remove_roundtrip() {
 
     let mut audit_entries = None;
     for attempt in 0..4 {
+        let before: Vec<String> = crate::triggers::global_cron_registry()
+            .list()
+            .iter()
+            .map(|job| job.id.clone())
+            .collect();
         let outcome = CronCommand
             .run(
                 &["add".into(), "*/5 * * * *".into(), "echo hi".into()],
@@ -423,11 +434,11 @@ async fn cron_add_and_remove_roundtrip() {
             audit_entries = Some(session.entries().await.unwrap().len());
         }
 
-        let job = crate::triggers::global_cron_registry()
+        let added = crate::triggers::global_cron_registry()
             .list()
             .into_iter()
-            .find(|job| job.action == "echo hi");
-        let Some(job) = job else {
+            .find(|job| !before.contains(&job.id));
+        let Some(added) = added else {
             assert!(
                 attempt < 3,
                 "cron add should eventually create a job, but the registry is empty"
@@ -436,7 +447,7 @@ async fn cron_add_and_remove_roundtrip() {
         };
 
         let outcome = CronCommand
-            .run(&["remove".into(), job.id.clone()], &ctx)
+            .run(&["remove".into(), added.id.clone()], &ctx)
             .await;
         if matches!(outcome, CommandOutcome::Handled) {
             assert_eq!(audit_entries, Some(1));
@@ -444,7 +455,7 @@ async fn cron_add_and_remove_roundtrip() {
                 crate::triggers::global_cron_registry()
                     .list()
                     .iter()
-                    .all(|job| job.action != "echo hi"),
+                    .all(|job| job.id != added.id),
                 "remove should delete the added job"
             );
             return;
@@ -671,6 +682,7 @@ async fn cron_list_with_jobs_is_handled() {
 
     let outcome = CronCommand.run(&["list".into()], &ctx).await;
     assert!(matches!(outcome, CommandOutcome::Handled));
+    crate::triggers::global_cron_registry().clear_for_tests();
 }
 
 #[tokio::test]

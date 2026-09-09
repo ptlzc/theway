@@ -29,6 +29,13 @@ fn block_text(block: &UserContentBlock) -> String {
     }
 }
 
+/// Shared crate-level lock for the process-global cron registry (issue #141).
+fn cron_guard() -> std::sync::MutexGuard<'static, ()> {
+    crate::triggers::CRON_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn add_job(tag: &str) -> CronJob {
     let action = unique_action(tag);
     crate::triggers::global_cron_registry()
@@ -92,6 +99,7 @@ async fn new_cron_job_execute_validates_required_args_and_schedule() {
 
 #[tokio::test]
 async fn new_cron_job_execute_creates_session_scoped_job() {
+    let _guard = cron_guard();
     let tool = NewCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
     let action = unique_action("create");
 
@@ -131,6 +139,7 @@ async fn new_cron_job_execute_creates_session_scoped_job() {
 
 #[tokio::test]
 async fn list_cron_jobs_execute_renders_registry() {
+    let _guard = cron_guard();
     let job = add_job("list");
 
     let result = execute(&ListCronJobsTool::new(crate::triggers::global_cron_registry().clone()), json!({}))
@@ -150,6 +159,7 @@ async fn list_cron_jobs_execute_renders_registry() {
 
 #[tokio::test]
 async fn remove_cron_job_execute_validates_id_and_confirmation() {
+    let _guard = cron_guard();
     let tool = RemoveCronJobTool::new(None, crate::triggers::global_cron_registry().clone());
 
     let missing = execute(&tool, json!({}))
@@ -236,6 +246,7 @@ async fn set_cron_job_state_execute_validates_args_and_refuses_enable() {
 
 #[tokio::test]
 async fn set_cron_job_state_execute_disables_job() {
+    let _guard = cron_guard();
     let tool = SetCronJobStateTool::new(None, crate::triggers::global_cron_registry().clone());
     let job = add_job("disable");
 
