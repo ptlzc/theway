@@ -275,8 +275,31 @@ impl SessionRuntimeBuilder {
         opts.system_prompt = bundle.system_prompt;
         opts.thinking_level = ctx.thinking;
         opts.tools = tools;
-        opts.skills = ctx.resources.skills.clone();
-        opts.prompt_templates = ctx.resources.templates.clone();
+        // Skills / templates (issues #95/#96): in controller mode the TUI owns
+        // discovery and the catalog arrives via `Configure`, which targets the
+        // ACTIVE session's harness only. Session builds read the provisioned
+        // slots so a session built AFTER the configure lands (daemon restart +
+        // restore, session switch, lazy build) gets the provisioned catalog
+        // too — mirroring `handle_configure`'s merge (builtins + provisioned +
+        // override state). Standalone mode keeps the startup-frozen scan.
+        if ctx.resources.load_local_sources {
+            opts.skills = ctx.resources.skills.clone();
+            opts.prompt_templates = ctx.resources.templates.clone();
+        } else {
+            let provisioned = ctx.resources.provisioned_skills.read().unwrap().clone();
+            let builtins: Vec<_> = ctx
+                .resources
+                .skills
+                .iter()
+                .filter(|skill| matches!(skill.source, theway_core::SkillSource::Builtin))
+                .cloned()
+                .collect();
+            let mut merged = crate::builtin_skills::merge_with_user_project(builtins, &provisioned);
+            let overrides = crate::skill_overrides::load(&ctx.paths.base).await;
+            crate::skill_overrides::apply(&overrides, &mut merged);
+            opts.skills = merged;
+            opts.prompt_templates = ctx.resources.provisioned_templates.read().unwrap().clone();
+        }
         opts.compact_algorithms = ctx.extension_resources.compact_algorithms.clone();
         opts.stream_fn = Some(self.stream_fn.clone());
         opts.reload_skills_fn = Some(ctx.resources.reload_skills_fn.clone());
@@ -416,6 +439,15 @@ impl SessionRuntimeBuilder {
                 .rehydrate_from_session()
                 .await
                 .with_context(|| format!("rehydrate session {session_id}"))?;
+            // A rehydrated transcript may carry a model change that arrived
+            // while the session had no live runtime (SetModel persists it
+            // directly). The DAG launcher snapshotted `ctx.model` during
+            // `install_execution_context`, so point it at the authoritative
+            // rehydrated model — the same refresh `apply_model` performs for
+            // live model switches.
+            if let Some(model) = harness.agent().state().model.as_ref().cloned() {
+                self.refresh_dag_launcher(&session_id, model);
+            }
         }
         harness.start_runtime_extensions().await;
         Ok(SessionRuntime {

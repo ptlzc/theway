@@ -511,6 +511,86 @@ async fn create_session_with_cwd(
         .to_string()
 }
 
+/// Controller mode (issues #95/#96): a session built AFTER the TUI provisioned
+/// the catalog (daemon restart + restore, session switch, lazy build) must
+/// read the provisioned skill/template slots — `Configure` only targets the
+/// active session's harness, so the build path is the only way new sessions
+/// get the catalog.
+#[tokio::test]
+async fn controller_mode_build_reads_provisioned_skill_and_template_slots() {
+    // hooks::load inside build reads THEWAY_DIR — isolate it.
+    let _serial = ENV_LOCK.lock().unwrap();
+    let home = TempDir::new().unwrap();
+    let _theway_dir = EnvGuard::set("THEWAY_DIR", home.path());
+
+    let work_dir = TempDir::new().unwrap();
+    let repo_root = TempDir::new().unwrap();
+    let repo = theway_storage::sqlite_repo::SqliteSessionRepo::new(repo_root.path());
+    let id = create_session_with_cwd(&repo, work_dir.path().to_str().unwrap()).await;
+
+    let (factory, storage, _state) = test_factory();
+    let paths = crate::DaemonPaths {
+        base: home.path().join("base"),
+        home: home.path().to_path_buf(),
+        work_dir: home.path().to_path_buf(),
+        extra_skill_dirs: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+    };
+    let paths = paths.with_work_dir(work_dir.path());
+    // `false` = controller-provisioned: no disk scan, catalog comes from the slots.
+    let resources = SessionProjectResources::load(&paths, &[], &[], false)
+        .await
+        .unwrap();
+    *resources.provisioned_skills.write().unwrap() = vec![theway_core::Skill {
+        name: "provisioned-skill".into(),
+        description: "from the controller".into(),
+        file_path: "/tmp/provisioned-skill/SKILL.md".into(),
+        content: "body".into(),
+        disable_model_invocation: false,
+        source: theway_core::SkillSource::User,
+    }];
+    *resources.provisioned_templates.write().unwrap() = vec![theway_core::PromptTemplate {
+        name: "provisioned-template".into(),
+        description: Some("from the controller".into()),
+        file_path: "/tmp/provisioned-template.md".into(),
+        content: "template body".into(),
+    }];
+    let hooks = SessionHookResources::load(&paths, false).await;
+    let ctx = SessionExecutionContext::new(
+        "test-controller",
+        work_dir.path().to_path_buf(),
+        std::sync::Arc::new(repo),
+        storage,
+        paths,
+        crate::executor::executor_for_cwd(work_dir.path().to_path_buf()),
+        theway_core::executor::ExecutorKind::Local,
+        faux_model(),
+        theway_core::ThinkingLevel::Off,
+        resources,
+        SessionMcpResources::default(),
+        hooks,
+    );
+    let runtime = factory
+        .build(&ctx, &id)
+        .await
+        .expect("controller-mode session builds");
+    assert!(
+        runtime
+            .harness
+            .skills()
+            .iter()
+            .any(|skill| skill.name == "provisioned-skill"),
+        "build must read the provisioned skill slot"
+    );
+    assert!(
+        runtime
+            .harness
+            .templates()
+            .iter()
+            .any(|template| template.name == "provisioned-template"),
+        "build must read the provisioned template slot"
+    );
+}
+
 #[tokio::test]
 async fn build_uses_explicit_context_cwd_and_registers_session_ownership() {
     // hooks::load inside build reads THEWAY_DIR — isolate it.
