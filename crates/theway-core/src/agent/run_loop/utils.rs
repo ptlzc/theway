@@ -75,6 +75,9 @@ pub(super) async fn emit(inner: &Arc<AgentInner>, event: LoopEvent, cancel: &Can
         .await
         .is_err()
         {
+            // `tracing` is part of the harness feature set; the bare Agent
+            // build drops the listener without the warning.
+            #[cfg(feature = "harness")]
             tracing::warn!(
                 "loop listener exceeded {}s and was dropped",
                 EMIT_LISTENER_TIMEOUT.as_secs()
