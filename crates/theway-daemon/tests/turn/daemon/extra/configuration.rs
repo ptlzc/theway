@@ -84,6 +84,52 @@ async fn handle_configure_registers_custom_models_and_seeds_api_key() {
 }
 
 #[tokio::test]
+async fn handle_configure_auto_fetch_imports_catalog_and_selects_first() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = vec![0u8; 4096];
+        let _ = socket.read(&mut buffer).await.unwrap();
+        let body = r#"{"data":[{"id":"fetched-model-a"},{"id":"fetched-model-b"}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+    let base_url = format!("http://{addr}/v1");
+
+    let mut fixture = HostFixture::new().await;
+    let host = fixture.host();
+    host.handle_configure(
+        WireDaemonConfig {
+            provider: Some("fetch-test".into()),
+            base_url: Some(base_url.clone()),
+            auto_fetch_models: Some(true),
+            ..Default::default()
+        },
+        &mut TurnState::default(),
+    )
+    .await;
+
+    let view = host.runtime.config.read().unwrap().clone();
+    assert_eq!(view.auto_fetch_models, Some(true));
+    assert_eq!(view.models.len(), 2);
+    assert_eq!(view.models[0].id, "fetched-model-a");
+    assert_eq!(view.models[0].base_url, base_url);
+    // The unset model was filled from the first catalog entry and applied.
+    assert_eq!(view.provider.as_deref(), Some("fetch-test"));
+    assert_eq!(view.model.as_deref(), Some("fetched-model-a"));
+    for model in &view.models {
+        theway_llm_provider::unregister_custom_model(&model.provider, &model.id);
+    }
+}
+
+#[tokio::test]
 async fn handle_configure_auto_fetch_without_base_url_is_reported_not_applied() {
     let mut fixture = HostFixture::new().await;
     let host = fixture.host();

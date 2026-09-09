@@ -404,7 +404,7 @@ impl TurnHost {
             });
             match (provider, base_url) {
                 (Some(provider), Some(base_url)) => {
-                    let api_key = self
+                    let configured_key = self
                         .automation
                         .services
                         .configured_api_keys
@@ -412,6 +412,11 @@ impl TurnHost {
                         .expect("configured api keys poisoned")
                         .get(&provider)
                         .cloned();
+                    // Same precedence as the request path: env > configured
+                    // (`[model] api_key`) > auth.json.
+                    let api_key = theway_transport::auth::AuthStore::load()
+                        .unwrap_or_default()
+                        .resolve_for_provider_with(&provider, configured_key.as_deref());
                     match crate::model_fetch::fetch_models(&base_url, api_key.as_deref(), &provider)
                         .await
                     {
@@ -419,11 +424,16 @@ impl TurnHost {
                             let first = models[0].id.clone();
                             crate::model_defaults::register_models(&models);
                             self.runtime.model_catalog = model_catalog();
-                            if config.provider.is_none() && config.model.is_none() {
-                                config.provider = Some(provider);
+                            // Fill an unset model id from the catalog; an
+                            // explicit model in the same patch wins.
+                            if config.model.is_none() {
+                                config.provider.get_or_insert(provider);
                                 config.model = Some(first);
                             }
                             applied.auto_fetch_models = Some(true);
+                            // Report the imported catalog in GetConfig so
+                            // clients observe what was registered.
+                            applied.models = models;
                         }
                         Ok(_) => self
                             .error_line("configure: auto-fetch models returned an empty catalog"),
