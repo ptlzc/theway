@@ -75,6 +75,16 @@ pub(crate) fn set_config_path_for_tests(path: Option<PathBuf>) {
     *TEST_CONFIG_PATH.lock().unwrap() = path;
 }
 
+/// Serialize tests that swap the process-wide controller config path: they
+/// install a fixture, read through it, and reset it, so parallel execution
+/// otherwise races on the shared static (issue: flaky
+/// `ui_state_load_precedence_and_render_all_fields`).
+#[cfg(test)]
+pub(crate) fn lock_config_path_for_tests() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Pure base-dir resolution (testable without env access).
 pub(crate) fn resolve_config_base_dir(
     home: Option<&Path>,

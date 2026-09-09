@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn ui_state_load_precedence_and_render_all_fields() {
+    let _config_path = crate::config_payload::lock_config_path_for_tests();
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("config.toml");
     let state = dir.path().join("ui-state.toml");
@@ -77,6 +78,7 @@ async fn config_payload_assemble_covers_missing_readable_and_unreadable() {
     use crate::cli::Cli;
     use clap::Parser as _;
 
+    let _config_path = crate::config_payload::lock_config_path_for_tests();
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing.toml");
     let existing = dir.path().join("config.toml");

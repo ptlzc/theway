@@ -438,6 +438,8 @@ fn startup_connection_helpers_cover_spawn_kinds_and_endpoint_preservation() {
 fn theme_load_prefers_config_theme_and_falls_back_to_theme_file() {
     use std::ffi::OsString;
 
+    let _config_path = crate::config_payload::lock_config_path_for_tests();
+
     struct Guard {
         old: Option<OsString>,
     }
