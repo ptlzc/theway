@@ -71,7 +71,10 @@ pub fn lines(
 /// Tool / ToolResult / Thinking blocks carry the theme block layout (issue
 /// #49): background, padding columns and left/right alignment, with the
 /// background spanning every block row at full width. Colors come from the
-/// theme roles in `opts.theme` (issue #43).
+/// theme roles in `opts.theme` (issue #43). A user block composes three row
+/// groups: the provenance marker of a non-human turn, the banded text rows,
+/// and one muted chip row per attachment. A `Context` block renders one muted
+/// `[<label>] <text>` passage.
 pub(crate) fn render_block(
     block: &Block,
     width: usize,
@@ -82,7 +85,19 @@ pub(crate) fn render_block(
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut assistant_rows: Vec<std::ops::Range<usize>> = Vec::new();
     match block {
-        Block::User { text, .. } => push_user_block(&mut out, text, width, theme),
+        Block::User {
+            text,
+            attachments,
+            source,
+            ..
+        } => {
+            push_user_source_marker(&mut out, source.as_ref(), theme);
+            push_user_block(&mut out, text, width, theme);
+            push_attachment_chips(&mut out, attachments, theme);
+        }
+        Block::Context { label, text, .. } => {
+            push_context_block(&mut out, label, text, width, theme);
+        }
         Block::Assistant { text, .. } => {
             // Assistant blocks are markdown: one-shot pretty render via
             // theway-markdown, link underlines from the renderer's
@@ -195,6 +210,83 @@ pub(crate) fn render_block(
     }
     underline_links(&mut out, &assistant_rows);
     out
+}
+
+/// One muted row per attachment chip under a user block: `[<kind>] <name>`
+/// plus ` · <detail>` when the producer recorded one, aligned with the user
+/// block's continuation indent. The chips are display-only metadata and never
+/// join the block text.
+fn push_attachment_chips(
+    out: &mut Vec<Line<'static>>,
+    attachments: &[theway_transport::feed::WireFeedAttachment],
+    theme: &Theme,
+) {
+    let style = muted_meta_style(theme);
+    for attachment in attachments {
+        let mut text = format!("{USER_BAND_INDENT}[{}] {}", attachment.kind, attachment.name);
+        if let Some(detail) = attachment.detail.as_deref().filter(|d| !d.is_empty()) {
+            text.push_str(" · ");
+            text.push_str(detail);
+        }
+        out.push(Line::from(Span::styled(text, style)));
+    }
+}
+
+/// Provenance marker above a user turn that did not come from a human
+/// (`source.kind` ≠ `"user"`): `[<kind>: <label>]`, or `[<kind>]` when the
+/// producer recorded no label. Muted, at the user block's continuation
+/// indent, so the turn never reads as a human message.
+fn push_user_source_marker(
+    out: &mut Vec<Line<'static>>,
+    source: Option<&theway_transport::feed::WireFeedSource>,
+    theme: &Theme,
+) {
+    let Some(source) = source else { return };
+    if source.kind.is_empty() || source.kind == "user" {
+        return;
+    }
+    let marker = match source.label.as_deref().filter(|label| !label.is_empty()) {
+        Some(label) => format!("{USER_BAND_INDENT}[{}: {label}]", source.kind),
+        None => format!("{USER_BAND_INDENT}[{}]", source.kind),
+    };
+    out.push(Line::from(Span::styled(marker, muted_meta_style(theme))));
+}
+
+/// Pre-injected content as a muted `[<label>] <text>` passage: the label
+/// opens the first row, wrapped rows keep the text column (the indent spans
+/// the label prefix), and the label/body text comes from the transport's
+/// shared `context_line` projection so the styled row and the plain-line
+/// cache render the same line. Visually distinct from the user band and from
+/// assistant markdown.
+fn push_context_block(
+    out: &mut Vec<Line<'static>>,
+    label: &str,
+    text: &str,
+    width: usize,
+    theme: &Theme,
+) {
+    let width = width.max(1);
+    let style = context_style(theme);
+    // The row text and its `[<label>] ` prefix both come from the transport's
+    // shared projection; stripping the prefix back off leaves the body that
+    // gets wrapped, with the continuation rows indented under the text column.
+    let line = theway_transport::feed::context_line(label, text);
+    let prefix = theway_transport::feed::context_line(label, "");
+    let body = line.strip_prefix(prefix.as_str()).unwrap_or(line.as_str());
+    let indent_width = unicode_width::UnicodeWidthStr::width(prefix.as_str());
+    let indent = " ".repeat(indent_width);
+    let body_width = width.saturating_sub(indent_width).max(1);
+    let mut first = true;
+    for row in wrap_str(body, body_width) {
+        let head = if first { prefix.as_str() } else { indent.as_str() };
+        let mut spans: Vec<Span<'static>> = Vec::with_capacity(2);
+        if !head.is_empty() {
+            spans.push(Span::styled(head.to_string(), style));
+        }
+        spans.push(Span::styled(row, style));
+        out.push(Line::from(spans));
+        first = false;
+    }
 }
 
 /// One tool-call row: `⏵ name args · metadata`, truncated to the block

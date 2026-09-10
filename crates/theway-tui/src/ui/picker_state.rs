@@ -73,6 +73,11 @@ pub(crate) struct ResumePickerState {
 /// ≤60-char preview (`…` appended when truncated, newlines flattened for
 /// single-row rendering — the same shape the daemon's `/fork` listing
 /// prints).
+///
+/// Every User block is listed, whatever its `source`: the daemon numbers
+/// every stored user message, so filtering here would desynchronize the
+/// picker's numbers from `/fork <n>`. Attachment chips and the provenance
+/// marker stay out of the preview for the same reason.
 pub(super) fn fork_picker_entries(
     blocks: &[theway_transport::feed::WireFeedBlock],
 ) -> Vec<ForkPickerEntry> {

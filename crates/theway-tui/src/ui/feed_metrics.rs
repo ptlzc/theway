@@ -13,6 +13,8 @@ pub(super) fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) 
             | Block::Assistant { text, .. }
             | Block::Thinking { text, .. }
             | Block::Plain { text, .. } => text.len(),
+            // A context row renders both halves (`[<label>] <text>`).
+            Block::Context { label, text, .. } => label.len() + text.len(),
             Block::ToolCall { name, args, .. } => name.len() + args.len(),
             Block::Error { message, .. } => message.len(),
             Block::ToolResult { lines, .. } => lines.iter().map(String::len).sum(),
@@ -47,6 +49,9 @@ pub(super) fn feed_text_tokens(blocks: &[theway_transport::feed::WireFeedBlock])
             | Block::Assistant { text, .. }
             | Block::Thinking { text, .. }
             | Block::Plain { text, .. } => estimate_token_chars(text),
+            Block::Context { label, text, .. } => {
+                estimate_token_chars(label) + estimate_token_chars(text)
+            }
             Block::ToolCall { name, args, .. } => {
                 estimate_token_chars(name) + estimate_token_chars(args)
             }

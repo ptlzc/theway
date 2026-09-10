@@ -162,7 +162,9 @@ fn feed_render_tool_pair_and_incremental_wrap() {
         crate::feed_render::tool_pair_len(
             &[Block::User {
                 text: "x".into(),
-                timestamp: None
+                timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             }],
             0
         ),
@@ -204,7 +206,9 @@ fn feed_render_tool_pair_and_incremental_wrap() {
             },
             Block::User {
                 text: "y".into(),
-                timestamp: None
+                timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             },
         ]),
         2
@@ -247,6 +251,8 @@ fn feed_render_block_edge_variants() {
         &Block::User {
             text: "hello\nworld".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         1,
         &opts,
@@ -324,6 +330,8 @@ fn feed_render_block_edge_variants() {
         &Block::User {
             text: "u".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         &Block::Plain {
             text: "p".into(),

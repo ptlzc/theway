@@ -53,6 +53,19 @@ fn thinking_style(theme: &Theme) -> Style {
         .add_modifier(Modifier::ITALIC)
 }
 
+/// Muted role for feed metadata rows: attachment chips and the provenance
+/// marker of a non-human user turn.
+fn muted_meta_style(theme: &Theme) -> Style {
+    Style::new().fg(theme.tool_args)
+}
+
+/// Muted role for pre-injected `Block::Context` rows. No modifier: injected
+/// content is neither user text (band + `❯`) nor assistant prose, and stays
+/// secondary by color alone.
+fn context_style(theme: &Theme) -> Style {
+    Style::new().fg(theme.thinking_text)
+}
+
 /// How `Block::Thinking` renders in the feed (Ctrl+O cycles).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ThinkingMode {

@@ -18,6 +18,64 @@ async fn submit_sends_message_to_daemon() {
     }
 }
 
+/// The skill envelope is still built client-side and wraps the verbatim
+/// user text.
+#[tokio::test]
+async fn submit_keeps_skill_envelope_around_raw_text() {
+    let (mut app, mut rx) = test_app().await;
+    app.pending_skill = Some("git".into());
+    app.set_input("look at @src/foo.rs");
+    app.submit(&mut terminal_placeholder()).await.unwrap();
+    assert!(app.pending_skill.is_none(), "the pending skill is consumed");
+    match rx.recv().await.unwrap() {
+        WireCommand::Submit { text, .. } => {
+            assert!(
+                text.contains("invoke the Skill tool with name \"git\""),
+                "{text}"
+            );
+            assert!(
+                text.ends_with("User request:\nlook at @src/foo.rs"),
+                "the user text is appended verbatim: {text}"
+            );
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+/// Mentions are the daemon's to resolve, exactly once at admission: the
+/// client submits the user's text verbatim, so an `@path` token survives
+/// unchanged and no `Files in context:` block is appended client-side.
+#[tokio::test]
+async fn submit_sends_raw_text_without_expanding_mentions() {
+    let (mut app, mut rx) = test_app().await;
+    // The mention resolves against a real file: the removed client-side
+    // expansion would have appended this file's content to the prompt.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/foo.rs"), "fn main() {}\n").unwrap();
+    app.cwd = dir.path().to_path_buf();
+
+    app.set_input("look at @src/foo.rs");
+    app.submit(&mut terminal_placeholder()).await.unwrap();
+
+    match rx.recv().await.unwrap() {
+        WireCommand::Submit { text, .. } => {
+            assert_eq!(
+                text.matches("@src/foo.rs").count(),
+                1,
+                "the `@path` token must travel verbatim exactly once: {text}"
+            );
+            assert!(!text.contains("Files in context:"), "{text}");
+            assert!(!text.contains("<file path="), "{text}");
+            assert!(
+                !text.contains("fn main()"),
+                "the file body must not be inlined client-side: {text}"
+            );
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn slash_quit_sets_quit_and_clear_empties_feed() {
     let (mut app, _rx) = test_app().await;

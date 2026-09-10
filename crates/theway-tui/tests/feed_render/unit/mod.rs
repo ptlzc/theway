@@ -26,6 +26,8 @@
         let feed = feed_with(&[WireFeedBlock::User {
             text: "hello world".into(),
             timestamp: Some("2026-01-01 12:00".into()),
+            attachments: Vec::new(),
+            source: None,
         }]);
         let opts = FeedRenderOptions::default();
         let lines = super::lines(&feed, 30, &opts);
@@ -48,6 +50,8 @@
         let feed = feed_with(&[WireFeedBlock::User {
             text: "one two three four five six seven".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         }]);
         let opts = FeedRenderOptions::default();
         let lines = super::lines(&feed, 12, &opts);
@@ -64,6 +68,8 @@
         let feed = feed_with(&[WireFeedBlock::User {
             text: "hello".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         }]);
         let mut opts = FeedRenderOptions::default();
         let custom = Color::Rgb(36, 40, 59);
@@ -87,6 +93,8 @@
             WireFeedBlock::User {
                 text: "go".into(),
                 timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             },
             WireFeedBlock::Thinking {
                 text: "deep thoughts about the plan".into(),
@@ -678,3 +686,4 @@
 
 mod layout;
 mod selection;
+mod user_rows;

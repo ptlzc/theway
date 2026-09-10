@@ -313,6 +313,8 @@ async fn snapshot_rebuilds_feed_and_resyncs_busy_panel() {
         WireFeedBlock::User {
             text: "snap question".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::Assistant {
             text: "snap answer".into(),

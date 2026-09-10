@@ -124,7 +124,6 @@ use theway_transport::commands::Registry;
 use theway_transport::feed::{Block as FeedBlock, Feed, Level, TriggerPollStatus};
 use theway_transport::history::HistoryStore;
 use theway_transport::images::EncodedImage;
-use theway_transport::mentions;
 use theway_transport::proto::theway_grpc::stream_frame;
 use theway_transport::proto::{theway_grpc, wire_status_from_session_snapshot};
 use theway_transport::transport::SlashCompleter;

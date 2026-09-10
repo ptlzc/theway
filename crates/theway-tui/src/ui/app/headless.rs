@@ -112,8 +112,9 @@ impl App {
                 }
             }
 
-            let (expanded, _) = mentions::expand(input, &self.cwd).await;
-            let prompt = commands::attach_skill_prompt(expanded, None);
+            // Submitted verbatim (like the TUI path): the daemon resolves
+            // `@path` mentions once at admission.
+            let prompt = commands::attach_skill_prompt(input, None);
             self.messaged_sessions.insert(self.session_id.clone());
             match crate::ui::daemon_call(
                 "send_message",

@@ -33,6 +33,8 @@ async fn fork_picker_lists_feed_user_blocks_newest_first() {
         WireFeedBlock::User {
             text: "oldest prompt".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::Assistant {
             text: "old answer".into(),
@@ -46,6 +48,8 @@ async fn fork_picker_lists_feed_user_blocks_newest_first() {
         WireFeedBlock::User {
             text: long.clone(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
     ];
 
@@ -86,10 +90,14 @@ async fn fork_picker_enter_forwards_slash_fork_number_and_arg_forwards_directly(
         WireFeedBlock::User {
             text: "first prompt".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::User {
             text: "second prompt".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
     ];
     app.dispatch_slash("/fork", &mut term).await;
@@ -140,6 +148,8 @@ async fn fork_picker_esc_cancels_and_empty_feed_reports_error() {
     app.latest.feed_blocks = vec![WireFeedBlock::User {
         text: "only prompt".into(),
         timestamp: None,
+        attachments: Vec::new(),
+        source: None,
     }];
     app.dispatch_slash("/fork", &mut term).await;
     assert!(app.fork_picker.is_some());
@@ -182,10 +192,14 @@ async fn fork_picker_renders_centered_popup_with_fork_title() {
         WireFeedBlock::User {
             text: "oldest prompt".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::User {
             text: "newest prompt".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
     ];
     app.dispatch_slash("/fork", &mut terminal_placeholder())

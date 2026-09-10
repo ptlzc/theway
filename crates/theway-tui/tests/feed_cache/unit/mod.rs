@@ -11,6 +11,8 @@
         WireFeedBlock::User {
             text: text.into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         }
     }
 
@@ -167,6 +169,35 @@
         assert_eq!(cache.last_rebuilt, 0);
     }
 
+    /// A `Context` block renders through the cache like any other block and
+    /// reuses its rendered rows until its content changes.
+    #[test]
+    fn context_block_renders_and_reuses_cached_rows() {
+        let context = |text: &str| WireFeedBlock::Context {
+            label: "skill:git".into(),
+            text: text.into(),
+            timestamp: None,
+        };
+        let feed = feed_with(&[user("go"), context("preamble")]);
+        let mut cache = FeedRenderCache::new();
+        let opts = FeedRenderOptions::default();
+        cache.update(&feed, 80, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 2);
+        let text = flat(cache.lines());
+        assert!(text.contains("[skill:git] preamble"), "{text}");
+
+        cache.update(&feed, 80, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 0, "an unchanged context block caches");
+
+        // A changed body re-renders the context block only.
+        let feed = feed_with(&[user("go"), context("CHANGED preamble")]);
+        cache.update(&feed, 80, &opts, 1000);
+        assert_eq!(cache.last_rebuilt, 1);
+        let text = flat(cache.lines());
+        assert!(text.contains("[skill:git] CHANGED preamble"), "{text}");
+        assert!(!text.contains("skill:git] preamble"), "{text}");
+    }
+
     #[test]
     fn fingerprints_differ_by_kind_and_content() {
         use theway_transport::feed::Block;
@@ -187,6 +218,8 @@
         let user_block = Block::User {
             text: "same".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         };
         assert_ne!(block_fingerprint(&same_a), block_fingerprint(&user_block));
     }
@@ -396,6 +429,8 @@
             WireFeedBlock::User {
                 text: "go".into(),
                 timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             },
             WireFeedBlock::ToolCall {
                 name: "read".into(),
@@ -413,6 +448,8 @@
             WireFeedBlock::User {
                 text: "go".into(),
                 timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             },
             WireFeedBlock::ToolCall {
                 name: "read".into(),

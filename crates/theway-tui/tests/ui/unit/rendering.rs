@@ -509,6 +509,8 @@ async fn picker_theme_recolors_fork_popup_rows() {
     app.latest.feed_blocks = vec![WireFeedBlock::User {
         text: "hello world".into(),
         timestamp: None,
+        attachments: Vec::new(),
+        source: None,
     }];
     app.open_fork_picker();
 
@@ -641,10 +643,14 @@ async fn fork_picker_keys_wrap_at_both_ends() {
         WireFeedBlock::User {
             text: "first".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::User {
             text: "second".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
     ];
     app.open_fork_picker();

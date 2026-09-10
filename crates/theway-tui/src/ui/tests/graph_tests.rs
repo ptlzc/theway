@@ -401,6 +401,8 @@ async fn dag_band_scrolls_with_feed() {
         .map(|i| WireFeedBlock::User {
             text: format!("history message {i}"),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         })
         .collect();
     status.dags = vec![WireDagRunSnapshot {

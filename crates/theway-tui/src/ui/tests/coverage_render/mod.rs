@@ -37,6 +37,7 @@ mod cli_startup;
 mod controller_storage;
 mod feed;
 mod menu_band;
+mod metrics;
 mod panel;
 mod theme;
 mod ui_state_config;

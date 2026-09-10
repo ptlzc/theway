@@ -15,7 +15,6 @@ use ratatui::Terminal;
 
 use theway_transport::commands;
 use theway_transport::images;
-use theway_transport::mentions;
 
 use super::App;
 use super::render_utils::{enter_tui, leave_tui};
@@ -57,13 +56,11 @@ impl App {
         }
         self.follow = true;
 
-        let expanded = if trimmed.is_empty() {
-            String::new()
-        } else {
-            mentions::expand(&trimmed, &self.cwd).await.0
-        };
+        // The user's text is submitted verbatim: `@path` mentions are resolved
+        // once by the daemon at admission. Only the skill envelope is still
+        // built client-side.
         let prompt_text =
-            commands::attach_skill_prompt(expanded, self.pending_skill.take().as_deref());
+            commands::attach_skill_prompt(trimmed, self.pending_skill.take().as_deref());
 
         // `--image` payloads attach to the first prompt only.
         let image_paths = std::mem::take(&mut self.pending_images);

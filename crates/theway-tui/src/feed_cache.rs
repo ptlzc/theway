@@ -474,7 +474,23 @@ mod streaming_tests {
         let wire: Vec<WireFeedBlock> = blocks
             .iter()
             .map(|block| match block {
-                Block::User { text, timestamp } => WireFeedBlock::User {
+                Block::User {
+                    text,
+                    timestamp,
+                    attachments,
+                    source,
+                } => WireFeedBlock::User {
+                    text: text.clone(),
+                    timestamp: timestamp.clone(),
+                    attachments: attachments.clone(),
+                    source: source.clone(),
+                },
+                Block::Context {
+                    label,
+                    text,
+                    timestamp,
+                } => WireFeedBlock::Context {
+                    label: label.clone(),
                     text: text.clone(),
                     timestamp: timestamp.clone(),
                 },

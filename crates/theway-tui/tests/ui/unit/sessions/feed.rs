@@ -239,6 +239,8 @@ async fn restored_notice_clears_after_response_patch() {
             block: WireFeedBlock::User {
                 text: "ping".into(),
                 timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             },
         },
         WireFeedBlockPatch {
@@ -278,6 +280,8 @@ async fn restored_notice_stays_until_response() {
         block: WireFeedBlock::User {
             text: "ping".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
     }];
     app.apply_snapshot(patch);

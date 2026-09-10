@@ -6,6 +6,8 @@ fn feed_gap_controls_inter_block_spacing() {
         WireFeedBlock::User {
             text: "hello".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::Assistant {
             text: "world".into(),
@@ -41,6 +43,8 @@ fn feed_separator_renders_full_width_styled_line() {
         WireFeedBlock::User {
             text: "hello".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::Assistant {
             text: "world".into(),
@@ -116,6 +120,8 @@ fn block_frame_composes_with_feed_gap() {
         WireFeedBlock::User {
             text: "hello".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         WireFeedBlock::ToolCall {
             name: "bash".into(),
