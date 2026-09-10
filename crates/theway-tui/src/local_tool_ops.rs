@@ -130,15 +130,23 @@ impl ToolOps for LocalToolOps {
             .map(PathBuf::from)
             .unwrap_or_else(|| self.work_dir.clone());
         let timeout = request.timeout_ms.map(Duration::from_millis);
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg(&request.command)
+        // Host shell resolution: `sh -c` does not exist on Windows, so the
+        // program and its command flag come from the shared contract helper.
+        let spec = theway_contract::shell::shell();
+        let mut cmd = Command::new(&spec.program);
+        cmd.args(spec.command_args(&request.command));
+        let mut child = cmd
             .current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| ToolError::Other(anyhow::anyhow!("spawn: {e}")))?;
+            .map_err(|e| {
+                ToolError::Other(anyhow::anyhow!(
+                    "spawn {}: {e}",
+                    Path::new(&spec.program).display()
+                ))
+            })?;
         let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<WireToolExecFrame>();
