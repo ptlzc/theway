@@ -1,7 +1,6 @@
 //! `state.rs` gaps: cancel, feed routing, control-plane prompts, model specs,
 //! and thinking changes.
 
-use super::super::*;
 use super::*;
 use crate::turn::daemon::{SUPPORTED_APIS, SessionRuntimeState, current_model_label};
 
