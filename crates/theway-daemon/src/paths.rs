@@ -16,6 +16,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use crate::shared_lock::{read_lock, write_lock};
+
 /// Resolved host-path context for one daemon process.
 ///
 /// Built once at startup by the composition root (`bin/thewayd.rs`) from CLI
@@ -111,13 +113,13 @@ impl DaemonPaths {
     /// the serialized event loop when a `SetSkillDirs` command lands). The
     /// change is visible through every `Clone` of this struct.
     pub fn set_extra_skill_dirs(&self, dirs: Vec<PathBuf>) {
-        *self.extra_skill_dirs.write().unwrap() = dirs;
+        *write_lock(&self.extra_skill_dirs) = dirs;
     }
 
     /// Snapshot of the current extra skill directories (issue #68: the list
     /// may be replaced at runtime via [`Self::set_extra_skill_dirs`]).
     pub fn current_extra_skill_dirs(&self) -> Vec<PathBuf> {
-        self.extra_skill_dirs.read().unwrap().clone()
+        read_lock(&self.extra_skill_dirs).clone()
     }
 }
 

@@ -64,10 +64,7 @@ impl TurnHost {
             thinking: startup_thinking,
             thinking_level: startup_thinking_level,
             builtin_skills: config.startup.builtin_skills.clone(),
-            skills: config
-                .provisioned_skills
-                .read()
-                .unwrap()
+            skills: read_lock(&config.provisioned_skills)
                 .iter()
                 .map(|skill| theway_transport::wire::WireProvisionedSkill {
                     name: skill.name.clone(),
@@ -81,10 +78,7 @@ impl TurnHost {
                     disable_model_invocation: skill.disable_model_invocation,
                 })
                 .collect(),
-            templates: config
-                .provisioned_templates
-                .read()
-                .unwrap()
+            templates: read_lock(&config.provisioned_templates)
                 .iter()
                 .map(|t| theway_transport::wire::WireProvisionedTemplate {
                     name: t.name.clone(),

@@ -23,6 +23,8 @@ use theway_transport::wire::{
     WireToolSkillInstallResult, WireToolWriteRequest, WireToolWriteResult,
 };
 
+use crate::shared_lock::read_lock;
+
 /// Forwarding [`ToolOps`] that connects to the controller's tool service.
 pub struct ForwardingToolOps {
     config: Arc<RwLock<WireDaemonConfig>>,
@@ -39,7 +41,7 @@ impl ForwardingToolOps {
 
     async fn client(&self) -> Result<GrpcClient, ToolError> {
         let addr = {
-            let config = self.config.read().unwrap();
+            let config = read_lock(&self.config);
             config
                 .tool_service_addr
                 .clone()

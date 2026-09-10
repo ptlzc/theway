@@ -571,6 +571,11 @@ mod tests {
     }
 }
 
+// The bare `#[cfg(test)]` beside the feature gate is the test-code marker clippy's
+// `allow-unwrap-in-tests` and `scripts/check-unwrap-budget.py` both key on; neither recognises
+// `cfg(all(test, feature = "…"))` on its own (rust-lang/rust-clippy#16369). Two `cfg`
+// attributes are a conjunction, so the compile condition stays exactly `test` + `local`.
+#[cfg(test)]
 #[cfg(all(test, feature = "local"))]
 mod coverage_gap {
     use super::*;

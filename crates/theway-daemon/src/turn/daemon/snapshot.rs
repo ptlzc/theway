@@ -303,9 +303,9 @@ impl TurnHost {
                 // session-scoped-mcp: a session-level overlay owns a per-session
                 // slot that already holds the merged daemon + session servers.
                 if let Some(overlay) = self.session.mcp_overlay.as_ref() {
-                    mcp_snapshot_from_slot(&overlay.slot.read().unwrap())
+                    mcp_snapshot_from_slot(&read_lock(&overlay.slot))
                 } else {
-                    let slot = self.runtime.mcp_provision.read().unwrap();
+                    let slot = read_lock(&self.runtime.mcp_provision);
                     let slot_active = !slot.configs.is_empty()
                         || !slot.tools.is_empty()
                         || !slot.errors.is_empty();

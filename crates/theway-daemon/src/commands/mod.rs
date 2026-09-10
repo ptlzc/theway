@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 use crate::trigger_engine::execution::TriggerExecutor;
 use crate::trigger_engine::execution::{NotificationStatusSnapshot, RunningTriggerState};
@@ -630,6 +630,22 @@ fn args_tail_of(input: &str, name: &str) -> String {
     trimmed[skip..].trim_start().to_string()
 }
 
+/// Read side of the shared MCP provision slot, recovered from a poisoned `RwLock`.
+///
+/// The slot is replaced wholesale by `Configure` / `/reload`, so a panic in another thread
+/// cannot tear it, and `/reload` has no error channel to report a poisoned lock through. The
+/// helpers stay local to this module because `tests/commands_e2e_main.rs` path-includes this
+/// file: inside that test crate `crate::` is the test-crate root, which has no
+/// `crate::shared_lock` to borrow.
+fn read_lock<T>(lock: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    lock.read().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Write side of the shared MCP provision slot, with the same poison recovery as `read_lock`.
+fn write_lock<T>(lock: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    lock.write().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// `/reload` (issue #37): rescan the claude-code-format file commands and
 /// hot-reload the skill catalog from disk.
 async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> CommandOutcome {
@@ -660,13 +676,13 @@ async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> Command
     // configs so a fixed `mcp.toml` (or auth.json) takes effect without a
     // daemon restart. Standalone mode keeps the startup scan semantics.
     if let (Some(slot), Some(auth_base)) = (ctx.mcp_provision, ctx.auth_base) {
-        let old_tools = slot.read().unwrap().tools.clone();
-        let configs = slot.read().unwrap().configs.clone();
+        let old_tools = read_lock(slot).tools.clone();
+        let configs = read_lock(slot).configs.clone();
         let result =
             crate::mcp_loader::connect_servers(&configs, ctx.cwd, &auth_base.join("auth.json"))
                 .await;
         let (new_tools, new_hooks) = {
-            let mut slot_state = slot.write().unwrap();
+            let mut slot_state = write_lock(slot);
             slot_state.replace_connection_result(configs, result);
             (slot_state.tools.clone(), slot_state.hooks.clone())
         };
@@ -675,7 +691,7 @@ async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> Command
         {
             use crate::trigger_engine::notification_hook::NotificationHook;
             use crate::trigger_engine::notification_hook::NotificationHookSink;
-            let mut slot_state = slot.write().unwrap();
+            let mut slot_state = write_lock(slot);
             for hook in &new_hooks {
                 let label = hook.label().to_string();
                 if slot_state.registered_labels.insert(label) {
@@ -685,7 +701,7 @@ async fn reload_everything(registry: &Registry, ctx: &CommandCtx<'_>) -> Command
         }
         cprintln!(
             "reconnected mcp servers: {} connected, {} hook(s) registered",
-            slot.read().unwrap().server_names.len(),
+            read_lock(slot).server_names.len(),
             registered
         );
     }

@@ -155,7 +155,7 @@ impl TurnHost {
                 ));
                 // Keep the shared GetConfig view in sync with the runtime, as
                 // the parked-runtime path does through `set_thinking_level`.
-                let mut view = self.runtime.config.write().unwrap();
+                let mut view = write_lock(&self.runtime.config);
                 view.thinking_level = Some(parsed.as_str().to_string());
                 drop(view);
                 true
@@ -246,11 +246,7 @@ impl TurnHost {
         // Bare model ids are accepted when they resolve unambiguously against the
         // registered model catalog, using the daemon's base URL to disambiguate.
         let id = spec.trim();
-        let base_url = self
-            .runtime
-            .config
-            .read()
-            .unwrap()
+        let base_url = read_lock(&self.runtime.config)
             .base_url
             .clone()
             .unwrap_or_default();
@@ -273,16 +269,16 @@ impl TurnHost {
                 exact
             }
         };
-        if candidates.len() == 1 {
-            return Ok(candidates.into_iter().next().unwrap());
-        }
-        if candidates.len() > 1 {
-            Err(format!(
+        let mut candidates = candidates.into_iter();
+        let Some(model) = candidates.next() else {
+            return Err(format!("invalid model spec: {spec}"));
+        };
+        if candidates.next().is_some() {
+            return Err(format!(
                 "ambiguous model id: {id}; use provider:model to disambiguate"
-            ))
-        } else {
-            Err(format!("invalid model spec: {spec}"))
+            ));
         }
+        Ok(model)
     }
 
     async fn apply_model(&mut self, model: theway_llm_provider::Model) -> bool {
@@ -336,7 +332,7 @@ impl TurnHost {
             Ok(_) => {
                 self.system_line(format!("thinking level: {}", parsed.as_str()));
                 // Keep the shared GetConfig view in sync with the runtime.
-                let mut view = self.runtime.config.write().unwrap();
+                let mut view = write_lock(&self.runtime.config);
                 view.thinking_level = Some(parsed.as_str().to_string());
                 drop(view);
                 true
@@ -491,7 +487,7 @@ impl TurnHost {
         let mcp_capabilities = context.mcp.capabilities();
         if let Some(overlay) = mcp_overlay.as_ref() {
             // The build that just ran registered exactly the slot's hooks.
-            overlay.slot.write().unwrap().mark_hooks_registered();
+            write_lock(&overlay.slot).mark_hooks_registered();
         }
         let cwd = runtime.cwd.clone();
         let old_projection = self.take_active_projection();
@@ -625,7 +621,7 @@ impl TurnHost {
             return;
         }
         let (daemon, daemon_configs) = {
-            let slot = self.runtime.mcp_provision.read().unwrap();
+            let slot = read_lock(&self.runtime.mcp_provision);
             (slot.layer(), slot.configs.clone())
         };
         let overlay_names: std::collections::HashSet<String> = overlay
@@ -637,7 +633,7 @@ impl TurnHost {
         // activation-time connection result: `/reload` replaces those
         // instances, and re-merging stale ones would resurrect dead clients.
         let session_layer = {
-            let slot = overlay.slot.read().unwrap();
+            let slot = read_lock(&overlay.slot);
             crate::mcp_loader::McpLayer {
                 servers: slot
                     .servers
@@ -673,7 +669,7 @@ impl TurnHost {
             .collect();
         let (old_tools, new_tools, new_hooks, capabilities) = {
             use crate::trigger_engine::notification_hook::NotificationHook;
-            let mut slot = overlay.slot.write().unwrap();
+            let mut slot = write_lock(&overlay.slot);
             let old_tools = slot.tools.clone();
             slot.replace_connection_result(effective_configs, (merged, Vec::new()));
             // Session-level hooks were registered by the session build and are
@@ -706,7 +702,7 @@ impl TurnHost {
             use crate::orchestration::session::NotificationHookSink;
             use crate::trigger_engine::notification_hook::NotificationHook;
             let executor = self.session.kernel.trigger_executor().clone();
-            let mut slot = overlay.slot.write().unwrap();
+            let mut slot = write_lock(&overlay.slot);
             for hook in &new_hooks {
                 let label = hook.label().to_string();
                 if slot.registered_labels.insert(label) {

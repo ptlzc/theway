@@ -11,6 +11,7 @@ use theway_transport::feed::FeedUpdate;
 use theway_transport::inbox;
 
 use crate::orchestration::DaemonServices;
+use crate::shared_lock::read_lock;
 use crate::{agent_specs, tools, triggers};
 
 mod activation_build;
@@ -196,7 +197,7 @@ impl SessionRuntimeBuilder {
             // Controller mode (issue #73): the provision slot is the live
             // MCP state — `Configure` updates it at runtime, so each new
             // session picks up the currently connected servers.
-            tools.extend(provision.read().unwrap().tools.iter().cloned());
+            tools.extend(read_lock(provision).tools.iter().cloned());
         } else {
             tools.extend(ctx.mcp.tools.iter().cloned());
         }
@@ -287,7 +288,7 @@ impl SessionRuntimeBuilder {
             opts.skills = ctx.resources.skills.clone();
             opts.prompt_templates = ctx.resources.templates.clone();
         } else {
-            let provisioned = ctx.resources.provisioned_skills.read().unwrap().clone();
+            let provisioned = read_lock(&ctx.resources.provisioned_skills).clone();
             let builtins: Vec<_> = ctx
                 .resources
                 .skills
@@ -299,7 +300,7 @@ impl SessionRuntimeBuilder {
             let overrides = crate::skill_overrides::load(&ctx.paths.base).await;
             crate::skill_overrides::apply(&overrides, &mut merged);
             opts.skills = merged;
-            opts.prompt_templates = ctx.resources.provisioned_templates.read().unwrap().clone();
+            opts.prompt_templates = read_lock(&ctx.resources.provisioned_templates).clone();
         }
         opts.compact_algorithms = ctx.extension_resources.compact_algorithms.clone();
         opts.stream_fn = Some(self.stream_fn.clone());
@@ -340,7 +341,7 @@ impl SessionRuntimeBuilder {
         // process-owned and are wrapped fresh for each executor.
         let (inject_summary, inject_and_run) = match ctx.mcp.provision.as_ref() {
             Some(provision) => {
-                let slot = provision.read().unwrap();
+                let slot = read_lock(provision);
                 (slot.inject_summary.clone(), slot.inject_and_run.clone())
             }
             None => (
@@ -372,7 +373,7 @@ impl SessionRuntimeBuilder {
         // dynamic-trigger hooks are constructed fresh per executor. Registered exactly
         // once per executor — see `register_notification_hooks`.
         let mcp_notification_hooks = match ctx.mcp.provision.as_ref() {
-            Some(provision) => provision.read().unwrap().hooks.clone(),
+            Some(provision) => read_lock(provision).hooks.clone(),
             None => std::mem::take(&mut *ctx.mcp.notification_hooks.lock()),
         };
         register_notification_hooks(

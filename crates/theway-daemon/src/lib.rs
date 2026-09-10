@@ -9,6 +9,16 @@
 //! startup types, while the public modules below are extension surfaces for
 //! custom executors, hooks, storage adapters, tools, and automation sources.
 
+// Kernel code propagates errors instead of unwrapping; `clippy.toml` exempts `#[cfg(test)]`
+// modules and `#[test]` fns (`allow-unwrap-in-tests` / `allow-panic-in-tests`).
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::panic)]
+// The test build is exempt as a whole: rustc consumes a `#[cfg(test)]` written on a
+// `tests_bridge!` invocation before expanding it, so bridged mirror modules never carry the
+// attribute and clippy cannot recognise their fixture unwraps through `clippy.toml`. The plain
+// library target still carries both denies above, so every non-test line stays gated.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::panic))]
+
 //! Self-alias so `#[path]`-included src modules (integration tests) and lib code
 //! share one absolute path shape: `theway_daemon::tools`, `theway_daemon::...`
 //! resolve identically inside the lib and inside test crates that pull src files
@@ -66,6 +76,7 @@ mod startup_config;
 mod stream_auth;
 
 mod runtime_capabilities;
+mod shared_lock;
 mod skill_overrides;
 pub mod subagent_settings;
 pub mod templates;

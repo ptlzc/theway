@@ -229,7 +229,7 @@ impl TurnHost {
         // (collapse) and requested runtime-settings inheritance. Apply the
         // carried model + thinking level to the child now — the command layer
         // has no &mut TurnHost, so the host consumes the slot.
-        let inherit = self.runtime.inherit_slot.lock().unwrap().take();
+        let inherit = lock_mutex(&self.runtime.inherit_slot).take();
         if let Some(inherit) = inherit {
             let ok = self
                 .set_model_for_session(&inherit.session_id, &inherit.model_spec)
@@ -248,7 +248,7 @@ impl TurnHost {
         // Collapse unload: release the collapsed source session's runtime
         // from memory (the command layer has no &mut TurnHost, so the host
         // consumes the slot).
-        let unload = self.runtime.collapse_unload_slot.lock().unwrap().take();
+        let unload = lock_mutex(&self.runtime.collapse_unload_slot).take();
         if let Some(unload) = unload {
             self.handle_collapse_unload(unload, turn).await;
         }
@@ -402,7 +402,7 @@ impl TurnHost {
         // Issue #100: consume the inheritance slot here as well — a parked
         // collapse writes it too, and a stale slot must never leak into a
         // later active-session dispatch.
-        let inherit = self.runtime.inherit_slot.lock().unwrap().take();
+        let inherit = lock_mutex(&self.runtime.inherit_slot).take();
         if let Some(inherit) = inherit {
             let _ = self
                 .set_model_for_session(&inherit.session_id, &inherit.model_spec)
@@ -413,7 +413,7 @@ impl TurnHost {
         }
         // Collapse unload: a parked session collapsing itself is dropped from
         // the registry outright; the host consumes the slot here too.
-        let unload = self.runtime.collapse_unload_slot.lock().unwrap().take();
+        let unload = lock_mutex(&self.runtime.collapse_unload_slot).take();
         if let Some(unload) = unload {
             let mut turn = TurnState::default();
             self.handle_collapse_unload(unload, &mut turn).await;

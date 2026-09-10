@@ -280,19 +280,9 @@ fn ts_kind(node: TSNode) -> Option<&'static str> {
 
             // const X = memo(function X()...) or const X = () => ...
             // Find variable_declarator child, then check its init
-            let mut declarator_idx: Option<usize> = None;
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    if child.kind() == "variable_declarator" {
-                        declarator_idx = Some(i);
-                        break;
-                    }
-                }
-            }
-            let declarator = {
-                let idx = declarator_idx?;
-                node.child(idx).unwrap()
-            };
+            let declarator = (0..node.child_count())
+                .filter_map(|i| node.child(i))
+                .find(|child| child.kind() == "variable_declarator")?;
 
             // Check if init is a function/arrow/call (using named_child to skip punctuation)
             for i in 0..declarator.named_child_count() {

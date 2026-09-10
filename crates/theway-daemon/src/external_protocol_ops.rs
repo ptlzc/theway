@@ -32,6 +32,8 @@ use theway_transport::wire::{
 };
 use tokio::sync::mpsc;
 
+use crate::shared_lock::{read_lock, write_lock};
+
 /// The daemon's single non-streaming external service implementation.
 pub(crate) struct DaemonExternalProtocolOps {
     commands: mpsc::UnboundedSender<WireCommand>,
@@ -150,7 +152,7 @@ impl CommandOps for DaemonExternalProtocolOps {
 #[async_trait]
 impl SettingsOps for DaemonExternalProtocolOps {
     async fn get_config(&self) -> Result<WireDaemonConfig> {
-        Ok(self.daemon_config.read().unwrap().clone())
+        Ok(read_lock(&self.daemon_config).clone())
     }
 
     async fn set_config(&self, config: &WireDaemonConfig) -> Result<bool> {
@@ -167,11 +169,11 @@ impl SettingsOps for DaemonExternalProtocolOps {
     }
 
     async fn get_path_context(&self) -> Result<WirePathContext> {
-        Ok(self.path_context.read().unwrap().clone())
+        Ok(read_lock(&self.path_context).clone())
     }
 
     async fn set_skill_dirs(&self, dirs: &[String]) -> Result<bool> {
-        self.path_context.write().unwrap().skills_dirs = dirs.to_vec();
+        write_lock(&self.path_context).skills_dirs = dirs.to_vec();
         self.commands
             .send(WireCommand::SetSkillDirs {
                 dirs: dirs.to_vec(),

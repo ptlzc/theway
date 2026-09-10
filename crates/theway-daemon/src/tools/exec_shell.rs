@@ -15,6 +15,7 @@
 //! 3. Exited shells stay queryable for [`EXITED_KEEP_ALIVE`] so the model can still read
 //!    their final output, then their registry entry is reaped.
 
+use crate::shared_lock::lock_mutex;
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{Value, json};
@@ -117,19 +118,19 @@ pub(crate) struct ShellRegistry {
 
 impl ShellRegistry {
     fn insert(&self, id: String, handle: Arc<ShellHandle>) {
-        self.shells.lock().unwrap().insert(id, handle);
+        lock_mutex(&self.shells).insert(id, handle);
     }
 
     fn get(&self, id: &str) -> Option<Arc<ShellHandle>> {
-        self.shells.lock().unwrap().get(id).cloned()
+        lock_mutex(&self.shells).get(id).cloned()
     }
 
     fn remove(&self, id: &str) -> Option<Arc<ShellHandle>> {
-        self.shells.lock().unwrap().remove(id)
+        lock_mutex(&self.shells).remove(id)
     }
 
     fn remove_if_exited(&self, id: &str) {
-        let mut guard = self.shells.lock().unwrap();
+        let mut guard = lock_mutex(&self.shells);
         if let Some(handle) = guard.get(id) {
             if handle.exited.load(Ordering::SeqCst) {
                 guard.remove(id);
@@ -141,16 +142,14 @@ impl ShellRegistry {
     /// Exited handles are filtered out, and shells already removed from the map are not
     /// counted (removal only happens after exit, so a live shell is always present here).
     pub fn alive_count(&self) -> usize {
-        self.shells
-            .lock()
-            .unwrap()
+        lock_mutex(&self.shells)
             .values()
             .filter(|h| !h.exited.load(Ordering::SeqCst))
             .count()
     }
 
     fn ids(&self) -> Vec<String> {
-        self.shells.lock().unwrap().keys().cloned().collect()
+        lock_mutex(&self.shells).keys().cloned().collect()
     }
 }
 
@@ -204,16 +203,16 @@ struct OutputSnapshot {
 impl ShellHandle {
     fn append_output(&self, stderr: bool, chunk: String) {
         if stderr {
-            self.stderr.lock().unwrap().append(chunk);
+            lock_mutex(&self.stderr).append(chunk);
         } else {
-            self.stdout.lock().unwrap().append(chunk);
+            lock_mutex(&self.stdout).append(chunk);
         }
         self.notify.notify_waiters();
     }
 
     fn mark_exited(&self, code: Option<i32>) {
         self.exited.store(true, Ordering::SeqCst);
-        *self.exit_code.lock().unwrap() = code;
+        *lock_mutex(&self.exit_code) = code;
         self.notify.notify_waiters();
         let id = self.id.clone();
         tokio::spawn(async move {
@@ -223,8 +222,8 @@ impl ShellHandle {
     }
 
     fn snapshot(&self) -> OutputSnapshot {
-        let (stdout, stdout_dropped) = self.stdout.lock().unwrap().snapshot();
-        let (stderr, stderr_dropped) = self.stderr.lock().unwrap().snapshot();
+        let (stdout, stdout_dropped) = lock_mutex(&self.stdout).snapshot();
+        let (stderr, stderr_dropped) = lock_mutex(&self.stderr).snapshot();
         OutputSnapshot {
             version: self.version(),
             stdout,
@@ -232,12 +231,12 @@ impl ShellHandle {
             stderr,
             stderr_dropped,
             exited: self.exited.load(Ordering::SeqCst),
-            exit_code: *self.exit_code.lock().unwrap(),
+            exit_code: *lock_mutex(&self.exit_code),
         }
     }
 
     fn version(&self) -> u64 {
-        self.stdout.lock().unwrap().version + self.stderr.lock().unwrap().version
+        lock_mutex(&self.stdout).version + lock_mutex(&self.stderr).version
     }
 
     /// Kill the whole process tree through the daemon's shared process-group primitive

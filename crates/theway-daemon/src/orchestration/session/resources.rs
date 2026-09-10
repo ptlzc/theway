@@ -9,6 +9,7 @@ use theway_core::multiagent::jobs::JobTranscriptStore;
 use crate::hook_executors::daemon_executors;
 use crate::hooks;
 use crate::runtime_storage::{RuntimeStorage, SessionRepository};
+use crate::shared_lock::{read_lock, write_lock};
 use crate::triggers;
 
 #[derive(Clone)]
@@ -94,7 +95,7 @@ impl SessionProjectResources {
                         // the currently provisioned catalog instead of wiping
                         // it with an empty disk scan.
                         crate::skills::LoadedSkills {
-                            skills: provisioned.read().unwrap().clone(),
+                            skills: read_lock(&provisioned).clone(),
                             diagnostics: Vec::new(),
                         }
                     };
@@ -107,12 +108,12 @@ impl SessionProjectResources {
                         crate::templates::load_all(&paths).await
                     } else {
                         crate::templates::LoadedTemplates {
-                            templates: provisioned_templates.read().unwrap().clone(),
+                            templates: read_lock(&provisioned_templates).clone(),
                             diagnostics: Vec::new(),
                         }
                     };
                     if !load_local_sources {
-                        *provisioned_templates.write().unwrap() = loaded_templates.templates;
+                        *write_lock(&provisioned_templates) = loaded_templates.templates;
                     }
                     let mut merged =
                         crate::builtin_skills::merge_with_user_project(builtins, &loaded.skills);
@@ -250,7 +251,7 @@ impl SessionMcpResources {
     /// controller mode, the local `mcp.toml` scan in standalone mode.
     fn daemon_layer(&self) -> crate::mcp_loader::McpLayer {
         match self.provision.as_ref() {
-            Some(slot) => slot.read().unwrap().layer(),
+            Some(slot) => read_lock(slot).layer(),
             None => crate::mcp_loader::McpLayer {
                 servers: self.daemon_servers.clone(),
                 inject_summary: self.inject_summary_servers.clone(),
@@ -262,7 +263,7 @@ impl SessionMcpResources {
 
     fn daemon_layer_configs(&self) -> Vec<crate::mcp_loader::ServerConfig> {
         match self.provision.as_ref() {
-            Some(slot) => slot.read().unwrap().configs.clone(),
+            Some(slot) => read_lock(slot).configs.clone(),
             None => self.daemon_configs.clone(),
         }
     }
@@ -310,7 +311,7 @@ impl SessionMcpResources {
     pub fn capabilities(&self) -> SessionMcpCapabilities {
         match self.provision.as_ref() {
             Some(slot) => {
-                let slot = slot.read().unwrap();
+                let slot = read_lock(slot);
                 SessionMcpCapabilities {
                     servers: slot.server_names.len(),
                     tools: slot.tool_names.len(),
