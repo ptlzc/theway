@@ -18,8 +18,10 @@ The vendored parser stays in one file so it can be compared with its source. Rea
 
 ## Validation
 
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
 ```bash
-cargo test -p mermaid-rs-parser
-cargo doc -p mermaid-rs-parser --no-deps --document-private-items
-cargo run -p mermaid-rs-parser --example dag_plan_demo
+cargo test --manifest-path crates/mermaid-parser/Cargo.toml
+cargo doc --manifest-path crates/mermaid-parser/Cargo.toml --no-deps --document-private-items
+cargo run --manifest-path crates/mermaid-parser/Cargo.toml --example dag_plan_demo
 ```

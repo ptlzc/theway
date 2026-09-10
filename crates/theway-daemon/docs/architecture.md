@@ -10,7 +10,7 @@ English | [中文](architecture.zh.md)
 
 ## Startup composition
 
-[`orchestration/startup.rs`](../src/orchestration/startup.rs) is the application composition path:
+[`orchestration/startup/mod.rs`](../src/orchestration/startup/mod.rs) is the application composition path:
 
 1. Set the resolved working directory and select local or remote `RuntimeStorage`.
 2. Create or resume a raw session store and initialize logging and telemetry.
@@ -51,7 +51,7 @@ Session switching invokes the current harness's extension gate before constructi
 
 The local adapter uses `theway-storage`. `RemoteRuntimeStorage` uses the storage RPC operations from `theway-transport`. Orchestration code depends on these daemon traits and does not expose SQLite types.
 
-A daemon configured with controller storage is valid only while that storage service remains reachable. [`orchestration/startup.rs`](../src/orchestration/startup.rs) completes a service-scoped gRPC health check once per second, resets the failure count after recovery, and logs the recovery. Three consecutive failed probes end the protocol lifecycle and shut the daemon down normally; shutdown flushes DAG persistence, aborts active graph runs, drains telemetry, and removes the discovery entry only when it still belongs to that process.
+A daemon configured with controller storage is valid only while that storage service remains reachable. [`orchestration/startup/mod.rs`](../src/orchestration/startup/mod.rs) completes a service-scoped gRPC health check once per second, resets the failure count after recovery, and logs the recovery. Three consecutive failed probes end the protocol lifecycle and shut the daemon down normally; shutdown flushes DAG persistence, aborts active graph runs, drains telemetry, and removes the discovery entry only when it still belongs to that process.
 
 ## Tools and host integrations
 

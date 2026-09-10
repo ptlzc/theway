@@ -18,8 +18,10 @@ Vendored parser 保持单文件，便于与来源代码比较。修改前阅读 
 
 ## 验证
 
+本 crate 被排除在根工作区之外并声明自己的 `[workspace]`；在仓库根目录用 `--manifest-path` 运行这些检查。
+
 ```bash
-cargo test -p mermaid-rs-parser
-cargo doc -p mermaid-rs-parser --no-deps --document-private-items
-cargo run -p mermaid-rs-parser --example dag_plan_demo
+cargo test --manifest-path crates/mermaid-parser/Cargo.toml
+cargo doc --manifest-path crates/mermaid-parser/Cargo.toml --no-deps --document-private-items
+cargo run --manifest-path crates/mermaid-parser/Cargo.toml --example dag_plan_demo
 ```

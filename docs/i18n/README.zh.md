@@ -14,9 +14,9 @@ Crate 文档语料以英文为默认源，以简体中文作为经评审的辅�
 
 ## 范围
 
-本约定覆盖每个工作区成员的 `README.md`、必需的 `docs/architecture.md`、各 crate 的 `docs/` 目录中的其他 Markdown，以及本目录中的配对政策文档。
+本约定覆盖根 `Cargo.toml` 在 `[workspace]` 的 `members` 或 `exclude` 中列出的每个 package 的 `README.md` 与必需的 `docs/architecture.md`，因此自有工作区成员与被排除的 vendored/port crate 同属一个语料。各 crate 的 `docs/` 目录中的其他 Markdown 以及本目录中的配对政策文档同样覆盖在内。
 
-- 根目录与 crate 的 `AGENTS.md` 是仅使用英文的 agent 指令。
+- 根目录与 crate 的 `AGENTS.md` 是仅使用英文的 agent 指令。对每个 package 的 `AGENTS.md`，脚本只检查链接是否留在归属 crate 内；这些文件没有 `.zh.md` 译文，也没有 `*.i18n.yaml` 记录。
 - 本政策不覆盖根目录中其他产品文档和贡献者文档。
 
 ## 更新流程

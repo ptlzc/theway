@@ -10,7 +10,7 @@
 
 ## 启动组装
 
-[`orchestration/startup.rs`](../src/orchestration/startup.rs) 是应用组合路径：
+[`orchestration/startup/mod.rs`](../src/orchestration/startup/mod.rs) 是应用组合路径：
 
 1. 设置解析后的工作目录，并选择本地或远程 `RuntimeStorage`。
 2. 创建或恢复原始会话 store，初始化日志与遥测。
@@ -51,7 +51,7 @@
 
 本地适配器使用 `theway-storage`。`RemoteRuntimeStorage` 使用 `theway-transport` 的存储 RPC 操作。编排代码依赖这些 daemon trait，不暴露 SQLite 类型。
 
-配置 controller 存储的 daemon 仅在该存储服务可访问时有效。[`orchestration/startup.rs`](../src/orchestration/startup.rs) 每秒完成一次限定服务的 gRPC 健康检查，在连接恢复后重置失败计数并记录恢复日志。连续三次探测失败会结束协议生命周期并正常关闭 daemon；关闭过程会刷新 DAG 持久化、终止活动 graph run、排空遥测，并且仅在 discovery 记录仍属于当前进程时将其删除。
+配置 controller 存储的 daemon 仅在该存储服务可访问时有效。[`orchestration/startup/mod.rs`](../src/orchestration/startup/mod.rs) 每秒完成一次限定服务的 gRPC 健康检查，在连接恢复后重置失败计数并记录恢复日志。连续三次探测失败会结束协议生命周期并正常关闭 daemon；关闭过程会刷新 DAG 持久化、终止活动 graph run、排空遥测，并且仅在 discovery 记录仍属于当前进程时将其删除。
 
 ## 工具与宿主集成
 

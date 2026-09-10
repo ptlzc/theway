@@ -6,5 +6,6 @@
 
 - 许可证：MIT（见 `LICENSE`）
 - 上游：<https://github.com/microsoft/tgrep>
-- 为什么 vendored：未发布到 crates.io；theway 将其作为 workspace 成员构建，daemon 为内置 grep 工具（issue #121）spawn `tgrep serve` + `tgrep` 客户端查询。二进制与 `theway`/`thewayd` 并列安装。
+- 为什么 vendored：未发布到 crates.io；theway 从本 crate 构建 `tgrep` 二进制，daemon 为内置 grep 工具（issue #121）spawn `tgrep serve` + `tgrep` 客户端查询。二进制与 `theway`/`thewayd` 并列安装。
+- 工作区边界：根 `Cargo.toml` 将该 crate 列入 `[workspace.exclude]`，因此它不是根工作区成员，并声明自己的 `[workspace]`；它通过 path 依赖 `tgrep-core = { path = "../tgrep-core" }` 消费 `tgrep-core`。用 `cargo test --manifest-path crates/tgrep-cli/Cargo.toml` 或 `make vendored-test` 运行本 crate 的检查。
 - 升级流程：下载新 pinned commit 的上游 tarball，逐字替换 `src/`。`Cargo.toml` 并非逐字：theway workspace 没有 `[workspace.dependencies]`/可继承元数据，因此 manifest 自包含且与上游版本/依赖完全一致 —— 升级时仅同步上游变更的版本/依赖值。**不要**手改 vendored 源码 —— 有 bug 上报上游。

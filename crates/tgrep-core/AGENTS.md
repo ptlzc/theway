@@ -31,5 +31,6 @@ This file contains the complete crate-local modification rules for `tgrep-core`.
 
 ## Validation
 
-Run `cargo test -p tgrep-core` and `cargo check -p tgrep-core`. The vendored
-bench suite runs with `cargo bench -p tgrep-core`.
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
+Run `cargo test --manifest-path crates/tgrep-core/Cargo.toml` and `cargo check --manifest-path crates/tgrep-core/Cargo.toml`. The vendored bench suite runs with `cargo bench --manifest-path crates/tgrep-core/Cargo.toml`.

@@ -17,4 +17,6 @@ This file contains the complete crate-local modification rules for `theway-markd
 
 ## Verification
 
-Run `cargo test -p theway-markdown-core` and `cargo doc -p theway-markdown-core --no-deps --document-private-items`. Changes to parser events also require `cargo test -p theway-markdown`.
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
+Run `cargo test --manifest-path crates/theway-markdown-core/Cargo.toml` and `cargo doc --manifest-path crates/theway-markdown-core/Cargo.toml --no-deps --document-private-items`. Changes to parser events also require `cargo test --manifest-path crates/theway-markdown/Cargo.toml`.

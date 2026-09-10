@@ -19,7 +19,9 @@ Parser feature 与仅双波浪线删除线策略来自 `theway-markdown-core`。
 
 渲染流水线与流式契约见 [`docs/architecture.md`](docs/architecture.md)，目录修改规则见 [`AGENTS.md`](AGENTS.md)，代码来源见 [`NOTICE`](NOTICE)。
 
+本 crate 被排除在根工作区之外并声明自己的 `[workspace]`；在仓库根目录用 `--manifest-path` 运行这些检查。
+
 ```bash
-cargo test -p theway-markdown
-cargo doc -p theway-markdown --no-deps --document-private-items
+cargo test --manifest-path crates/theway-markdown/Cargo.toml
+cargo doc --manifest-path crates/theway-markdown/Cargo.toml --no-deps --document-private-items
 ```

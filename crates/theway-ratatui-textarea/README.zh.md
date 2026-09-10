@@ -17,10 +17,10 @@
 
 编辑器、widget、wrap 和渲染层见 [`docs/architecture.md`](docs/architecture.md)，目录修改规则见 [`AGENTS.md`](AGENTS.md)，代码来源见 [`NOTICE`](NOTICE)。
 
-在 workspace 根目录运行 crate 检查：
+本 crate 被排除在根工作区之外并声明自己的 `[workspace]`；在仓库根目录用 `--manifest-path` 运行这些检查。
 
 ```bash
-cargo test -p theway-ratatui-textarea
-cargo check -p theway-ratatui-textarea --example textarea_demo
-cargo doc -p theway-ratatui-textarea --no-deps --document-private-items
+cargo test --manifest-path crates/theway-ratatui-textarea/Cargo.toml
+cargo check --manifest-path crates/theway-ratatui-textarea/Cargo.toml --example textarea_demo
+cargo doc --manifest-path crates/theway-ratatui-textarea/Cargo.toml --no-deps --document-private-items
 ```

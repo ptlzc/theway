@@ -17,4 +17,6 @@ This file contains the complete crate-local modification rules for `theway-pager
 
 ## Verification
 
-Run `cargo test -p theway-pager-render` and `cargo doc -p theway-pager-render --no-deps --document-private-items`.
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
+Run `cargo test --manifest-path crates/theway-pager-render/Cargo.toml` and `cargo doc --manifest-path crates/theway-pager-render/Cargo.toml --no-deps --document-private-items`.

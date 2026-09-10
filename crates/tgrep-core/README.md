@@ -8,8 +8,14 @@ index library behind the `tgrep` CLI. Copied **verbatim** from upstream commit
 
 - License: MIT (see `LICENSE`)
 - Upstream: <https://github.com/microsoft/tgrep>
-- Why vendored: not published on crates.io; theway ships it as a workspace member
-  next to `tgrep-cli` so the `tgrep` binary builds from the same pinned source.
+- Why vendored: not published on crates.io; theway keeps it under `crates/`
+  beside `tgrep-cli` so the `tgrep` binary builds from the same pinned source.
+- Workspace boundary: the root `Cargo.toml` lists this crate in
+  `[workspace.exclude]`, so it is not a root workspace member and declares its
+  own `[workspace]`. `tgrep-cli` consumes it through the path dependency
+  `tgrep-core = { path = "../tgrep-core" }`; run this crate's checks with
+  `cargo test --manifest-path crates/tgrep-core/Cargo.toml` or
+  `make vendored-test`.
 - Upgrade process: download the upstream tarball at the new pinned commit and
   replace `src/` verbatim. `Cargo.toml` is NOT verbatim: theway's workspace
   lacks `[workspace.dependencies]`/inheritance-compatible metadata, so the

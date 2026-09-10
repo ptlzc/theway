@@ -18,9 +18,9 @@ The TUI composes these primitives with its own view state and interaction policy
 
 The module boundaries and safety rules are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
 
-Run the crate checks from the workspace root:
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
 
 ```bash
-cargo test -p theway-pager-render
-cargo doc -p theway-pager-render --no-deps --document-private-items
+cargo test --manifest-path crates/theway-pager-render/Cargo.toml
+cargo doc --manifest-path crates/theway-pager-render/Cargo.toml --no-deps --document-private-items
 ```

@@ -19,9 +19,9 @@ The parser feature set and double-tilde-only strikethrough policy come from `the
 
 The rendering pipeline and streaming contract are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
 
-Run the crate checks from the workspace root:
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
 
 ```bash
-cargo test -p theway-markdown
-cargo doc -p theway-markdown --no-deps --document-private-items
+cargo test --manifest-path crates/theway-markdown/Cargo.toml
+cargo doc --manifest-path crates/theway-markdown/Cargo.toml --no-deps --document-private-items
 ```

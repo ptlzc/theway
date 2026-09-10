@@ -17,10 +17,10 @@ The example in [`examples/textarea_demo.rs`](examples/textarea_demo.rs) demonstr
 
 The editor, widget, wrapping, and rendering layers are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
 
-Run the crate checks from the workspace root:
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
 
 ```bash
-cargo test -p theway-ratatui-textarea
-cargo check -p theway-ratatui-textarea --example textarea_demo
-cargo doc -p theway-ratatui-textarea --no-deps --document-private-items
+cargo test --manifest-path crates/theway-ratatui-textarea/Cargo.toml
+cargo check --manifest-path crates/theway-ratatui-textarea/Cargo.toml --example textarea_demo
+cargo doc --manifest-path crates/theway-ratatui-textarea/Cargo.toml --no-deps --document-private-items
 ```

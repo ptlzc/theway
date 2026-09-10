@@ -34,5 +34,6 @@ This file contains the complete crate-local modification rules for `tgrep-cli`. 
 
 ## Validation
 
-Run `cargo test -p tgrep-cli` and `cargo check -p tgrep-cli`. Integration
-tests in this crate exercise the CLI end to end against tempdir fixtures.
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
+Run `cargo test --manifest-path crates/tgrep-cli/Cargo.toml` and `cargo check --manifest-path crates/tgrep-cli/Cargo.toml`. Integration tests in this crate exercise the CLI end to end against tempdir fixtures.

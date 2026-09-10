@@ -16,7 +16,9 @@
 
 机制与不变量见 [`docs/architecture.md`](docs/architecture.md)，目录修改规则见 [`AGENTS.md`](AGENTS.md)，代码来源见 [`NOTICE`](NOTICE)。
 
+本 crate 被排除在根工作区之外并声明自己的 `[workspace]`；在仓库根目录用 `--manifest-path` 运行这些检查。
+
 ```bash
-cargo test -p theway-markdown-core
-cargo doc -p theway-markdown-core --no-deps --document-private-items
+cargo test --manifest-path crates/theway-markdown-core/Cargo.toml
+cargo doc --manifest-path crates/theway-markdown-core/Cargo.toml --no-deps --document-private-items
 ```

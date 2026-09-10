@@ -8,9 +8,16 @@ from upstream commit `e2007b52d2b8fe4176159d0da20c9ba4a46d5aab` (2026-09-07).
 
 - License: MIT (see `LICENSE`)
 - Upstream: <https://github.com/microsoft/tgrep>
-- Why vendored: not published on crates.io; theway builds it as a workspace member
-  and the daemon spawns `tgrep serve` + `tgrep` client queries for the built-in
-  grep tool (issue #121). The binary installs alongside `theway`/`thewayd`.
+- Why vendored: not published on crates.io; theway builds the `tgrep` binary
+  from this crate, and the daemon spawns `tgrep serve` + `tgrep` client queries
+  for the built-in grep tool (issue #121). The binary installs alongside
+  `theway`/`thewayd`.
+- Workspace boundary: the root `Cargo.toml` lists this crate in
+  `[workspace.exclude]`, so it is not a root workspace member and declares its
+  own `[workspace]`; it consumes `tgrep-core` through the path dependency
+  `tgrep-core = { path = "../tgrep-core" }`. Run this crate's checks with
+  `cargo test --manifest-path crates/tgrep-cli/Cargo.toml` or
+  `make vendored-test`.
 - Upgrade process: download the upstream tarball at the new pinned commit and
   replace `src/` verbatim. `Cargo.toml` is NOT verbatim: theway's workspace
   lacks `[workspace.dependencies]`/inheritance-compatible metadata, so the

@@ -18,4 +18,6 @@ This file contains the complete crate-local modification rules for `mermaid-rs-p
 
 ## Validation
 
-Run `cargo test -p mermaid-rs-parser` and `cargo doc -p mermaid-rs-parser --no-deps --document-private-items`. For changes that may affect the DAG adapter, also run `cargo test -p theway-core multiagent::graph::mermaid`.
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
+Run `cargo test --manifest-path crates/mermaid-parser/Cargo.toml` and `cargo doc --manifest-path crates/mermaid-parser/Cargo.toml --no-deps --document-private-items`. For changes that may affect the DAG adapter, also run `cargo test --manifest-path crates/theway-core/Cargo.toml multiagent::graph::mermaid`.

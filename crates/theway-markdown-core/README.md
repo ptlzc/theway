@@ -16,9 +16,9 @@ Use this crate when a caller needs to inspect Markdown without pulling in `thewa
 
 The mechanism and invariants are documented in [`docs/architecture.md`](docs/architecture.md). Directory-specific modification rules are in [`AGENTS.md`](AGENTS.md), and code lineage is recorded in [`NOTICE`](NOTICE).
 
-Run the crate checks from the workspace root:
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
 
 ```bash
-cargo test -p theway-markdown-core
-cargo doc -p theway-markdown-core --no-deps --document-private-items
+cargo test --manifest-path crates/theway-markdown-core/Cargo.toml
+cargo doc --manifest-path crates/theway-markdown-core/Cargo.toml --no-deps --document-private-items
 ```

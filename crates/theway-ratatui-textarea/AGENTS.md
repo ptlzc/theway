@@ -25,4 +25,6 @@ This file contains the complete crate-local modification rules for `theway-ratat
 
 ## Verification
 
-Run `cargo test -p theway-ratatui-textarea`, `cargo check -p theway-ratatui-textarea --example textarea_demo`, and `cargo doc -p theway-ratatui-textarea --no-deps --document-private-items`.
+This crate is excluded from the root workspace and declares its own `[workspace]`; run these checks from the repository root with `--manifest-path`.
+
+Run `cargo test --manifest-path crates/theway-ratatui-textarea/Cargo.toml`, `cargo check --manifest-path crates/theway-ratatui-textarea/Cargo.toml --example textarea_demo`, and `cargo doc --manifest-path crates/theway-ratatui-textarea/Cargo.toml --no-deps --document-private-items`.

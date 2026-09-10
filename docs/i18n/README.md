@@ -14,9 +14,9 @@ The crate documentation corpus uses English as its default source and Simplified
 
 ## Scope
 
-The contract covers every workspace member's `README.md`, required `docs/architecture.md`, additional Markdown under each crate's `docs/` directory, and the paired policy documents in this directory.
+The contract covers the `README.md` and required `docs/architecture.md` of every package the root `Cargo.toml` lists in `[workspace]` under `members` or `exclude`, so first-party workspace members and the excluded vendored/ported crates share one corpus. Additional Markdown under each crate's `docs/` directory and the paired policy documents in this directory are covered as well.
 
-- Root and crate `AGENTS.md` files are English-only agent instructions.
+- Root and crate `AGENTS.md` files are English-only agent instructions. For each package's `AGENTS.md`, the script checks that links stay inside the owning crate; these files have no `.zh.md` translation and no `*.i18n.yaml` record.
 - Root product and contributor documentation outside this policy remains outside the crate-pairing corpus.
 
 ## Update workflow
