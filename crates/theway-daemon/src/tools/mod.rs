@@ -84,7 +84,7 @@ pub use crate::triggers::tool_assembly::{
 };
 
 /// Tool names that bypass the [`ToolExecutor`] seam and touch the host OS directly:
-/// `bash` spawns `sh -c` process groups (setsid/killpg), the `exec_shell` family owns
+/// `bash` spawns host-shell process groups (setsid/killpg), the `exec_shell` family owns
 /// `tokio::process` children, and `ls` / `grep` / `find` walk the local filesystem
 /// with `tokio::fs` / `ignore`. They are registered ONLY in `local` execution mode.
 /// In sandbox mode (issue #123: selected at runtime via `[executor] kind` in

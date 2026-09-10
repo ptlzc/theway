@@ -1,6 +1,7 @@
-//! `bash` tool. Mirrors `packages/coding-agent/src/core/tools/bash.ts`. Runs the command via
-//! `sh -c`, captures stdout+stderr, honors an optional timeout (seconds), and honors the
-//! agent's cancellation token.
+//! `bash` tool. Mirrors `packages/coding-agent/src/core/tools/bash.ts`. Runs the command
+//! through the host shell (`sh -c` on Unix; `pwsh` → `powershell` → `cmd` on Windows),
+//! captures stdout+stderr, honors an optional timeout (seconds), and honors the agent's
+//! cancellation token.
 //!
 //! Concurrency and lifecycle invariants (per the code-review post 2026-05-22 in
 //! `#code-review`):
@@ -21,6 +22,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::time::Duration;
+use theway_contract::shell::shell;
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio_util::sync::CancellationToken;
@@ -172,7 +174,8 @@ use once_cell::sync::Lazy;
 static DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     name: "bash".into(),
     description: format!(
-        "Run a shell command via `sh -c`. With `run_in_background: true` the command runs in a background shell and the tool returns its shell_id immediately — manage it with get_output / kill_shell / write_to_process. Returns stdout+stderr (tail-truncated to {DEFAULT_MAX_LINES} lines / {} KiB) and exit code. Optional `timeout` in seconds. Timeouts and cancellations kill the child process; stdout and stderr are drained concurrently so high-output commands do not deadlock the tool.",
+        "Run a shell command via `{}`. With `run_in_background: true` the command runs in a background shell and the tool returns its shell_id immediately — manage it with get_output / kill_shell / write_to_process. Returns stdout+stderr (tail-truncated to {DEFAULT_MAX_LINES} lines / {} KiB) and exit code. Optional `timeout` in seconds. Timeouts and cancellations kill the child process; stdout and stderr are drained concurrently so high-output commands do not deadlock the tool.",
+        shell().display(),
         DEFAULT_MAX_BYTES / 1024
     ),
     parameters: json!({

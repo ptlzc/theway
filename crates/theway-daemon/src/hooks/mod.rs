@@ -48,7 +48,7 @@ pub struct LoadedHooks {
 }
 
 /// Command-execution seam for hook rules. The daemon owns the implementation
-/// (spawn `sh -c` with the given env, whole-process-tree kill on timeout/cancel)
+/// (spawn the host shell with the given env, whole-process-tree kill on timeout/cancel)
 /// in [`crate::hook_executors`], routing it through the single `setsid`/`killpg`
 /// primitive shared by the bash tool, the exec_shell family and native env.
 /// Returns captured stdout/stderr on success.

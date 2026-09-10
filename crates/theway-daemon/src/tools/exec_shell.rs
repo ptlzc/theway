@@ -24,6 +24,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use theway_contract::shell::shell;
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate};
 use theway_llm_provider::{Tool, UserContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
@@ -273,9 +274,9 @@ pub async fn run_in_background_with_cwd(
     command: &str,
     cwd: Option<&std::path::Path>,
 ) -> Result<BackgroundShell, AgentToolError> {
-    let mut cmd = tokio::process::Command::new(shell_program());
-    cmd.arg(shell_flag())
-        .arg(command)
+    let spec = shell();
+    let mut cmd = tokio::process::Command::new(&spec.program);
+    cmd.args(spec.command_args(command))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -288,9 +289,9 @@ pub async fn run_in_background_with_cwd(
     // process-group leader on Unix so `kill_shell`'s group kill reaches the whole tree.
     super::exec::process_group::prepare_command(&mut cmd);
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| AgentToolError::from(format!("spawn: {e}")))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        AgentToolError::from(format!("spawn {}: {e}", spec.program.to_string_lossy()))
+    })?;
     let pid = child
         .id()
         .ok_or_else(|| AgentToolError::from("spawned child has no pid"))?;
@@ -344,27 +345,6 @@ where
     }
 }
 
-fn shell_program() -> &'static str {
-    #[cfg(windows)]
-    {
-        "cmd"
-    }
-    #[cfg(not(windows))]
-    {
-        "sh"
-    }
-}
-
-fn shell_flag() -> &'static str {
-    #[cfg(windows)]
-    {
-        "/C"
-    }
-    #[cfg(not(windows))]
-    {
-        "-c"
-    }
-}
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // get_output core
 // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -731,11 +711,12 @@ impl AgentTool for WriteToProcessTool {
 // Definitions
 // ──────────────────────────────────────────────────────────────────────────────────────────
 
-static EXEC_DEFINITION: Lazy<Tool> = Lazy::new(|| {
-    Tool {
+static EXEC_DEFINITION: Lazy<Tool> = Lazy::new(|| Tool {
     name: "exec".into(),
-    description: "Execute a shell command. With `run_in_background: true` the command runs in a background shell and the tool immediately returns its shell_id — use get_output to read output, kill_shell to terminate, write_to_process to send input. Foreground mode behaves exactly like `bash` (captures stdout+stderr, optional `timeout` in seconds, kills the process tree on timeout/cancel)."
-        .into(),
+    description: format!(
+        "Execute a shell command via `{}`. With `run_in_background: true` the command runs in a background shell and the tool immediately returns its shell_id — use get_output to read output, kill_shell to terminate, write_to_process to send input. Foreground mode behaves exactly like `bash` (captures stdout+stderr, optional `timeout` in seconds, kills the process tree on timeout/cancel).",
+        shell().display()
+    ),
     parameters: json!({
         "type": "object",
         "properties": {
@@ -746,7 +727,6 @@ static EXEC_DEFINITION: Lazy<Tool> = Lazy::new(|| {
         },
         "required": ["command"],
     }),
-}
 });
 
 static GET_OUTPUT_DEFINITION: Lazy<Tool> = Lazy::new(|| {

@@ -1,4 +1,5 @@
-//! Process execution primitives — spawn `sh -c` with setsid + killpg teardown.
+//! Process execution primitives — spawn commands through the host shell (`sh -c` on Unix;
+//! `pwsh` → `powershell` → `cmd` on Windows) with setsid + killpg teardown.
 //!
 //! Single implementation of the timeout/cancel → kill-the-whole-tree semantics shared
 //! by the server `bash` tool, the core async exec tool group (`exec_shell`), the
@@ -21,6 +22,7 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
+use theway_contract::shell::shell;
 use theway_core::AgentToolError;
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -157,7 +159,7 @@ pub(crate) mod process_group {
     }
 }
 
-/// Captured outcome of a foreground `sh -c` run. Only `Err` when the spawn itself
+/// Captured outcome of a foreground host-shell run. Only `Err` when the spawn itself
 /// failed; every other failure mode (kill from timeout / cancel / pipe error) folds
 /// into the outcome so the LLM still sees what the command produced.
 #[derive(Debug)]
@@ -190,7 +192,8 @@ impl RunOutcome {
     }
 }
 
-/// Spawn `sh -c <command>` and collect its output, killing the child on timeout / cancel.
+/// Run `<command>` in the host shell (`sh -c` on Unix; `pwsh` → `powershell` → `cmd` on
+/// Windows) and collect its output, killing the child on timeout / cancel.
 ///
 /// Returns the captured stdout / stderr and the exit-code-or-`None` per [`RunOutcome`].
 /// Only returns `Err` when the spawn itself fails — every other failure mode (kill from
@@ -203,9 +206,9 @@ pub async fn run_with_kill_on_timeout_or_cancel(
     envs: Option<&BTreeMap<String, String>>,
     cancel: &CancellationToken,
 ) -> Result<RunOutcome, AgentToolError> {
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c")
-        .arg(command)
+    let spec = shell();
+    let mut cmd = tokio::process::Command::new(&spec.program);
+    cmd.args(spec.command_args(command))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -225,9 +228,9 @@ pub async fn run_with_kill_on_timeout_or_cancel(
     // (openspec `layering`).
     process_group::prepare_command(&mut cmd);
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| AgentToolError::from(format!("spawn: {e}")))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        AgentToolError::from(format!("spawn {}: {e}", spec.program.to_string_lossy()))
+    })?;
     // Snapshot the pid before any wait/select touches `child` so the kill path can target
     // the process group even if tokio later loses the handle.
     let child_pid = child.id();

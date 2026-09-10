@@ -17,6 +17,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio_util::sync::CancellationToken;
 
+use theway_contract::shell::shell;
 use theway_core::agent::types::*;
 
 // The daemon's single process-group kill primitive (openspec `layering`): setsid-before-
@@ -308,15 +309,17 @@ impl ExecutionEnv for NativeEnv {
     }
 
     async fn exec(&self, command: &str, options: ExecOptions) -> ExecResult<ExecOutput> {
-        // Builds a `sh -c <command>` child with piped stdout/stderr. The child lives in its
-        // own process group on Unix so a timeout/abort sends SIGKILL to the entire group —
-        // killing only the direct shell would leak descendants like
-        // `(sleep 30; touch leak) & wait`. `kill_on_drop(true)` is the last-line backstop if
-        // we ever return without explicitly killing (e.g. an `?` exit before the select).
-        // Stdout and stderr are drained on separate spawned tasks because a serial drain
-        // deadlocks any time one pipe fills before the other is read.
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(command);
+        // Builds a host-shell child (`sh -c` on Unix; `pwsh` → `powershell` → `cmd` on
+        // Windows) with piped stdout/stderr. The child lives in its own process group on
+        // Unix so a timeout/abort sends SIGKILL to the entire group — killing only the
+        // direct shell would leak descendants like `(sleep 30; touch leak) & wait`.
+        // `kill_on_drop(true)` is the last-line backstop if we ever return without
+        // explicitly killing (e.g. an `?` exit before the select). Stdout and stderr are
+        // drained on separate spawned tasks because a serial drain deadlocks any time one
+        // pipe fills before the other is read.
+        let spec = shell();
+        let mut cmd = Command::new(&spec.program);
+        cmd.args(spec.command_args(command));
         if let Some(cwd) = &options.cwd {
             cmd.current_dir(cwd);
         } else {
@@ -335,9 +338,12 @@ impl ExecutionEnv for NativeEnv {
         // process group on Unix so the timeout/abort kill below reaches the whole tree.
         process_group::prepare_command(&mut cmd);
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| ExecutionError::new(ExecutionErrorCode::SpawnFailed, e.to_string()))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            ExecutionError::new(
+                ExecutionErrorCode::SpawnFailed,
+                format!("spawn {}: {e}", spec.program.to_string_lossy()),
+            )
+        })?;
 
         // Snapshot the pid before any drain/select so the kill paths can target the process
         // group even if the underlying `tokio::process::Child` later loses access (e.g. after
