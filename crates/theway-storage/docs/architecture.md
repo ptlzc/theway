@@ -28,6 +28,14 @@ Import accepts only the fixed archive member names, enforces member-size limits,
 
 Automation is disabled on import unless `ActivateTriggers::On` is selected. Interactive `Ask` handling belongs to the calling client and is not performed by `import_session`.
 
+## Attachment library
+
+[`attachments.rs`](../src/attachments.rs) implements the leaf contract's `AttachmentStore` as a local object tree that is independent of the session databases. `LocalAttachmentStore::new` takes an explicit root, `from_base_dir` roots the store at `theway_contract::config::attachments_dir` (`<base>/attachments/v1`), and `root` reports the resolved directory.
+
+An object lives at `<root>/<shard>/<hex>`, where `hex` is the 64 lowercase hex characters of the `sha256:<hex>` digest and `shard` is its first two characters. `put` hashes the bytes, returns the digest unchanged when the object file already exists, and otherwise creates the shard directory, writes a `tmp-<pid>-<nanos>` staging file inside that same directory, and renames it into place; a failed rename removes the staging file, so neither a partial object nor a staging file is left behind. Because the object name is the content digest, an existing object is never rewritten.
+
+`get` rejects a malformed digest with `InvalidDigest`, reports a missing object as `NotFound`, recomputes the digest of the bytes it read, and returns `DigestMismatch` rather than bytes that do not hash to the digest they are filed under. `contains` answers from object existence only and never reads bytes.
+
 ## DAG snapshots
 
 [`sqlite_dag.rs`](../src/sqlite_dag.rs) stores `PersistedRun` and `PersistedNode` records. `save` transactionally replaces the complete snapshot set; `load` skips individual rows whose JSON cannot be decoded.
@@ -41,5 +49,7 @@ DAG snapshots are rebuildable runtime state. A database that cannot be opened or
 - Extension payloads remain opaque to storage and branch selection is derived from persisted parent and leaf records.
 - DAG snapshot databases are replaceable projections and may be rebuilt after corruption.
 - Archive import validates all content before exposing the final `<uuidv7>.db` path.
+- Attachment objects are immutable and content-addressed: an existing object is never rewritten, and a read verifies the digest before returning bytes.
+- Attachment objects commit by rename, so a reader never observes a partially written object.
 - Raw persistence remains independent of typed runtime and wire representations.
 - Sidecar paths derive from the final session database path through shared helpers.

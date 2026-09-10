@@ -28,6 +28,14 @@ Daemon 和 TUI 决定何时使用本地持久化。本 crate 负责本地文件�
 
 除非选择 `ActivateTriggers::On`，导入后的自动化默认关闭。交互式 `Ask` 由调用客户端处理，`import_session` 不执行交互。
 
+## 附件库
+
+[`attachments.rs`](../src/attachments.rs) 把叶子契约的 `AttachmentStore` 实现为独立于会话数据库的本地对象树。`LocalAttachmentStore::new` 接收显式根目录，`from_base_dir` 以 `theway_contract::config::attachments_dir`（`<base>/attachments/v1`）为根，`root` 返回解析后的目录。
+
+对象位于 `<root>/<shard>/<hex>`：`hex` 是 `sha256:<hex>` digest 的 64 个小写十六进制字符，`shard` 是其前两个字符。`put` 对字节取哈希，在对象文件已存在时原样返回 digest；否则创建 shard 目录，在同一目录内写入 `tmp-<pid>-<nanos>` 暂存文件，再以重命名提交——重命名失败会删除暂存文件，因此既不会留下半个对象，也不会残留暂存文件。由于对象名即内容 digest，已存在的对象不会被重写。
+
+`get` 对格式非法的 digest 返回 `InvalidDigest`，对缺失对象返回 `NotFound`，并重新计算读回字节的 digest，在字节与其登记 digest 不一致时返回 `DigestMismatch`，而不是返回这些字节。`contains` 只根据对象是否存在作答，从不读取字节。
+
 ## DAG 快照
 
 [`sqlite_dag.rs`](../src/sqlite_dag.rs) 存储 `PersistedRun` 与 `PersistedNode`。`save` 在事务中替换完整快照集合；`load` 跳过无法解码 JSON 的单行记录。
@@ -41,5 +49,7 @@ DAG 快照是可重建的运行时状态。数据库无法打开或写入时会�
 - Extension 载荷对存储保持不透明，分支选择从持久化父节点和叶节点记录推导。
 - DAG 快照数据库是可替换投影，损坏后可以重建。
 - 归档导入在暴露最终 `<uuidv7>.db` 路径之前校验全部内容。
+- 附件对象不可变且内容寻址：已存在的对象不会被重写，读取在返回字节前校验 digest。
+- 附件对象以重命名提交，读取方不会观察到写了一半的对象。
 - 原始持久化与带类型运行时、wire 表示保持独立。
 - Sidecar 路径通过共享辅助函数从最终会话数据库路径派生。

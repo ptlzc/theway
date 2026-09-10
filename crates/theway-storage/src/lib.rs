@@ -5,6 +5,10 @@
 //! SQLite via Turso stores one `<uuidv7>.db` file per session. The composition
 //! root chooses the backend and adapts it to a core runtime session when needed.
 //!
+//! [`attachments`] implements the content-addressed attachment store contract as a
+//! local `<root>/<shard>/<digest>` file tree: writes are deduplicated by digest and
+//! committed by rename, reads re-verify the digest before returning bytes.
+//!
 //! This crate depends only on leaf contracts, never on core or the transport
 //! stack.
 
@@ -22,6 +26,7 @@
 //! shape (`theway_storage::…`), same pattern as theway-core / theway-daemon.
 extern crate self as theway_storage;
 
+pub mod attachments;
 pub mod session;
 pub mod session_archive;
 pub mod session_graph;
