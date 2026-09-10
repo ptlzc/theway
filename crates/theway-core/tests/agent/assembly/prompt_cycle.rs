@@ -1,7 +1,11 @@
-//! Prompt cycle: image and template prompts, `continue_`, and on-turn-end
-//! hook decisions.
+//! Prompt cycle: image and template prompts, structured user-input records,
+//! `continue_`, and on-turn-end hook decisions.
 
 use super::*;
+use theway_contract::user_input::{
+    InputFilePart, InputImagePart, InputInjectedPart, InputPart, InputSource, UserInput,
+    digest_bytes,
+};
 
 // ──────────────────────────────────────────────────────────────────────────────────────────
 // Harness lifecycle / prompt-cycle coverage
@@ -222,4 +226,255 @@ async fn prompt_with_images_with_empty_text_still_sends_images() {
         }
         other => panic!("expected image block, got {other:?}"),
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────
+// Structured user input — `prompt_with_input` / `record_user_input_prompt` archive the
+// canonical `user_input` record one entry ahead of the user message it describes.
+// ──────────────────────────────────────────────────────────────────────────────────────────
+
+fn sample_user_input() -> UserInput {
+    UserInput {
+        text: "summarize @src/lib.rs".into(),
+        parts: vec![
+            InputPart::File(InputFilePart {
+                path: "src/lib.rs".into(),
+                name: "lib.rs".into(),
+                digest: digest_bytes(b"lib.rs"),
+                bytes: 6,
+                media_type: "text/x-rust".into(),
+                truncated: false,
+            }),
+            InputPart::Image(InputImagePart {
+                name: Some("shot.png".into()),
+                digest: digest_bytes(b"png"),
+                bytes: 3,
+                media_type: "image/png".into(),
+            }),
+            InputPart::Injected(InputInjectedPart {
+                source: "skill".into(),
+                name: Some("review".into()),
+                text: "review the diff".into(),
+            }),
+        ],
+        source: InputSource::User,
+        source_ref: None,
+    }
+}
+
+fn sample_image() -> ImageContent {
+    ImageContent {
+        data: "base64".into(),
+        mime_type: "image/png".into(),
+    }
+}
+
+fn is_user_message(message: &AgentMessage) -> bool {
+    matches!(message, AgentMessage::Llm(PiMessage::User(_)))
+}
+
+fn is_user_input_record(message: &AgentMessage) -> bool {
+    match message {
+        AgentMessage::Custom(custom) => custom.role == UserInput::CUSTOM_ROLE,
+        _ => false,
+    }
+}
+
+fn logged_messages(entries: &[SessionTreeEntry]) -> Vec<AgentMessage> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            SessionTreeEntry::Message { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn has_user_input_record(messages: &[AgentMessage]) -> bool {
+    messages.iter().any(is_user_input_record)
+}
+
+fn assert_user_input_record(message: &AgentMessage, expected: &UserInput) {
+    let custom = match message {
+        AgentMessage::Custom(custom) => custom,
+        other => panic!("expected a user_input custom message, got {other:?}"),
+    };
+    assert_eq!(custom.role, UserInput::CUSTOM_ROLE);
+    let restored: UserInput = serde_json::from_value(custom.payload.clone())
+        .expect("user_input payload must deserialize");
+    assert_eq!(&restored, expected);
+}
+
+fn capturing_stream(captured: Arc<std::sync::Mutex<Vec<Vec<PiMessage>>>>) -> StreamFn {
+    Arc::new(move |model, context, options| {
+        captured.lock().unwrap().push(context.messages.clone());
+        let stream_fn = faux_stream("ok");
+        stream_fn(model, context, options)
+    })
+}
+
+fn captured_messages(captured: &std::sync::Mutex<Vec<Vec<PiMessage>>>) -> Vec<PiMessage> {
+    let mut calls = captured.lock().unwrap();
+    match calls.len() {
+        1 => calls.remove(0),
+        other => panic!("expected one provider call, got {other}"),
+    }
+}
+
+fn provider_user_text(message: &PiMessage) -> String {
+    match message {
+        PiMessage::User(user) => match &user.content {
+            UserContent::Text(text) => text.clone(),
+            other => panic!("expected text content, got {other:?}"),
+        },
+        other => panic!("expected a user message, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn prompt_with_input_appends_record_before_user_message() {
+    let h = harness_with_stream(faux_stream("ok"));
+    let input = sample_user_input();
+
+    h.prompt_with_input("summarize @src/lib.rs", Vec::new(), Some(input.clone()))
+        .await
+        .unwrap();
+
+    let entries = h.session().entries().await.unwrap();
+    let logged = logged_messages(&entries);
+    assert_eq!(logged.len(), 3);
+    assert_user_input_record(&logged[0], &input);
+    assert!(is_user_message(&logged[1]));
+
+    let state = h.agent().state();
+    assert_eq!(state.messages.len(), 3);
+    assert_user_input_record(&state.messages[0], &input);
+    assert!(is_user_message(&state.messages[1]));
+}
+
+#[tokio::test]
+async fn prompt_with_input_with_images_appends_record_and_image_blocks() {
+    let h = harness_with_stream(faux_stream("ok"));
+    let input = sample_user_input();
+    h.prompt_with_input("look", vec![sample_image()], Some(input.clone()))
+        .await
+        .unwrap();
+
+    let state = h.agent().state();
+    assert_user_input_record(&state.messages[0], &input);
+    let user = match &state.messages[1] {
+        AgentMessage::Llm(PiMessage::User(user)) => user,
+        other => panic!("expected the user message, got {other:?}"),
+    };
+    match &user.content {
+        UserContent::Blocks(blocks) => {
+            assert_eq!(blocks.len(), 2);
+            assert!(matches!(blocks[0], UserContentBlock::Text(_)));
+            assert!(matches!(blocks[1], UserContentBlock::Image(_)));
+        }
+        other => panic!("expected content blocks, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn prompt_paths_without_input_append_no_record() {
+    let imgs = vec![sample_image()];
+
+    let h = harness_with_stream(faux_stream("ok"));
+    h.prompt("hello").await.unwrap();
+    let entries = h.session().entries().await.unwrap();
+    assert!(!has_user_input_record(&logged_messages(&entries)));
+    assert!(!has_user_input_record(&h.agent().state().messages));
+
+    let h = harness_with_stream(faux_stream("ok"));
+    h.prompt_with_images("look", imgs).await.unwrap();
+    let entries = h.session().entries().await.unwrap();
+    let logged = logged_messages(&entries);
+    assert!(!has_user_input_record(&logged));
+    assert!(is_user_message(&logged[0]));
+
+    let h = harness_with_stream(faux_stream("ok"));
+    h.prompt_with_input("hi", vec![], None).await.unwrap();
+    let entries = h.session().entries().await.unwrap();
+    assert!(!has_user_input_record(&logged_messages(&entries)));
+}
+
+#[tokio::test]
+async fn record_user_prompt_without_input_appends_no_record() {
+    let h = harness_with_stream(faux_stream("ok"));
+    h.record_user_prompt("queued", Vec::new()).await.unwrap();
+    let entries = h.session().entries().await.unwrap();
+    assert!(!has_user_input_record(&logged_messages(&entries)));
+    assert!(!has_user_input_record(&h.agent().state().messages));
+}
+
+#[tokio::test]
+async fn user_input_record_round_trips_through_persisted_json() {
+    let h = harness_with_stream(faux_stream("ok"));
+    let input = sample_user_input();
+    h.prompt_with_input("summarize @src/lib.rs", Vec::new(), Some(input.clone()))
+        .await
+        .unwrap();
+
+    let entries = h.session().entries().await.unwrap();
+    let encoded = serde_json::to_value(&entries[0]).unwrap();
+    let decoded: SessionTreeEntry = serde_json::from_value(encoded).unwrap();
+    let custom = match decoded {
+        SessionTreeEntry::Message { message: AgentMessage::Custom(custom), .. } => custom,
+        other => panic!("first session entry must be the user_input record, got {other:?}"),
+    };
+    assert_eq!(custom.role, UserInput::CUSTOM_ROLE);
+    let restored: UserInput = serde_json::from_value(custom.payload).unwrap();
+    assert_eq!(restored, input);
+}
+
+#[tokio::test]
+async fn queued_steering_input_reaches_the_log_before_the_steering_message() {
+    let h = harness_with_stream(faux_stream("ok"));
+    let input = sample_user_input();
+    h.enqueue_steering_input(&input).unwrap();
+    h.enqueue_steering(user_message("steer"));
+
+    h.prompt("hello").await.unwrap();
+
+    let entries = h.session().entries().await.unwrap();
+    let logged = logged_messages(&entries);
+    let record_index = logged
+        .iter()
+        .position(is_user_input_record)
+        .expect("steering record must reach the session log");
+    assert_user_input_record(&logged[record_index], &input);
+    let queued = match &logged[record_index + 1] {
+        AgentMessage::Llm(message) => message,
+        other => panic!("expected the steering message, got {other:?}"),
+    };
+    assert_eq!(provider_user_text(queued), "steer");
+}
+
+#[tokio::test]
+async fn user_input_record_is_filtered_from_provider_messages() {
+    let plain_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let plain_stream = capturing_stream(plain_seen.clone());
+    let plain = harness_with_stream(plain_stream);
+    plain.prompt("hello").await.unwrap();
+
+    let recorded_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded_stream = capturing_stream(recorded_seen.clone());
+    let recorded = harness_with_stream(recorded_stream);
+    let input = sample_user_input();
+    recorded
+        .prompt_with_input("hello", Vec::new(), Some(input.clone()))
+        .await
+        .unwrap();
+
+    let plain_messages = captured_messages(&plain_seen);
+    let recorded_messages = captured_messages(&recorded_seen);
+    assert_eq!(recorded_messages.len(), plain_messages.len());
+    let plain_text = provider_user_text(&plain_messages[0]);
+    let recorded_text = provider_user_text(&recorded_messages[0]);
+    assert_eq!(recorded_text, plain_text);
+
+    // The dropped record was in the transcript that fed the provider request.
+    let state = recorded.agent().state();
+    assert_user_input_record(&state.messages[0], &input);
 }

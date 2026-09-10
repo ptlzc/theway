@@ -30,6 +30,14 @@ Tool bodies implement `AgentTool`. Host-level filesystem and process operations 
 
 [`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) estimates context use, chooses a cut point, produces or invokes a summarizer, and records compaction metadata without knowing which persistence backend stores the session.
 
+## Canonical user input records
+
+[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs)'s `user_input_record_message` turns one `UserInput` into the canonical record: an `AgentMessage::Custom` whose role is `UserInput::CUSTOM_ROLE` and whose payload is the serialized `UserInput`. `AgentHarness::prompt_with_input` and `AgentHarness::record_user_input_prompt` in [`agent/assembly/run.rs`](../src/agent/assembly/run.rs) take that record as their last argument, while `prompt_with_images` and `record_user_prompt` keep their signatures and delegate with `None`.
+
+The record is appended to the persisted session log and to the in-memory transcript ahead of the user message it describes, so a transcript read pairs each record with the `Message::User` entry that follows it. The record never enters the run loop, so the session listener that persists every `MessageEnd` does not write it a second time. `AgentHarness::enqueue_steering_input` queues the same record ahead of the message it describes, and the steering queue drains in order, which gives the interleaved path the same record-then-message adjacency.
+
+`default_convert_to_llm` in [`types.rs`](../src/types.rs) materializes only the known summary custom roles, so a `user_input` record converts to nothing and a round that carries one produces the same provider request as the same round without a record.
+
 ## Multiagent runtime
 
 [`multiagent/runner.rs`](../src/multiagent/runner.rs) launches a fresh harness for one nested agent run, filters its tool set, enforces idle-timeout cancellation, and returns normalized output and usage.
@@ -92,5 +100,6 @@ Compaction invokes the extension gate before selecting or running either the bui
 - A normalized request replacement is atomic and request-local; visible definitions and executable references describe the same immutable tool catalog.
 - Provider header/raw transforms and response/failure observations cross core only as redacted provider DTOs with an explicit wire format.
 - Compaction input contains only typed session messages plus de-duplicated model-visible extension context, never private extension state.
+- A user input record precedes the user message it describes in the log and never enters model context.
 - Cancellation produces a terminal runtime outcome and releases run admission and control handles.
 - Event payloads and operation correlation remain deterministic enough for the daemon to project snapshots without accessing private core state.

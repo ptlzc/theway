@@ -1,6 +1,8 @@
+use theway_contract::user_input::UserInput;
 use theway_llm_provider::{ImageContent, Message as PiMessage};
 
 use crate::agent::AgentRunError;
+use crate::agent::types::SessionError;
 use crate::types::AgentMessage;
 
 use super::runtime_extensions::InputTransformOutcome;
@@ -36,10 +38,21 @@ fn user_message_from_text_and_images(
     }))
 }
 
+/// Text-only prompts keep the plain text form; a prompt carrying images uses
+/// content blocks. Matches the shape the queued-prompt path persists.
+fn user_message_for_prompt(text: impl Into<String>, images: Vec<ImageContent>) -> AgentMessage {
+    if images.is_empty() {
+        user_message_from_text(text)
+    } else {
+        user_message_from_text_and_images(text, images)
+    }
+}
+
 impl AgentHarness {
     /// Prompt the agent with text. Runs auto-compaction first and persists results.
     pub async fn prompt(&self, text: impl Into<String>) -> Result<(), AgentRunError> {
-        self.prompt_with_message(user_message_from_text(text)).await
+        self.prompt_with_message_and_input(user_message_from_text(text), None)
+            .await
     }
 
     /// Prompt with text and images.
@@ -48,7 +61,24 @@ impl AgentHarness {
         text: impl Into<String>,
         images: Vec<ImageContent>,
     ) -> Result<(), AgentRunError> {
-        self.prompt_with_message(user_message_from_text_and_images(text, images))
+        self.prompt_with_message_and_input(user_message_from_text_and_images(text, images), None)
+            .await
+    }
+
+    /// Prompt with text, images, and the canonical record of the round of input
+    /// they came from. The text form matches [`AgentHarness::prompt`] when
+    /// `images` is empty.
+    ///
+    /// With `input` as `Some`, the record is appended to the session log and the
+    /// in-memory transcript immediately before the user message; a runtime
+    /// extension that handles the input returns before either write.
+    pub async fn prompt_with_input(
+        &self,
+        text: impl Into<String>,
+        images: Vec<ImageContent>,
+        input: Option<UserInput>,
+    ) -> Result<(), AgentRunError> {
+        self.prompt_with_message_and_input(user_message_for_prompt(text, images), input)
             .await
     }
 
@@ -61,17 +91,34 @@ impl AgentHarness {
         text: impl Into<String>,
         images: Vec<ImageContent>,
     ) -> Result<(), crate::agent::types::SessionError> {
-        let message = if images.is_empty() {
-            user_message_from_text(text)
-        } else {
-            user_message_from_text_and_images(text, images)
-        };
+        self.record_user_input_prompt(text, images, None).await
+    }
+
+    /// Persist a user prompt together with the canonical record of the round of
+    /// input it came from. A `Some` record is written immediately before the
+    /// message, so replay reads the two as one turn.
+    pub async fn record_user_input_prompt(
+        &self,
+        text: impl Into<String>,
+        images: Vec<ImageContent>,
+        input: Option<UserInput>,
+    ) -> Result<(), SessionError> {
+        if let Some(input) = input {
+            let record = Self::user_input_record_message(&input)?;
+            self.session.append_messages(vec![record.clone()]).await?;
+            self.agent.state().messages.push(record);
+        }
+        let message = user_message_for_prompt(text, images);
         self.session.append_messages(vec![message.clone()]).await?;
         self.agent.state().messages.push(message);
         Ok(())
     }
 
-    async fn prompt_with_message(&self, message: AgentMessage) -> Result<(), AgentRunError> {
+    async fn prompt_with_message_and_input(
+        &self,
+        message: AgentMessage,
+        input: Option<UserInput>,
+    ) -> Result<(), AgentRunError> {
         self.runtime_extensions
             .reject_reentrant_operation()
             .map_err(|error| AgentRunError::Other(error.message))?;
@@ -85,9 +132,27 @@ impl AgentHarness {
         };
         self.check_budget_cap()?;
         self.run_auto_compaction().await?;
+        if let Some(input) = input {
+            self.append_user_input_record(&input).await?;
+        }
         let last_user_prompt = extract_user_prompt_text(&message);
         self.run_turn_with_continuation(Some(message), last_user_prompt)
             .await
+    }
+
+    /// Append the canonical record to the session log and the in-memory
+    /// transcript. The record is never emitted as a loop message, so the session
+    /// listener persists it exactly once.
+    async fn append_user_input_record(&self, input: &UserInput) -> Result<(), AgentRunError> {
+        let record = Self::user_input_record_message(input).map_err(|error| {
+            AgentRunError::Other(format!("serialize user input record: {error}"))
+        })?;
+        self.session
+            .append_messages(vec![record.clone()])
+            .await
+            .map_err(|error| AgentRunError::Other(format!("persist user input record: {error}")))?;
+        self.agent.state().messages.push(record);
+        Ok(())
     }
 
     pub async fn continue_(&self) -> Result<(), AgentRunError> {

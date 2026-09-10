@@ -24,10 +24,12 @@ mod session;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use theway_contract::user_input::UserInput;
 use theway_llm_provider::Model;
 use tokio::sync::broadcast;
 
 use crate::agent::session::session::Session;
+use crate::agent::types::SessionError;
 use crate::agent::{Agent, AgentOptions, LoopListener};
 use crate::observability::{
     ObservationContext, OperationId, RuntimeObserver, noop_runtime_observer,
@@ -356,6 +358,29 @@ impl AgentHarness {
 
     pub fn enqueue_steering(&self, message: AgentMessage) {
         self.agent.enqueue_steering(message);
+    }
+
+    /// Queue the canonical `user_input` record for the next steering drain. Call it
+    /// immediately before queueing the user message the record describes, so the
+    /// transcript keeps record-then-message order.
+    pub fn enqueue_steering_input(&self, input: &UserInput) -> Result<(), SessionError> {
+        let record = Self::user_input_record_message(input)?;
+        self.enqueue_steering(record);
+        Ok(())
+    }
+
+    /// Build the canonical record of one round of input: a `user_input` custom message
+    /// carrying the serialized [`UserInput`]. Unknown custom roles are dropped by
+    /// `default_convert_to_llm`, so the record never reaches a provider request.
+    pub fn user_input_record_message(input: &UserInput) -> Result<AgentMessage, SessionError> {
+        let payload = serde_json::to_value(input).map_err(|error| {
+            SessionError::corrupted(format!("serialize user input record: {error}"))
+        })?;
+        Ok(AgentMessage::Custom(CustomMessage {
+            role: UserInput::CUSTOM_ROLE.to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis(),
+            payload,
+        }))
     }
 
     pub fn enqueue_follow_up(&self, message: AgentMessage) {

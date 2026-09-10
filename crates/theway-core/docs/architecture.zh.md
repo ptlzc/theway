@@ -30,6 +30,14 @@
 
 [`agent/compaction/mod.rs`](../src/agent/compaction/mod.rs) 估算上下文占用、选择切分点、生成或调用摘要器，并记录压缩元数据，不感知会话使用哪种持久化后端。
 
+## 规范化用户输入记录
+
+[`agent/assembly/mod.rs`](../src/agent/assembly/mod.rs) 的 `user_input_record_message` 把一条 `UserInput` 变成规范记录：role 为 `UserInput::CUSTOM_ROLE`、payload 为序列化 `UserInput` 的 `AgentMessage::Custom`。[`agent/assembly/run.rs`](../src/agent/assembly/run.rs) 中的 `AgentHarness::prompt_with_input` 与 `AgentHarness::record_user_input_prompt` 把它作为最后一个参数；`prompt_with_images` 与 `record_user_prompt` 保持原签名并以 `None` 委托。
+
+记录先追加到持久化会话日志与内存 transcript，位置在它所描述的用户消息之前，因此读取 transcript 时每条记录都与紧随其后的 `Message::User` 条目配对。记录不进入 run loop，因此为每个 `MessageEnd` 执行持久化的 session listener 不会重复写入它。`AgentHarness::enqueue_steering_input` 把同一条记录排在它描述的消息之前进入 steering 队列，而该队列按序排空，因此 interleave 路径具有同样的「记录在前、消息在后」相邻关系。
+
+[`types.rs`](../src/types.rs) 的 `default_convert_to_llm` 只物化已知的 summary custom role，因此 `user_input` 记录转换结果为空，携带该记录的轮次与不带记录的同一轮次产生相同的 provider 请求。
+
 ## 多 agent 运行时
 
 [`multiagent/runner.rs`](../src/multiagent/runner.rs) 为一次嵌套 agent 运行启动全新 harness，过滤工具集合，执行空闲超时取消，并返回规范化输出与用量。
@@ -92,5 +100,6 @@ Compaction 在选择或运行 builtin 或已注册算法前调用 extension gate
 - Normalized request replacement 是原子且仅作用于本次请求；可见 definition 与 executable reference 描述同一个不可变 tool catalog。
 - Provider header/raw transform 与 response/failure observation 只通过带显式 wire format 的脱敏 provider DTO 进入 core。
 - Compaction input 只包含带类型 session message 与去重后的 model-visible extension context，不包含 private extension state。
+- 用户输入记录在日志中先于其描述的用户消息，且永不进入模型上下文。
 - 取消会产生终止运行结果，并释放运行准入和控制句柄。
 - 事件载荷和操作关联保持足够确定，使 daemon 无需访问 core 私有状态即可投影 snapshot。

@@ -9,7 +9,7 @@ Core does not own concrete tools, filesystem or process implementations, persist
 ## Public entry points
 
 - `Agent` and `AgentOptions` run the provider-neutral message and tool loop.
-- `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and the cross-turn lifecycle hook interfaces.
+- `AgentHarness` composes an agent with a typed `Session`, skills, compaction, cost tracking, and the cross-turn lifecycle hook interfaces. `prompt_with_input` and `record_user_input_prompt` accept an optional `UserInput` record and append it, as a custom message whose role is `UserInput::CUSTOM_ROLE`, immediately before the user message in both the session log and the in-memory transcript; `user_input_record_message` builds that entry and `enqueue_steering_input` queues it for the next steering drain in the same order. `prompt_with_images` and `record_user_prompt` keep their signatures and pass no record, and `default_convert_to_llm` drops unknown custom roles, so the record never reaches a provider request.
 - `PersistentSessionStorage` adapts typed session entries to the raw `SessionReader` and `SessionStore` records from `theway-contract`.
 - `RuntimeExtensionPort` splits engine-independent lifecycle dispatch into session, run, request, message, tool, and compaction domains; core consumes normalized replacements and follow-ups after the embedding host has validated and committed durable actions, and the default implementation is a no-op.
 - `NormalizedModelRequestDraft` is the provider-independent, request-local system/message/tool/generation snapshot transformed before provider serialization.

@@ -2,6 +2,7 @@
 //! ordering, follow-up queueing, and terminal event sequences.
 
 use super::*;
+use theway_contract::user_input::UserInput;
 
 #[tokio::test]
 async fn handled_extension_input_returns_outcome_without_dispatching_provider() {
@@ -36,6 +37,38 @@ async fn handled_extension_input_returns_outcome_without_dispatching_provider() 
     assert!(!port.events().contains(&ExtensionLifecycleEvent::BeforeRun));
     assert!(std::iter::from_fn(|| events.try_recv().ok())
         .any(|event| matches!(event, SessionEvent::ExtensionCommandOutcome { .. })));
+}
+
+#[tokio::test]
+async fn handled_extension_input_appends_no_user_input_record() {
+    let port = Arc::new(RecordingPort::default());
+    port.respond(
+        ExtensionLifecycleEvent::Input,
+        ExtensionHookClass::Transform,
+        ExtensionActionBatch {
+            decision: None,
+            actions: vec![ExtensionAction {
+                kind: ExtensionActionKind::EmitCommandOutcome,
+                payload: serde_json::json!({
+                    "status": "success",
+                    "message": "handled",
+                }),
+            }],
+        },
+    );
+    let harness = harness_with_port(
+        port,
+        success_stream(Arc::new(AtomicUsize::new(0))),
+        Session::new(Arc::new(MemorySessionStorage::new())),
+    );
+
+    harness
+        .prompt_with_input("/extension-command", vec![], Some(UserInput::user("cmd")))
+        .await
+        .unwrap();
+
+    assert!(harness.agent().state().messages.is_empty());
+    assert!(harness.session().entries().await.unwrap().is_empty());
 }
 
 #[tokio::test]
