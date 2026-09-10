@@ -48,3 +48,17 @@ predicates = "3"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
+
+# Own workspace root: the repository root manifest excludes this crate, so its
+# dependency resolution, lockfile, and lint configuration are standalone.
+[workspace]
+resolver = "2"
+
+# Standalone workspace (root Cargo.toml excludes this crate), so the dist profile must be
+# declared here with the same shape as the root [profile.dist] / [profile.release] pair.
+[profile.dist]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

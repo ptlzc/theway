@@ -98,6 +98,14 @@ jobs:
         run: cargo build --profile dist --target ${{ matrix.target }} --workspace
         shell: bash
 
+      - name: build vendored tgrep
+        # crates/tgrep-cli is excluded from the root workspace and declares its own
+        # `[workspace]`, so `--workspace` does not produce the `tgrep` binary. `--target-dir`
+        # is pinned to the root target dir because the packaging step reads
+        # `target/<target>/dist/tgrep`.
+        run: cargo build --profile dist --target ${{ matrix.target }} --target-dir "$PWD/target" --manifest-path crates/tgrep-cli/Cargo.toml
+        shell: bash
+
       - name: collect binaries and package products
         id: pkg
         shell: bash

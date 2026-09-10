@@ -13,12 +13,19 @@ Rust 2024 Cargo workspace. The root [`Cargo.toml`](Cargo.toml) is the authoritat
 - [`crates/theway-mcp`](crates/theway-mcp/README.md) — MCP client: stdio transport, JSON-RPC framing, tools list/call.
 - [`crates/theway-transport`](crates/theway-transport/README.md) — gRPC/web (HTTP+SSE+WS) transport and wire types.
 - [`crates/theway-probe`](crates/theway-probe/README.md) — gRPC serviceability probe binary.
-- [`crates/theway-markdown-core`](crates/theway-markdown-core/README.md) — headless Markdown parser policy, analysis, statistics, and structural diagnostics.
-- [`crates/theway-markdown`](crates/theway-markdown/README.md) — streaming terminal Markdown renderer.
-- [`crates/theway-pager-render`](crates/theway-pager-render/README.md) — ratatui pager and feed rendering primitives.
-- [`crates/theway-ratatui-textarea`](crates/theway-ratatui-textarea/README.md) — reusable multiline editor and ratatui widget.
-- [`crates/mermaid-parser`](crates/mermaid-parser/README.md) — vendored Mermaid parse stage consumed by `dag_plan`'s flowchart adapter.
 - [`crates/tests-bridge-macro`](crates/tests-bridge-macro/README.md) — proc macro anchoring mirrored `#[path]` test modules to the crate root.
+
+Vendored and ported crates live under `crates/` but are not workspace members: the root [`Cargo.toml`](Cargo.toml) lists them in `[workspace.exclude]` and each one declares its own `[workspace]`. First-party crates consume them through path dependencies.
+
+Excluded crates keep their upstream versions and licenses instead of the root `[workspace.package]` values. Workspace-scoped tooling reports first-party code — `cargo metadata`, `--workspace` builds, `cargo clippy --workspace`, and `make file-size-check` — while `make vendored-check`, `make vendored-test`, and `make vendored-lint` report the vendored crates through `--manifest-path`.
+
+- [`crates/mermaid-parser`](crates/mermaid-parser/README.md) — vendored Mermaid parse stage consumed by `dag_plan`'s flowchart adapter (MIT, vendored upstream).
+- [`crates/tgrep-core`](crates/tgrep-core/README.md) — vendored microsoft/tgrep trigram index library (MIT).
+- [`crates/tgrep-cli`](crates/tgrep-cli/README.md) — vendored microsoft/tgrep `tgrep` binary, the optional indexing backend for the built-in grep tool (MIT).
+- [`crates/theway-markdown`](crates/theway-markdown/README.md) — streaming terminal Markdown renderer (Grok Build port, Apache-2.0).
+- [`crates/theway-markdown-core`](crates/theway-markdown-core/README.md) — headless Markdown parser policy, analysis, statistics, and structural diagnostics (Grok Build port, Apache-2.0).
+- [`crates/theway-pager-render`](crates/theway-pager-render/README.md) — ratatui pager and feed rendering primitives (Grok Build port, Apache-2.0).
+- [`crates/theway-ratatui-textarea`](crates/theway-ratatui-textarea/README.md) — reusable multiline editor and ratatui widget (Grok Build port, Apache-2.0).
 
 Layering: `theway-daemon` is the only direct consumer of `theway-core` and composes core, storage, and transport; `theway-tui` depends on transport/storage/contract but never core or daemon; `theway-storage` depends only on `theway-contract` among runtime workspace crates; `theway-transport` never depends on core or storage. Provider-specific code lives under `crates/theway-llm-provider/src/providers/`; daemon tool implementations live under `crates/theway-daemon/src/tools/`. `make layering-check` enforces these edges.
 
@@ -30,9 +37,9 @@ Boundary rules: client-specific appearance and interaction belong to [`crates/th
 
 ## File size governance (>800 lines)
 
-Source and test files stay under ~800 lines; larger files split into a directory (`foo.rs` → `foo/mod.rs` + domain submodules; `tests/<name>/mod.rs` + domain submodule files), splitting by domain, never mechanically. Exceptions:
+Source and test files stay under ~800 lines; larger files split into a directory (`foo.rs` → `foo/mod.rs` + domain submodules; `tests/<name>/mod.rs` + domain submodule files), splitting by domain, never mechanically. [`scripts/check-rust-file-size.sh`](scripts/check-rust-file-size.sh) enforces the limit on first-party `crates/theway-*` files and skips the vendored/ported crates that [`Cargo.toml`](Cargo.toml) lists in `[workspace.exclude]`.
 
-- [`crates/mermaid-parser/src/parser.rs`](crates/mermaid-parser/src/parser.rs) — extracted from the third-party `mmdr` parser; kept monolithic to stay diff-compatible with upstream extraction. Do not split it.
+[`crates/mermaid-parser/src/parser.rs`](crates/mermaid-parser/src/parser.rs) stays monolithic: it is extracted from the third-party `mmdr` parser, so its shape has to stay diff-compatible with upstream extraction. Do not split it.
 
 ## Build, test, and lint
 
@@ -40,12 +47,14 @@ The [`Makefile`](Makefile) mirrors `.github/workflows/ci.yml`; prefer it.
 
 - `make check` — type-check the full workspace including tests (`cargo check --workspace --all-targets`).
 - `make build` / `make release` — workspace build; release produces `target/release/theway`.
-- `make test` — `cargo test --workspace`.
+- `make test` — `cargo test --workspace`, with the vendored `tgrep` binary built first (`make tgrep-bin`); `crates/theway-daemon/tests/tgrep_e2e.rs` discovers that binary next to its own test binary.
+- `make vendored-check` / `make vendored-test` / `make vendored-lint` — type-check, test, and clippy every vendored/ported crate through `--manifest-path`, one `cargo` invocation per crate.
 - `make lint` — `cargo clippy --workspace --all-targets -- -D warnings`.
+- `make unwrap-budget` — enforce the per-crate ceiling for non-test `.unwrap()` in first-party `src/`; [`scripts/check-unwrap-budget.py`](scripts/check-unwrap-budget.py) holds the budget, and `--report` prints the non-test and raw counts without failing.
 - `make fmt` / `make fmt-check` — rustfmt rewrite / CI check.
 - `make package-check` — verify that the extracted `theway-probe` source package builds independently; this dry run does not authorize a crates.io upload.
 - `make doc-sync` — verify English/Chinese documentation pairs, structure, and recorded blob hashes.
-- `make ci` — the full local pipeline (format, file-size, layering, documentation synchronization, lint, feature-gate, and test checks).
+- `make ci` — the full local pipeline (format, file-size, layering, documentation synchronization, lint, unwrap budget, feature-gate, test, and vendored-crate checks).
 - `make run` / `make install` — run the REPL / install into `~/.cargo/bin`.
 
 ## crates.io publication policy

@@ -95,6 +95,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: non-test unwrap budget
+        # Fast, cargo-free ceiling check over first-party src/; runs before the toolchain
+        # install so a regression fails in seconds instead of after a clippy build.
+        run: scripts/check-unwrap-budget.py
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -132,6 +136,11 @@ jobs:
           # PRs restore only; main saves so the cache generation advances
           # once per merge instead of once per pull request.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: build vendored tgrep binary
+        # crates/theway-daemon/tests/tgrep_e2e.rs discovers `tgrep` next to the test binary;
+        # crates/tgrep-cli is excluded from the workspace, so `cargo test --workspace`
+        # does not build it and the suite would skip.
+        run: make tgrep-bin
       - name: cargo test --workspace
         # Strip all provider env vars so any test that accidentally hits a real API will
         # self-skip / error cleanly. Mirrors the TS repo's `test.sh` discipline.
@@ -148,6 +157,39 @@ jobs:
           CODEX_AUTH_TOKEN: ""
           AZURE_OPENAI_API_KEY: ""
         run: cargo test --workspace
+
+  # ----------------------------------------------------------------
+  # Vendored/ported crates (root Cargo.toml `[workspace.exclude]`) are not
+  # workspace members, so clippy/test/feature-gate cannot reach them. This job
+  # keeps their lint, type-check, and test coverage on both platforms.
+  # ----------------------------------------------------------------
+  vendored:
+    name: vendored crates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The vendored targets build into output/ (see the Makefile), so this job
+          # caches that target dir under its own key instead of the `theway` one.
+          workspaces: ". -> output"
+          shared-key: theway-vendored
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: clippy vendored crates
+        run: make vendored-lint
+      - name: type-check vendored crates
+        run: make vendored-check
+      - name: test vendored crates
+        run: make vendored-test
 
   # ----------------------------------------------------------------
   # L4 性能层编译门禁 — 完整 bench 不进 PR, 这里仅 `--test` (dry-run

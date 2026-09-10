@@ -110,6 +110,20 @@ class VerifyDocI18nTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("headings structure differs", result.stderr)
 
+    def test_excluded_crate_stays_in_the_discovered_corpus(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/demo"]\nexclude = ["crates/vendored"]\n',
+            encoding="utf-8",
+        )
+        crate = self.root / "crates/vendored"
+        crate.mkdir()
+        self.write_pair(crate / "README.md")
+        self.assertEqual(self.run_script("--write", "crates/vendored/README.md").returncode, 0)
+        result = self.run_script("--list")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("crates/vendored/README.md", result.stdout)
+        self.assertIn("crates/vendored/AGENTS.md", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

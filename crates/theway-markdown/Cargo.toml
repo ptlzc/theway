@@ -27,10 +27,8 @@ theway-markdown-core = { version = "0.1.0", path = "../theway-markdown-core" }
 [dev-dependencies]
 tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 
-# NOTE: cargo 1.91 rejects combining `[lints] workspace = true` with additional
-# lint tables (such as the `unexpected_cfgs` check-cfg declaration below), so the
-# workspace clippy policy is replicated here instead of inherited. Keep this
-# table in sync with `[workspace.lints.clippy]` in the root Cargo.toml.
+# Clippy policy: this crate is excluded from the root workspace, so the table is carried
+# explicitly instead of inheriting `[workspace.lints.clippy]`. Keep the two in sync.
 [lints.clippy]
 large_enum_variant = "allow"
 module_inception = "allow"
@@ -44,3 +42,8 @@ redundant_guards = "allow"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+# Own workspace root: the repository root manifest excludes this crate, so its
+# dependency resolution, lockfile, and lint configuration are standalone.
+[workspace]
+resolver = "2"

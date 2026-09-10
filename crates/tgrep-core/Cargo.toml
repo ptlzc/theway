@@ -41,3 +41,8 @@ harness = false
 [[bench]]
 name = "index_build"
 harness = false
+
+# Own workspace root: the repository root manifest excludes this crate, so its
+# dependency resolution, lockfile, and lint configuration are standalone.
+[workspace]
+resolver = "2"

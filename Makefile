@@ -7,6 +7,9 @@ CARGO ?= cargo
 PYTHON ?= python3
 BIN   ?= theway
 OUTPUT_DIR ?= output
+# Target dir of the root workspace. The daemon's tgrep e2e suite discovers the
+# vendored `tgrep` binary next to its own test binary, so it has to land here.
+TARGET_DIR ?= $(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),target)
 THEWAY_BINARY ?= $(OUTPUT_DIR)/debug/$(BIN)
 THEWAY_RELEASE_BINARY ?= $(OUTPUT_DIR)/release/$(BIN)
 
@@ -36,7 +39,7 @@ check: ## fast type-check without producing artifacts (full workspace incl. TUI 
 # --- tests ------------------------------------------------------------------
 
 .PHONY: test
-test: ## run every workspace test (full CLI surface)
+test: tgrep-bin ## run every workspace test (builds the vendored tgrep binary first)
 	$(CARGO) test --workspace
 
 .PHONY: test-coding-agent
@@ -54,6 +57,50 @@ test-ai: ## run only the theway-llm-provider crate's tests
 .PHONY: test-mcp
 test-mcp: ## run only the MCP client tests
 	$(CARGO) test -p theway-mcp
+
+# --- vendored crates --------------------------------------------------------
+#
+# Vendored/ported crates are excluded from the root workspace (Cargo.toml
+# `[workspace.exclude]`) and each declares its own `[workspace]`, so the
+# `--workspace` targets above cannot reach them. Every target below drives one
+# `cargo` invocation per crate through `--manifest-path`; `--target-dir` keeps
+# their artifacts in output/ instead of crates/<name>/target/.
+
+VENDORED_CRATES := \
+	crates/mermaid-parser \
+	crates/tgrep-core \
+	crates/tgrep-cli \
+	crates/theway-markdown-core \
+	crates/theway-markdown \
+	crates/theway-pager-render \
+	crates/theway-ratatui-textarea
+
+VENDORED_TARGET_DIR ?= $(abspath $(OUTPUT_DIR))
+
+.PHONY: vendored-check
+vendored-check: ## type-check every vendored crate in its own workspace
+	@set -e; for crate in $(VENDORED_CRATES); do \
+		echo "==> $(CARGO) check --manifest-path $$crate/Cargo.toml"; \
+		$(CARGO) check --manifest-path $$crate/Cargo.toml --all-targets --target-dir $(VENDORED_TARGET_DIR); \
+	done
+
+.PHONY: vendored-test
+vendored-test: ## run every vendored crate's tests in its own workspace
+	@set -e; for crate in $(VENDORED_CRATES); do \
+		echo "==> $(CARGO) test --manifest-path $$crate/Cargo.toml"; \
+		$(CARGO) test --manifest-path $$crate/Cargo.toml --target-dir $(VENDORED_TARGET_DIR); \
+	done
+
+.PHONY: vendored-lint
+vendored-lint: ## clippy every vendored crate in its own workspace (matches CI)
+	@set -e; for crate in $(VENDORED_CRATES); do \
+		echo "==> $(CARGO) clippy --manifest-path $$crate/Cargo.toml"; \
+		$(CARGO) clippy --manifest-path $$crate/Cargo.toml --all-targets --target-dir $(VENDORED_TARGET_DIR) -- -D warnings; \
+	done
+
+.PHONY: tgrep-bin
+tgrep-bin: ## build the vendored tgrep binary into $(TARGET_DIR)/debug for the grep e2e suite
+	$(CARGO) build --manifest-path crates/tgrep-cli/Cargo.toml --target-dir $(abspath $(TARGET_DIR))
 
 # --- quality gates ----------------------------------------------------------
 
@@ -89,6 +136,10 @@ file-size-check: ## enforce the 800-line limit for all theway-* Rust files
 layering-check: ## enforce workspace crate dependency boundaries
 	scripts/check-workspace-layering.py
 
+.PHONY: unwrap-budget
+unwrap-budget: ## enforce the non-test unwrap() budget of first-party crates
+	scripts/check-unwrap-budget.py
+
 .PHONY: package-check
 package-check: ## verify the probe's standalone crates.io package builds
 	$(CARGO) publish --registry crates-io -p theway-probe --dry-run --allow-dirty
@@ -105,7 +156,7 @@ i18n-test: ## test the bilingual documentation verifier
 doc-sync: i18n-test i18n-check ## verify bilingual documentation synchronization
 
 .PHONY: ci
-ci: fmt-check release-check file-size-check layering-check package-check doc-sync sdks-check lint feature-gate test ## run the full CI pipeline locally
+ci: fmt-check release-check file-size-check layering-check package-check doc-sync sdks-check lint unwrap-budget feature-gate test vendored-lint vendored-check vendored-test ## run the full CI pipeline locally
 
 # --- run / install ----------------------------------------------------------
 

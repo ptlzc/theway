@@ -35,5 +35,25 @@ tests-bridge-macro = { version = "0.1.4", path = "../tests-bridge-macro" }
 name = "textarea_demo"
 path = "examples/textarea_demo.rs"
 
-[lints]
-workspace = true
+# Clippy policy: this crate is excluded from the root workspace, so the table is carried
+# explicitly instead of inheriting `[workspace.lints.clippy]`. Keep the two in sync.
+[lints.clippy]
+large_enum_variant = "allow"
+module_inception = "allow"
+type_complexity = "allow"
+manual_div_ceil = "allow"
+too_many_arguments = "allow"
+new_without_default = "allow"
+# Tests / setup code holds short-lived std::Mutex guards across `.await`; we keep them on
+# purpose (the lock scope never crosses tokio runtime boundaries that would deadlock).
+await_holding_lock = "allow"
+# The struct-then-assign pattern is more readable than nested `Default::default()` overrides
+# when many fields are set conditionally.
+field_reassign_with_default = "allow"
+# `match` arm guards with `matches!` read clearer than nested patterns in our context.
+redundant_guards = "allow"
+
+# Own workspace root: the repository root manifest excludes this crate, so its
+# dependency resolution, lockfile, and lint configuration are standalone.
+[workspace]
+resolver = "2"

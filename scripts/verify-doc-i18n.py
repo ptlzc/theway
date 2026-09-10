@@ -80,26 +80,33 @@ def repository_files(root: Path, cached: bool) -> set[str]:
     return {item.decode("utf-8") for item in output.split(b"\0") if item}
 
 
-def workspace_members(root: Path, cached: bool) -> list[str]:
+def workspace_packages(root: Path, cached: bool) -> list[str]:
+    """Cargo packages that own crate documentation: members plus excluded crates."""
     content = read_file(root, "Cargo.toml", cached)
     if content is None:
         raise RuntimeError("Cargo.toml is missing")
     manifest = tomllib.loads(content.decode("utf-8"))
-    members = manifest.get("workspace", {}).get("members", [])
-    if not isinstance(members, list) or not all(isinstance(item, str) for item in members):
-        raise RuntimeError("Cargo.toml [workspace].members must be a string array")
-    if any("*" in item or "?" in item or "[" in item for item in members):
-        raise RuntimeError("verify-doc-i18n requires explicit Cargo workspace members")
-    return sorted(members)
+    workspace = manifest.get("workspace", {})
+    packages: list[str] = []
+    for key in ("members", "exclude"):
+        entries = workspace.get(key, [])
+        if not isinstance(entries, list) or not all(isinstance(item, str) for item in entries):
+            raise RuntimeError(f"Cargo.toml [workspace].{key} must be a string array")
+        if any("*" in item or "?" in item or "[" in item for item in entries):
+            raise RuntimeError(
+                "verify-doc-i18n requires explicit Cargo workspace members and excludes"
+            )
+        packages.extend(entries)
+    return sorted(set(packages))
 
 
 def discover_sources(root: Path, cached: bool) -> list[str]:
     files = repository_files(root, cached)
     sources = set(POLICY_SOURCES)
-    for member in workspace_members(root, cached):
-        sources.add(f"{member}/README.md")
-        sources.add(f"{member}/docs/architecture.md")
-        prefix = f"{member}/docs/"
+    for package in workspace_packages(root, cached):
+        sources.add(f"{package}/README.md")
+        sources.add(f"{package}/docs/architecture.md")
+        prefix = f"{package}/docs/"
         for path in files:
             if path.startswith(prefix) and path.endswith(".md") and not path.endswith(".zh.md"):
                 sources.add(path)
@@ -107,7 +114,7 @@ def discover_sources(root: Path, cached: bool) -> list[str]:
 
 
 def discover_agent_docs(root: Path, cached: bool) -> list[str]:
-    return [f"{member}/AGENTS.md" for member in workspace_members(root, cached)]
+    return [f"{package}/AGENTS.md" for package in workspace_packages(root, cached)]
 
 
 def pair_paths(source: str) -> PairPaths:

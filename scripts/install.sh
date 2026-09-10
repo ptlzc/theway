@@ -83,6 +83,11 @@ echo "==> Building and installing thewayd (release) into $BIN_DIR"
 "$CARGO" install --path "$ROOT/crates/theway-daemon" --force --locked --root "$INSTALL_ROOT"
 
 echo "==> Building and installing tgrep (release) into $BIN_DIR"
+# tgrep-cli is its own workspace root (excluded from the root workspace, see AGENTS.md),
+# so its lockfile is not produced by root builds. Generate it once, then keep --locked.
+if [ ! -f "$ROOT/crates/tgrep-cli/Cargo.lock" ]; then
+    "$CARGO" generate-lockfile --manifest-path "$ROOT/crates/tgrep-cli/Cargo.toml"
+fi
 "$CARGO" install --path "$ROOT/crates/tgrep-cli" --force --locked --root "$INSTALL_ROOT"
 
 # ── Default configuration (issue #123) ───────────────────────────────────────
