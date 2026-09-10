@@ -223,4 +223,4 @@ include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/turn/daemon/final_coverage/
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/turn/daemon/final_coverage/remaining.rs"));
 
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/turn/daemon/final_coverage/branch_gaps.rs"));
+mod branch_gaps;
