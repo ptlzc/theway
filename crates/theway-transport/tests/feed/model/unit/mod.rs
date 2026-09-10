@@ -1,4 +1,5 @@
     use super::*;
+    use unicode_width::UnicodeWidthStr;
 
     fn plain_text(lines: &[String]) -> String {
         lines.join("\n")
@@ -57,6 +58,8 @@
         let user = Block::User {
             text: "hi".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         };
         let assistant = Block::Assistant {
             text: "yo".into(),
@@ -92,6 +95,8 @@
         let user = Block::User {
             text: "hi".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         };
         let assistant = Block::Assistant {
             text: "yo".into(),
@@ -440,4 +445,125 @@
         assert!(!feed.remove_block(1));
         assert!(!feed.remove_block(usize::MAX));
         assert_eq!(feed.blocks().len(), 1);
+    }
+
+    fn file_chip() -> WireFeedAttachment {
+        WireFeedAttachment {
+            kind: "file".into(),
+            name: "foo.rs".into(),
+            detail: Some("src/foo.rs".into()),
+        }
+    }
+
+    #[test]
+    fn push_user_input_keeps_text_chips_and_origin_separate() {
+        let mut feed = Feed::new();
+        feed.push_user_input(
+            "look at @src/foo.rs",
+            vec![file_chip()],
+            Some(WireFeedSource {
+                kind: "user".into(),
+                label: None,
+            }),
+        );
+        feed.push_context("skill:git", "preamble line one\nline two");
+
+        let rendered = plain_text(&feed.plain_lines(80));
+        assert!(rendered.contains("you ▸ look at @src/foo.rs"), "{rendered}");
+        // Context rows are single labelled lines; the injected newline flattens.
+        assert!(
+            rendered.contains("[skill:git] preamble line one line two"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("[skill:git] preamble line one\n"),
+            "{rendered}"
+        );
+
+        let blocks = feed.blocks();
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert!(matches!(
+            &blocks[0],
+            Block::User { attachments, source, .. }
+                if attachments.len() == 1 && source.is_some()
+        ));
+        assert!(matches!(
+            &blocks[1],
+            Block::Context { label, .. } if label == "skill:git"
+        ));
+    }
+
+    #[test]
+    fn replace_block_updates_user_chips_and_context_label() {
+        let mut feed = Feed::new();
+        feed.replace_blocks(&[
+            WireFeedBlock::User {
+                text: "one".into(),
+                timestamp: Some("09:00".into()),
+                attachments: Vec::new(),
+                source: None,
+            },
+            WireFeedBlock::Context {
+                label: "skill:git".into(),
+                text: "old".into(),
+                timestamp: None,
+            },
+        ]);
+
+        assert!(feed.replace_block(
+            0,
+            &WireFeedBlock::User {
+                text: "two".into(),
+                timestamp: Some("09:05".into()),
+                attachments: vec![file_chip()],
+                source: Some(WireFeedSource {
+                    kind: "trigger".into(),
+                    label: Some("tr-1".into()),
+                }),
+            }
+        ));
+        assert!(feed.replace_block(
+            1,
+            &WireFeedBlock::Context {
+                label: "trigger:nightly".into(),
+                text: "new".into(),
+                timestamp: None,
+            }
+        ));
+
+        let blocks = feed.blocks();
+        // Patched content is replaced; the block keeps its original timestamp.
+        assert!(matches!(
+            &blocks[0],
+            Block::User { text, attachments, source, timestamp }
+                if text == "two"
+                    && attachments.len() == 1
+                    && source.as_ref().is_some_and(|s| s.kind == "trigger")
+                    && timestamp.as_deref() == Some("09:00")
+        ));
+        assert!(matches!(
+            &blocks[1],
+            Block::Context { label, text, .. }
+                if label == "trigger:nightly" && text == "new"
+        ));
+    }
+
+    #[test]
+    fn context_blocks_survive_the_wire_round_trip() {
+        let mut feed = Feed::new();
+        feed.push_context("skill:git", "preamble");
+        let wire = feed.wire_blocks();
+        assert!(matches!(
+            &wire[0],
+            WireFeedBlock::Context { label, text, .. }
+                if label == "skill:git" && text == "preamble"
+        ));
+
+        let mut rebuilt = Feed::new();
+        rebuilt.append_blocks(&wire);
+        assert_eq!(rebuilt.plain_lines(80), feed.plain_lines(80));
+        assert!(matches!(
+            &rebuilt.blocks()[0],
+            Block::Context { label, .. } if label == "skill:git"
+        ));
     }

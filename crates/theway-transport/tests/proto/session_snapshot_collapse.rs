@@ -255,6 +255,8 @@ fn list_session_graph_node_messages_response_codec_round_trips() {
         crate::feed::WireFeedBlock::User {
             text: "hello".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         },
         crate::feed::WireFeedBlock::Assistant {
             text: "hi".into(),

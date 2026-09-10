@@ -91,6 +91,8 @@ fn fixture_snapshot() -> WireStatus {
             WireFeedBlock::User {
                 text: "hi".into(),
                 timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             },
             WireFeedBlock::Plain {
                 text: "note".into(),

@@ -47,7 +47,7 @@ pub enum FeedUpdate {
     },
 }
 
-pub use crate::feed::wire::WireFeedBlock;
+pub use crate::feed::wire::{WireFeedAttachment, WireFeedBlock, WireFeedSource};
 
 /// Bounded, display-only status for periodic trigger checks that should stay visible in the
 /// main UI without appending a line to the conversation feed.
@@ -57,6 +57,15 @@ pub use crate::feed::wire::TriggerPollStatus;
 #[derive(Clone, Debug)]
 pub enum Block {
     User {
+        text: String,
+        timestamp: Option<String>,
+        attachments: Vec<WireFeedAttachment>,
+        source: Option<WireFeedSource>,
+    },
+    /// Pre-injected content (skill preamble, trigger patch, extension note),
+    /// rendered as a `[<label>] <text>` row.
+    Context {
+        label: String,
         text: String,
         timestamp: Option<String>,
     },

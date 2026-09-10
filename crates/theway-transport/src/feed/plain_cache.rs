@@ -10,7 +10,8 @@
 //! thinking-summary backfill (and `/clear`), so the common case is a pure
 //! prefix match costing one fingerprint scan and zero re-renders.
 
-use super::model::{Feed, push_plain_paragraphs};
+use super::model::Feed;
+use super::plain::{context_line, push_plain_paragraphs};
 use super::{Block, Level};
 
 /// Content fingerprint of one feed block (fnv-1a over kind + fields). Two
@@ -26,8 +27,38 @@ pub fn block_fingerprint(block: &Block) -> u64 {
         }
     };
     match block {
-        Block::User { text, timestamp } => {
+        Block::User {
+            text,
+            timestamp,
+            attachments,
+            source,
+        } => {
             mix(b"user\x00");
+            mix(text.as_bytes());
+            mix(timestamp.as_deref().unwrap_or("").as_bytes());
+            for attachment in attachments {
+                mix(attachment.kind.as_bytes());
+                mix(b"\x00");
+                mix(attachment.name.as_bytes());
+                mix(b"\x00");
+                mix(attachment.detail.as_deref().unwrap_or("").as_bytes());
+                mix(b"\x00");
+            }
+            if let Some(source) = source {
+                mix(source.kind.as_bytes());
+                mix(b"\x00");
+                mix(source.label.as_deref().unwrap_or("").as_bytes());
+                mix(b"\x00");
+            }
+        }
+        Block::Context {
+            label,
+            text,
+            timestamp,
+        } => {
+            mix(b"context\x00");
+            mix(label.as_bytes());
+            mix(b"\x00");
             mix(text.as_bytes());
             mix(timestamp.as_deref().unwrap_or("").as_bytes());
         }
@@ -220,19 +251,31 @@ impl PlainLinesCache {
                 self.rows.push(String::new());
             }
             match block {
-                Block::User { text, timestamp } => push_plain_paragraphs(
+                Block::User {
+                    text, timestamp, ..
+                } => push_plain_paragraphs(
                     &mut self.rows,
                     text,
-                    Some(&super::model::display_prefix(
+                    Some(&super::plain::display_prefix(
                         timestamp.as_deref(),
                         "you \u{25b8} ",
                     )),
                     width,
                 ),
+                Block::Context {
+                    label,
+                    text,
+                    timestamp,
+                } => push_plain_paragraphs(
+                    &mut self.rows,
+                    &context_line(label, text),
+                    Some(&super::plain::display_prefix(timestamp.as_deref(), "")),
+                    width,
+                ),
                 Block::Assistant { text, timestamp } => push_plain_paragraphs(
                     &mut self.rows,
                     text,
-                    Some(&super::model::display_prefix(
+                    Some(&super::plain::display_prefix(
                         timestamp.as_deref(),
                         "ai \u{25b8} ",
                     )),
@@ -241,7 +284,7 @@ impl PlainLinesCache {
                 Block::Thinking { text, timestamp } => push_plain_paragraphs(
                     &mut self.rows,
                     text,
-                    Some(&super::model::display_prefix(
+                    Some(&super::plain::display_prefix(
                         timestamp.as_deref(),
                         "[thinking] ",
                     )),
@@ -260,7 +303,7 @@ impl PlainLinesCache {
                     push_plain_paragraphs(
                         &mut self.rows,
                         &text,
-                        Some(&super::model::display_prefix(timestamp.as_deref(), "")),
+                        Some(&super::plain::display_prefix(timestamp.as_deref(), "")),
                         width,
                     );
                 }
@@ -280,14 +323,14 @@ impl PlainLinesCache {
                     push_plain_paragraphs(
                         &mut self.rows,
                         &text,
-                        Some(&super::model::display_prefix(timestamp.as_deref(), "")),
+                        Some(&super::plain::display_prefix(timestamp.as_deref(), "")),
                         width,
                     );
                 }
                 Block::ToolResult { lines, .. } => {
                     for line in lines {
                         self.rows
-                            .extend(super::model::wrap_str(&format!("    {line}"), width));
+                            .extend(super::plain::wrap_str(&format!("    {line}"), width));
                     }
                 }
                 Block::Plain {
@@ -297,7 +340,7 @@ impl PlainLinesCache {
                 } => {
                     let prefix = timestamp
                         .as_deref()
-                        .map(|ts| super::model::display_prefix(Some(ts), ""));
+                        .map(|ts| super::plain::display_prefix(Some(ts), ""));
                     push_plain_paragraphs(&mut self.rows, text, prefix.as_deref(), width);
                 }
             }
@@ -357,6 +400,25 @@ mod tests {
 
     fn user(text: &str) -> WireFeedBlock {
         WireFeedBlock::User {
+            text: text.into(),
+            timestamp: None,
+            attachments: Vec::new(),
+            source: None,
+        }
+    }
+
+    fn user_with_chip(text: &str, chip: crate::feed::WireFeedAttachment) -> WireFeedBlock {
+        WireFeedBlock::User {
+            text: text.into(),
+            timestamp: None,
+            attachments: vec![chip],
+            source: None,
+        }
+    }
+
+    fn context(label: &str, text: &str) -> WireFeedBlock {
+        WireFeedBlock::Context {
+            label: label.into(),
             text: text.into(),
             timestamp: None,
         }
@@ -473,6 +535,8 @@ mod tests {
         let ok_result = feed_with(&[tool_result(&["ok"], false)]);
         let err_result = feed_with(&[tool_result(&["bad"], true)]);
         let plain = feed_with(&[plain("hi")]);
+        let context_other = feed_with(&[context("trigger:nightly", "hi")]);
+        let context = feed_with(&[context("skill:git", "hi")]);
 
         let fp = |f: &Feed| block_fingerprint(&f.blocks()[0]);
         assert_ne!(fp(&user), fp(&assistant));
@@ -481,6 +545,7 @@ mod tests {
         assert_ne!(fp(&tool_feed), fp(&ok_result));
         assert_ne!(fp(&ok_result), fp(&err_result));
         assert_ne!(fp(&err_result), fp(&plain));
+        assert_ne!(fp(&plain), fp(&context));
 
         let tool2 = feed_with(&[tool("read", "y")]);
         assert_ne!(fp(&tool_feed), fp(&tool2));
@@ -492,6 +557,52 @@ mod tests {
             timestamp: None,
         }]);
         assert_ne!(fp(&plain), fp(&plain2));
+        assert_ne!(fp(&context), fp(&context_other));
+    }
+
+    #[test]
+    fn fingerprints_distinguish_user_chips_and_source() {
+        let file_chip = crate::feed::WireFeedAttachment {
+            kind: "file".into(),
+            name: "foo.rs".into(),
+            detail: Some("src/foo.rs".into()),
+        };
+        let bare = feed_with(&[user("hi")]);
+        let chipped = feed_with(&[user_with_chip("hi", file_chip.clone())]);
+        let fp = |f: &Feed| block_fingerprint(&f.blocks()[0]);
+        // A chip landing on an unchanged text block must invalidate the cache.
+        assert_ne!(fp(&bare), fp(&chipped));
+
+        let other_chip = feed_with(&[user_with_chip(
+            "hi",
+            crate::feed::WireFeedAttachment {
+                detail: Some("src/bar.rs".into()),
+                name: "bar.rs".into(),
+                ..file_chip
+            },
+        )]);
+        assert_ne!(fp(&chipped), fp(&other_chip));
+
+        let sourced = feed_with(&[WireFeedBlock::User {
+            text: "hi".into(),
+            timestamp: None,
+            attachments: Vec::new(),
+            source: Some(crate::feed::WireFeedSource {
+                kind: "trigger".into(),
+                label: Some("nightly".into()),
+            }),
+        }]);
+        assert_ne!(fp(&bare), fp(&sourced));
+    }
+
+    #[test]
+    fn context_rows_render_as_one_labelled_line() {
+        let feed = feed_with(&[context("skill:git", "line one\nline two")]);
+        let mut cache = PlainLinesCache::new(80);
+        cache.update(&feed, 80);
+        let rows = cache.rows();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0], "[skill:git] line one line two");
     }
 
     #[test]

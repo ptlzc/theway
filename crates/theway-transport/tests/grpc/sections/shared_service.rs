@@ -39,6 +39,8 @@ async fn one_shared_service_backs_snapshot_page_command_and_settings() {
             blocks: vec![crate::feed::WireFeedBlock::User {
                 text: "old".into(),
                 timestamp: None,
+                attachments: Vec::new(),
+                source: None,
             }],
             next_before_entry_id: Some("entry-2".into()),
             has_more: true,

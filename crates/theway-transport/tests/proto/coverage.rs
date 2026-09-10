@@ -59,6 +59,27 @@ fn rich_snapshot() -> WireStatus {
         WireFeedBlock::User {
             text: "u".into(),
             timestamp: Some("t1".into()),
+            attachments: vec![
+                crate::feed::WireFeedAttachment {
+                    kind: "file".into(),
+                    name: "foo.rs".into(),
+                    detail: Some("src/foo.rs".into()),
+                },
+                crate::feed::WireFeedAttachment {
+                    kind: "image".into(),
+                    name: "pasted image".into(),
+                    detail: Some("image/png · 240 KiB".into()),
+                },
+            ],
+            source: Some(crate::feed::WireFeedSource {
+                kind: "trigger".into(),
+                label: Some("tr-1".into()),
+            }),
+        },
+        WireFeedBlock::Context {
+            label: "skill:git".into(),
+            text: "skill preamble".into(),
+            timestamp: Some("t2".into()),
         },
         WireFeedBlock::Assistant {
             text: "a".into(),
@@ -227,6 +248,62 @@ fn rich_snapshot_round_trips_all_proto_fields() {
         serde_json::to_value(&restored).unwrap(),
         serde_json::to_value(&snapshot).unwrap()
     );
+}
+
+#[test]
+fn feed_attachments_source_and_context_round_trip_through_proto() {
+    let mut snapshot = fixture_snapshot();
+    snapshot.feed_blocks = vec![
+        WireFeedBlock::User {
+            text: "look at @src/foo.rs".into(),
+            timestamp: Some("t1".into()),
+            attachments: vec![
+                crate::feed::WireFeedAttachment {
+                    kind: "file".into(),
+                    name: "foo.rs".into(),
+                    detail: Some("src/foo.rs".into()),
+                },
+                // Absent detail must stay absent, not become an empty string.
+                crate::feed::WireFeedAttachment {
+                    kind: "image".into(),
+                    name: "pasted image".into(),
+                    detail: None,
+                },
+            ],
+            source: Some(crate::feed::WireFeedSource {
+                kind: "subagent".into(),
+                label: Some("job-7".into()),
+            }),
+        },
+        WireFeedBlock::Context {
+            label: "skill:git".into(),
+            text: "skill preamble".into(),
+            timestamp: None,
+        },
+    ];
+
+    let proto = session_snapshot(&snapshot);
+    let feed = proto.feed.as_ref().expect("feed present");
+    let Some(wire::feed_block::Kind::User(user)) = feed.blocks[0].kind.as_ref() else {
+        panic!("block 0 not user: {:?}", feed.blocks[0]);
+    };
+    assert_eq!(user.attachments.len(), 2);
+    assert_eq!(user.attachments[0].kind, "file");
+    assert_eq!(user.attachments[0].name, "foo.rs");
+    assert_eq!(user.attachments[0].detail.as_deref(), Some("src/foo.rs"));
+    assert_eq!(user.attachments[1].detail, None);
+    let source = user.source.as_ref().expect("source present");
+    assert_eq!(source.kind, "subagent");
+    assert_eq!(source.label.as_deref(), Some("job-7"));
+    let Some(wire::feed_block::Kind::Context(context)) = feed.blocks[1].kind.as_ref() else {
+        panic!("block 1 not context: {:?}", feed.blocks[1]);
+    };
+    assert_eq!(context.label, "skill:git");
+    assert_eq!(context.text, "skill preamble");
+    assert_eq!(context.timestamp, None);
+
+    let restored = wire_status_from_session_snapshot(&proto);
+    assert_eq!(restored.feed_blocks, snapshot.feed_blocks);
 }
 
 #[test]

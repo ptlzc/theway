@@ -44,6 +44,22 @@ Daemon discovery reads a per-working-directory port/pid file under `${THEWAY_DIR
 
 Modules including [`feed/mod.rs`](../src/feed/mod.rs), [`commands.rs`](../src/commands.rs), [`auth.rs`](../src/auth.rs), [`history.rs`](../src/history.rs), [`images.rs`](../src/images.rs), and [`mentions.rs`](../src/mentions.rs) define reusable client/daemon records and pure helpers. Leaf path, trigger, cron, and raw persistence definitions remain in `theway-contract` and are re-exported only where a stable transport path requires it.
 
+## Feed replay and structured input records
+
+[`feed/wire.rs`](../src/feed/wire.rs) owns the serde feed-block enum, [`feed/types.rs`](../src/feed/types.rs) mirrors it as the `Block` model, and [`feed/model.rs`](../src/feed/model.rs) owns the structured `Feed` shared by the producing daemon and the consuming clients. The user block carries attachment chips and an origin next to its text, and the context row is a block of its own.
+
+[`feed/replay.rs`](../src/feed/replay.rs) rebuilds blocks from stored data: `replay_entries` consumes `TranscriptEntry::{Message, UserInput}`, so a session that carries structured records replays the user block and its context rows from the record, while `replay_messages` serves transcripts that hold messages only. A record describes the `Message::User` entry written immediately after it and replay skips exactly that entry, so one round renders once.
+
+[`feed/plain.rs`](../src/feed/plain.rs) owns the display form of a context row: `context_line` renders `[<label>] <text>` and flattens embedded newlines, and `Feed::plain_lines`, the plain-lines cache, and the TUI's styled renderer all call it, so one context block stays one counted row.
+
+[`proto/feed.rs`](../src/proto/feed.rs) converts generated `FeedBlock` messages into wire blocks and [`proto/resources.rs`](../src/proto/resources.rs) converts wire blocks back, covering the attachment chips, the origin, and the context row. Proto source, both conversion directions, and the generated SDK output change together.
+
+## Skill prompt envelope
+
+[`commands.rs`](../src/commands.rs) owns the skill envelope: the wrapper that makes an agent invoke a named skill before answering a turn. `SKILL_PROMPT_LEAD` and `SKILL_PROMPT_USER_MARKER` are the format's single definition — `attach_skill_prompt` renders them around the skill name and the user's own text, and passes the text through when no name is given — so the builder, the preamble, and the parser cannot drift apart.
+
+`skill_prompt_preamble` renders the same prefix alone as the content injected ahead of the turn, and `split_skill_prompt` parses a prompt back into its `(skill name, user text)` pair or returns `None` when the prompt is not an envelope. The daemon's input admission splits a `/skill` turn with `split_skill_prompt` to record the user's own text, so the format stays round-trippable: `split_skill_prompt(&attach_skill_prompt(text, Some(name)))` returns `(name, text)`, and no caller re-derives the format from the rendered string.
+
 ## Invariants
 
 - Wire and protobuf records never contain core or daemon-private types.
@@ -51,4 +67,6 @@ Modules including [`feed/mod.rs`](../src/feed/mod.rs), [`commands.rs`](../src/co
 - Runtime mutations that need ordering enter the serialized command queue.
 - Snapshot deltas apply only to the matching base and recover through a complete authoritative snapshot after lag or mismatch.
 - Proto source, Rust conversions, service handlers, client calls, and generated SDK output change together.
+- A feed user block comes from the structured input record when the transcript carries one, and from the stored message otherwise; both paths emit the same block kinds.
+- The skill envelope keeps one definition: `split_skill_prompt` recovers the name and text `attach_skill_prompt` wrapped, and `skill_prompt_preamble` renders the same prefix.
 - The crate contains no client appearance, terminal input handling, storage backend, or MCP implementation.

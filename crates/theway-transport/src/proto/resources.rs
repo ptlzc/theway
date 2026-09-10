@@ -533,7 +533,23 @@ fn subagent_wire(job: &crate::wire::WireAgentJobSnapshot) -> wire::SubagentJobSn
 fn feed_block(block: &WireFeedBlock) -> wire::FeedBlock {
     use wire::feed_block::Kind;
     let kind = match block {
-        WireFeedBlock::User { text, timestamp } => Kind::User(wire::UserBlock {
+        WireFeedBlock::User {
+            text,
+            timestamp,
+            attachments,
+            source,
+        } => Kind::User(wire::UserBlock {
+            text: text.clone(),
+            timestamp: timestamp.clone(),
+            attachments: attachments.iter().map(feed_attachment).collect(),
+            source: source.as_ref().map(feed_source),
+        }),
+        WireFeedBlock::Context {
+            label,
+            text,
+            timestamp,
+        } => Kind::Context(wire::ContextBlock {
+            label: label.clone(),
             text: text.clone(),
             timestamp: timestamp.clone(),
         }),
@@ -592,6 +608,23 @@ fn feed_block(block: &WireFeedBlock) -> wire::FeedBlock {
 /// Public wrapper for protocol adapters: serde feed block → proto oneof.
 pub fn wire_feed_block_to_proto(block: &WireFeedBlock) -> wire::FeedBlock {
     feed_block(block)
+}
+
+/// `WireFeedAttachment` → proto attachment chip.
+fn feed_attachment(attachment: &crate::feed::WireFeedAttachment) -> wire::FeedAttachment {
+    wire::FeedAttachment {
+        kind: attachment.kind.clone(),
+        name: attachment.name.clone(),
+        detail: attachment.detail.clone(),
+    }
+}
+
+/// `WireFeedSource` → proto origin.
+fn feed_source(source: &crate::feed::WireFeedSource) -> wire::FeedSource {
+    wire::FeedSource {
+        kind: source.kind.clone(),
+        label: source.label.clone(),
+    }
 }
 
 /// `feed::Level` serializes as snake_case variant names on the JSON surface.

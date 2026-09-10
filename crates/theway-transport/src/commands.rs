@@ -2,7 +2,7 @@
 //! Slash-command framework: [`CommandOutcome`], [`CommandCtx`], the [`SlashCommand`]
 //! trait, [`Registry`], the shared output sink ([`console`]), slash parsing ([`parse`]),
 //! and the pure helpers shared by command implementations and the CLI layer
-//! (`parse_model_spec`, `attach_skill_prompt`, …).
+//! (`parse_model_spec`, `attach_skill_prompt` / `split_skill_prompt`, …).
 //!
 //! The command table is shared contract — the TUI (completion) and the daemon
 //! (execution) both program against it. The framework is generic over the context
@@ -302,6 +302,16 @@ pub fn parse_model_spec(spec: &str) -> Option<(&str, &str)> {
     Some((provider, id))
 }
 
+/// Head of the skill envelope: everything [`attach_skill_prompt`] puts before the skill name.
+/// This constant and [`SKILL_PROMPT_USER_MARKER`] are the envelope format's single definition
+/// — the builder renders them, [`split_skill_prompt`] parses them back.
+const SKILL_PROMPT_LEAD: &str = "Before answering, invoke the Skill tool with name \"";
+
+/// Tail of the skill envelope's preamble: it follows the skill name and precedes the user's
+/// own text.
+const SKILL_PROMPT_USER_MARKER: &str =
+    "\" and use that skill's instructions for this turn.\n\nUser request:\n";
+
 /// Wrap a user prompt so the agent invokes the named skill first. Without a skill name the
 /// text passes through unchanged (never embeds the skill body — the agent loads it via the
 /// Skill tool).
@@ -310,9 +320,21 @@ pub fn attach_skill_prompt(text: impl Into<String>, skill_name: Option<&str>) ->
     let Some(skill_name) = skill_name else {
         return text;
     };
-    format!(
-        "Before answering, invoke the Skill tool with name \"{skill_name}\" and use that skill's instructions for this turn.\n\nUser request:\n{text}"
-    )
+    format!("{SKILL_PROMPT_LEAD}{skill_name}{SKILL_PROMPT_USER_MARKER}{text}")
+}
+
+/// The envelope preamble for `skill_name`: everything [`attach_skill_prompt`] places before
+/// the user's own text, i.e. the content injected ahead of the turn.
+pub fn skill_prompt_preamble(skill_name: &str) -> String {
+    format!("{SKILL_PROMPT_LEAD}{skill_name}{SKILL_PROMPT_USER_MARKER}")
+}
+
+/// Inverse of [`attach_skill_prompt`]: split the envelope back into the skill name and the
+/// user's own text. `None` when `prompt` is not a skill envelope.
+pub fn split_skill_prompt(prompt: &str) -> Option<(String, String)> {
+    let body = prompt.strip_prefix(SKILL_PROMPT_LEAD)?;
+    let (skill_name, text) = body.split_once(SKILL_PROMPT_USER_MARKER)?;
+    Some((skill_name.to_string(), text.to_string()))
 }
 
 /// Grouped model catalog used by the help/model text builders: provider -> models sorted
@@ -373,3 +395,6 @@ pub fn cli_model_help_text() -> String {
     }
     out
 }
+
+#[cfg(test)]
+tests_bridge_macro::tests_bridge!("commands");

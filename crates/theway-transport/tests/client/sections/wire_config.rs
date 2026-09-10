@@ -68,6 +68,7 @@ fn session_snapshot_round_trips_feed_block_kinds() {
         .iter()
         .map(|b| match b {
             WireFeedBlock::User { .. } => "user",
+            WireFeedBlock::Context { .. } => "context",
             WireFeedBlock::Assistant { .. } => "assistant",
             WireFeedBlock::Thinking { .. } => "thinking",
             WireFeedBlock::ToolCall { .. } => "tool_call",

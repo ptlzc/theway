@@ -44,6 +44,22 @@ Daemon 发现从 `${THEWAY_DIR:-$HOME/.theway}` 读取按工作目录区分的 p
 
 [`feed/mod.rs`](../src/feed/mod.rs)、[`commands.rs`](../src/commands.rs)、[`auth.rs`](../src/auth.rs)、[`history.rs`](../src/history.rs)、[`images.rs`](../src/images.rs) 和 [`mentions.rs`](../src/mentions.rs) 等模块定义可复用的客户端/daemon 记录与纯辅助函数。叶子路径、trigger、cron 和原始持久化定义留在 `theway-contract`，只在需要稳定 transport 路径时重新导出。
 
+## Feed 回放与结构化输入记录
+
+[`feed/wire.rs`](../src/feed/wire.rs) 负责 serde feed 块枚举，[`feed/types.rs`](../src/feed/types.rs) 把它镜像为 `Block` 模型，[`feed/model.rs`](../src/feed/model.rs) 负责生产方 daemon 与消费方客户端共享的结构化 `Feed`。用户块在文本之外携带附件 chip 与来源，Context 行是独立块。
+
+[`feed/replay.rs`](../src/feed/replay.rs) 从已存数据重建块：`replay_entries` 消费 `TranscriptEntry::{Message, UserInput}`，因此带结构化记录的会话从记录回放用户块及其 Context 行；`replay_messages` 服务于只有消息的 transcript。一条记录描述紧随其后写入的 `Message::User` 条目，回放恰好跳过该条目，因此一轮只渲染一次。
+
+[`feed/plain.rs`](../src/feed/plain.rs) 负责 Context 行的展示形态：`context_line` 渲染 `[<label>] <text>` 并压平内嵌换行，`Feed::plain_lines`、纯文本行缓存与 TUI 带样式渲染器都调用它，因此一个 Context 块始终算作一行。
+
+[`proto/feed.rs`](../src/proto/feed.rs) 把生成的 `FeedBlock` 消息转换为 wire 块，[`proto/resources.rs`](../src/proto/resources.rs) 把 wire 块转换回去，覆盖附件 chip、来源与 Context 行。Proto 源、双向转换与生成的 SDK 产物同步变化。
+
+## Skill prompt 信封
+
+[`commands.rs`](../src/commands.rs) 负责 skill 信封：让 agent 在回答本轮前先调用指定 skill 的包装文本。`SKILL_PROMPT_LEAD` 与 `SKILL_PROMPT_USER_MARKER` 是该格式的唯一权威定义——`attach_skill_prompt` 用它们包裹 skill 名与用户原文，并在未给 skill 名时原样返回原文——因此构建方、前言与解析器不会各自漂移。
+
+`skill_prompt_preamble` 单独渲染同一前缀，作为本轮之前注入的内容；`split_skill_prompt` 把 prompt 解析回 `(skill 名, 用户原文)` 对，prompt 不是信封时返回 `None`。daemon 的输入准入用 `split_skill_prompt` 拆解 `/skill` 轮次以记录用户原文，因此该格式保持可往返：`split_skill_prompt(&attach_skill_prompt(text, Some(name)))` 返回 `(name, text)`，没有调用方会从渲染后的字符串重新推导该格式。
+
 ## 不变量
 
 - Wire 与 protobuf 记录不包含 core 或 daemon 私有类型。
@@ -51,4 +67,6 @@ Daemon 发现从 `${THEWAY_DIR:-$HOME/.theway}` 读取按工作目录区分的 p
 - 需要排序的运行时变更进入串行命令队列。
 - Snapshot delta 只应用于匹配的 base；lag 或不匹配后通过完整权威 snapshot 恢复。
 - Proto 源、Rust 转换、服务 handler、客户端调用和生成 SDK 同步变化。
+- Transcript 携带结构化记录时，feed 用户块来自该记录；否则来自已存消息。两条路径产出相同的块种类。
+- Skill 信封保持唯一定义：`split_skill_prompt` 还原 `attach_skill_prompt` 包裹的名称与原文，`skill_prompt_preamble` 渲染同一前缀。
 - 本 crate 不包含客户端外观、终端输入处理、存储后端或 MCP 实现。

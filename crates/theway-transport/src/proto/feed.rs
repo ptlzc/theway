@@ -11,6 +11,13 @@ fn wire_feed_block(block: &wire::FeedBlock) -> WireFeedBlock {
         Kind::User(block) => WireFeedBlock::User {
             text: block.text.clone(),
             timestamp: block.timestamp.clone(),
+            attachments: block.attachments.iter().map(attachment_from_proto).collect(),
+            source: block.source.as_ref().map(source_from_proto),
+        },
+        Kind::Context(block) => WireFeedBlock::Context {
+            label: block.label.clone(),
+            text: block.text.clone(),
+            timestamp: block.timestamp.clone(),
         },
         Kind::Assistant(block) => WireFeedBlock::Assistant {
             text: block.text.clone(),
@@ -42,6 +49,23 @@ fn wire_feed_block(block: &wire::FeedBlock) -> WireFeedBlock {
             level: level_from_str(&block.level),
             timestamp: block.timestamp.clone(),
         },
+    }
+}
+
+/// `FeedAttachment` → `WireFeedAttachment` chip.
+fn attachment_from_proto(attachment: &wire::FeedAttachment) -> crate::feed::WireFeedAttachment {
+    crate::feed::WireFeedAttachment {
+        kind: attachment.kind.clone(),
+        name: attachment.name.clone(),
+        detail: attachment.detail.clone(),
+    }
+}
+
+/// `FeedSource` → `WireFeedSource` origin.
+fn source_from_proto(source: &wire::FeedSource) -> crate::feed::WireFeedSource {
+    crate::feed::WireFeedSource {
+        kind: source.kind.clone(),
+        label: source.label.clone(),
     }
 }
 

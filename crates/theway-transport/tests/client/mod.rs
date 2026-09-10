@@ -39,6 +39,8 @@ fn fixture_status(feed_line: &str) -> WireStatus {
         feed_blocks: vec![WireFeedBlock::User {
             text: feed_line.into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         }],
         feed_blocks_base: 0,
         feed_block_patches: Vec::new(),
