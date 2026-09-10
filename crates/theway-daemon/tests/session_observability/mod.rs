@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use theway_core::AgentMessage;
+use theway_contract::user_input::{InputFilePart, InputPart, UserInput};
+use theway_core::{AgentMessage, CustomMessage};
 use theway_llm_provider::{Message, UserContent, UserMessage};
+use theway_transport::feed::WireFeedBlock;
 use theway_transport::session_observability::ListSessionMessagesRequest;
 use theway_transport::wire::{
     WireContextUsage, WireSessionFeed, WireSessionGraphState, WireSessionInfo, WireSessionLineage,
@@ -24,6 +26,32 @@ fn user_message(text: &str) -> AgentMessage {
         content: UserContent::Text(text.to_string()),
         timestamp: 1_700_000_000_000,
     }))
+}
+
+/// The canonical `custom:user_input` record of one round of input, in the shape
+/// `crates/theway-core` writes it to the transcript.
+fn record_input() -> UserInput {
+    UserInput {
+        text: "look at @src/foo.rs".into(),
+        parts: vec![InputPart::File(InputFilePart {
+            path: "src/foo.rs".into(),
+            name: "foo.rs".into(),
+            digest: "sha256:00".into(),
+            bytes: 12,
+            media_type: "text/plain".into(),
+            truncated: false,
+        })],
+        source: Default::default(),
+        source_ref: None,
+    }
+}
+
+fn record_message(input: &UserInput) -> AgentMessage {
+    AgentMessage::Custom(CustomMessage {
+        role: UserInput::CUSTOM_ROLE.into(),
+        timestamp: 1_700_000_000_000,
+        payload: serde_json::to_value(input).expect("record serializes"),
+    })
 }
 
 fn live_status(session_id: &str, system_context: &str) -> WireStatus {
@@ -42,6 +70,8 @@ fn live_status(session_id: &str, system_context: &str) -> WireStatus {
         feed_blocks: vec![theway_transport::feed::WireFeedBlock::User {
             text: "live feed".into(),
             timestamp: None,
+            attachments: Vec::new(),
+            source: None,
         }],
         feed_blocks_base: 0,
         feed_block_patches: Vec::new(),
@@ -351,4 +381,98 @@ async fn list_messages_paginates_newest_first_with_cursor() {
     assert!(page.blocks.is_empty());
     assert!(!page.has_more);
     assert_eq!(page.total, 3);
+}
+
+#[tokio::test]
+async fn list_messages_renders_a_record_from_the_previous_page() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo: Arc<dyn SessionRepository> = Arc::new(SqliteSessionRepo::new(temp.path()));
+    let store = SessionRepository::create_with_id(repo.as_ref(), temp.path(), Some("sess-1"))
+        .await
+        .unwrap();
+    let session = Session::from_store(store);
+    let first = session.append_message(user_message("first")).await.unwrap();
+    let input = record_input();
+    let appended = session
+        .append_messages(vec![
+            record_message(&input),
+            user_message("look at @src/foo.rs with file contents"),
+        ])
+        .await
+        .unwrap();
+    let record_id = appended[0].clone();
+    let prompt_id = appended[1].clone();
+    let states = Arc::new(Mutex::new(HashMap::new()));
+    let latest = Arc::new(Mutex::new(live_status("sess-1", "")));
+    let ops = observability(
+        repo,
+        resource_snapshot("sess-1", "/resource/cwd", Default::default()),
+        states,
+        latest,
+    );
+
+    // The record entry describes a message: `total` counts transcript messages only.
+    let page = ops
+        .list_session_messages(&ListSessionMessagesRequest {
+            session_id: "sess-1".into(),
+            before_entry_id: None,
+            limit: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 2);
+    assert!(page.has_more);
+    assert_eq!(page.next_before_entry_id.as_deref(), Some(prompt_id.as_str()));
+    assert_eq!(page.blocks.len(), 1);
+    // The page starts after the record and still renders the record's text + chips.
+    let WireFeedBlock::User {
+        text,
+        attachments,
+        source,
+        ..
+    } = &page.blocks[0]
+    else {
+        panic!("expected user block: {:?}", page.blocks[0]);
+    };
+    assert_eq!(text, "look at @src/foo.rs");
+    assert_eq!(attachments.len(), 1, "{attachments:?}");
+    assert_eq!(attachments[0].name, "foo.rs");
+    assert_eq!(attachments[0].detail.as_deref(), Some("src/foo.rs"));
+    assert_eq!(source.as_ref().map(|origin| origin.kind.as_str()), Some("user"));
+
+    // The older page is the legacy message: no record, no chips.
+    let page = ops
+        .list_session_messages(&ListSessionMessagesRequest {
+            session_id: "sess-1".into(),
+            before_entry_id: Some(prompt_id),
+            limit: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 2);
+    assert!(!page.has_more);
+    assert_eq!(page.next_before_entry_id.as_deref(), Some(first.as_str()));
+    assert_eq!(page.blocks.len(), 1);
+    let block = &page.blocks[0];
+    let WireFeedBlock::User { text, .. } = block else {
+        panic!("expected user block: {block:?}");
+    };
+    assert_eq!(text, "first");
+    assert!(
+        matches!(block, WireFeedBlock::User { attachments, .. } if attachments.is_empty()),
+        "{block:?}"
+    );
+
+    // Cursor semantics still address message entries only: a record entry is not one.
+    let page = ops
+        .list_session_messages(&ListSessionMessagesRequest {
+            session_id: "sess-1".into(),
+            before_entry_id: Some(record_id),
+            limit: 1,
+        })
+        .await
+        .unwrap();
+    assert!(page.blocks.is_empty());
+    assert!(!page.has_more);
+    assert_eq!(page.total, 2);
 }

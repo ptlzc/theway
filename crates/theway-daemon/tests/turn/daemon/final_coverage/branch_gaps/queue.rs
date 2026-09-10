@@ -27,7 +27,7 @@ async fn start_parked_turn_missing_session_and_busy_session() {
             display: "held".into(),
             prompt: "held".into(),
             images: Vec::new(),
-        
+        input: None,
         persisted: false,});
     host.sessions.get_mut("parked-busy").unwrap().busy = true;
     assert!(
@@ -48,13 +48,13 @@ async fn start_parked_turn_reports_remaining_and_filters_busy_or_empty_sessions(
             display: "first".into(),
             prompt: "first".into(),
             images: Vec::new(),
-        
+        input: None,
         persisted: false,});
         session.queue.push_back(QueuedTurn::UserPrompt {
             display: "second".into(),
             prompt: "second".into(),
             images: Vec::new(),
-        
+        input: None,
         persisted: false,});
     }
 
@@ -76,7 +76,7 @@ async fn start_parked_turn_reports_remaining_and_filters_busy_or_empty_sessions(
             display: "filtered".into(),
             prompt: "filtered".into(),
             images: Vec::new(),
-        
+        input: None,
         persisted: false,});
     host.sessions.get_mut("parked-filtered").unwrap().busy = true;
     let mut unordered = FuturesUnordered::new();

@@ -1,5 +1,7 @@
 //! Tests for `commands` — split out of src (see docs/rust-test-files.md).
 
+mod skill_envelope;
+
 use super::*;
 use crate::test_env::{EnvGuard, ENV_LOCK};
 use theway_core::SkillSource;

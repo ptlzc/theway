@@ -133,7 +133,7 @@ async fn host_with_registry(input: Vec<InputModality>, registry: Registry) -> (T
         capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
-        services: crate::orchestration::DaemonServices::new(),
+        services: crate::orchestration::DaemonServices::new().with_attachments_base(&base),
         observability: Default::default(),
     };
 

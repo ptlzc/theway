@@ -113,7 +113,7 @@ async fn host_with_input(input: Vec<InputModality>) -> (TurnHost, TempDir, TempD
         capabilities: RuntimeCapabilities::default(),
         thinking_summary: None,
         startup: crate::startup_config::StartupConfig::default(),
-        services: crate::orchestration::DaemonServices::new(),
+        services: crate::orchestration::DaemonServices::new().with_attachments_base(&base),
         observability: Default::default(),
     };
 
@@ -147,13 +147,13 @@ fn user_facing_run_error_returns_original_for_empty_provider() {
 }
 
 #[test]
-fn load_web_prompt_images_blank_name_uses_index_label_in_decode_errors() {
+fn prompt_images_blank_name_uses_index_label_in_decode_errors() {
     let bad_b64 = theway_transport::wire::WirePromptImage {
         data: "not base64!!!".into(),
         name: Some("   ".into()),
     };
 
-    let err = load_web_prompt_images(&[bad_b64]).unwrap_err().to_string();
+    let err = prompt_images(&[bad_b64]).unwrap_err();
 
     assert!(err.contains("clipboard image #1"), "{err}");
 }

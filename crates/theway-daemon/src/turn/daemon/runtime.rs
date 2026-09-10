@@ -133,7 +133,7 @@ impl TurnHost {
         };
         crate::feed_replay::replay_transcript(
             &mut projection.feed,
-            &kernel.harness().agent().state().messages,
+            &crate::feed_replay::message_entries(&kernel.harness().agent().state().messages),
             config.startup.tui_max_feed_lines,
         );
         Self {

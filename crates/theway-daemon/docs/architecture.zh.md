@@ -42,6 +42,22 @@
 
 会话切换在构建目标 runtime 前调用当前 harness 的 extension gate。活动 turn 会被取消并驱动至 settlement，旧 runtime 随后发送 `session_shutdown`；之后 `ReplKernel::replace_runtime` 才激活已重建的目标并发布 `session_switched`。`/fork` 命令在 `SessionRepository::fork` 前调用 fork gate，并且只在新会话元数据可读取后发布 `session_forked`。因此，被拒绝的 gate 不会改变当前 runtime 或会话仓库。
 
+## 用户输入准入与显示投影
+
+[`attachments/mod.rs`](../src/attachments/mod.rs) 负责一轮输入的准入。[`attachments/files.rs`](../src/attachments/files.rs) 用共享的 `theway_transport::mentions` 解析器与截断窗口把 mention 文本变为 `File` part，[`attachments/images.rs`](../src/attachments/images.rs) 用共享的 `theway_transport::images` 校验解码并校验提交的图片。`PromptAdmission::admit` 在返回之前把每个字节写入 `DaemonServices.attachments`，因此持久化的 `UserInput` 绝不会指向没有被存储的内容；`PromptAdmission::with_injected` 在附件之后追加 skill、trigger 或 extension part。
+
+`/skill` 轮次以 `attach_skill_prompt(text, Some(name))` 信封到达准入。`PromptAdmission::admit` 用 `theway_transport::commands::split_skill_prompt` 拆解它，因此记录的 `text` 是用户原文，来自 `skill_prompt_preamble` 的信封前言成为 `Injected { source: "skill", name }` part，而调用方已持有的模型侧 prompt 永不改写。
+
+[`orchestration/startup/process_state.rs`](../src/orchestration/startup/process_state.rs) 的 `start_process_services` 接收已解析的 `DaemonPaths::base`，并把它传给 [`orchestration/services.rs`](../src/orchestration/services.rs) 中的 `DaemonServices::with_attachments_base`，由其在进程生命周期内把 `DaemonServices.attachments` 的根设为 `<base>/attachments/v1`，因此 `--theway-dir` 覆盖会让整个附件库随基础目录布局一起移动。
+
+活动会话与 `submit_web_text_for_session` 两条 intake 路径把记录与 prompt 一起携带，steering 路径通过 `AgentHarness::enqueue_steering_input` 排队该记录。core 先追加记录再追加用户消息，显示投影依赖该顺序。
+
+命令合成的 prompt 同样携带记录。[`turn/daemon/input.rs`](../src/turn/daemon/input.rs) 的 `command_prompt_record` 把由 skill 信封构建的 `CommandOutcome::RunAgentPrompt` prompt 记作 `InputSource::User` 并带同样的注入 part，其余合成 prompt（goal 命令、trigger 编写命令、file 命令、宿主注入文本）记作 `InputSource::Host`；[`turn/daemon/commands/triggers.rs`](../src/turn/daemon/commands/triggers.rs) 的 `trigger_web_rule_now` 把 `WireCommand::TriggerRuleNow { id }` 轮次记作 `InputSource::Trigger`，并在 `source_ref` 中带上规则 id。
+
+trigger 与 cron 注入通过 [`trigger_engine/execution/promotion.rs`](../src/trigger_engine/execution/promotion.rs) 的 `trigger_record_message` 构建记录：模型侧消息保留 `ensure_trigger_prefix` 强制的 `[Trigger <trace_id>] ` 前缀，而记录的 `text` 去掉该前缀，`source` 为 `InputSource::Trigger`，`source_ref` 为 trace id。`apply_promotion` 与 [`trigger_engine/execution/action.rs`](../src/trigger_engine/execution/action.rs) 的 inject-and-run 动作在两条分支上都把该记录紧接在用户消息之前写入——流式分支把记录、消息依次交给 `Agent::enqueue_follow_up`，空闲分支把记录、消息依次追加到会话 transcript 与 agent 内存状态——因此两条条目在日志中始终相邻。
+
+live turn 路径通过共享的 `theway_transport::feed::user_input_blocks` 映射产出块，[`feed_replay.rs`](../src/feed_replay.rs) 的 `replay_transcript` 从会话条目重建同样的块，[`session_observability.rs`](../src/session_observability.rs) 的分页路径投影同一条记录：用户块携带提交原文、附件 chip 与来源，每个注入 part 成为一条 Context 行。由于记录描述紧随其后写入的 `Message::User` 条目，回放与分页都会跳过该消息；分页在切页之前对整条 branch 求出配对集合，因此页边界不会把已配对的消息渲染成无记录的用户气泡，而 `total` 与 cursor 仍按消息条目计数。
+
 ## 存储归属
 
 [`runtime_storage.rs`](../src/runtime_storage.rs) 定义 daemon 应用 port：
@@ -86,4 +102,6 @@
 - Daemon 负责运行时语义，不持有客户端展示状态。
 - 协议转换由 daemon 适配器针对 transport 拥有的消息完成。
 - 宿主路径只解析一次并显式传递。
+- 附件字节先于命名它们的记录被持久化写入，每个展示面都投影该记录，而不是 materialized 消息。
+- 每条记录的轮次都紧接在其描述的用户消息之前写入，且 trigger 轮次的记录保存的是去掉模型侧 `[Trigger <id>] ` 前缀后的本体。
 - 工具、trigger、hook、MCP、LSP 和遥测失败通过各自操作报告，不破坏会话运行时生命周期。

@@ -224,7 +224,7 @@ async fn parked_source_unload_aborts_inflight_turn_before_dropping() {
         display: "hi".into(),
         prompt: "hi".into(),
         images: Vec::new(),
-    
+        input: None,
         persisted: false,});
     host.sessions.insert(state);
 

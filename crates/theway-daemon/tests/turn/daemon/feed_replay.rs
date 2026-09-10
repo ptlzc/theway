@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use tempfile::TempDir;
+use theway_contract::user_input::{InputFilePart, InputPart, UserInput};
 use theway_core::{
     AgentHarness, AgentHarnessOptions, AgentMessage, MemorySessionStorage, Session, SessionStorage,
 };
@@ -62,6 +63,31 @@ fn push_user(harness: &Arc<AgentHarness>, text: &str) {
             content: UserContent::Text(text.to_string()),
             timestamp: 1_700_000_000_000,
         })));
+}
+
+/// Push the canonical record of one round of input through the prompt path: the record
+/// entry lands in the transcript immediately before the materialized user message.
+async fn record_round(harness: &Arc<AgentHarness>, text: &str, input: &UserInput) {
+    harness
+        .record_user_input_prompt(text, Vec::new(), Some(input.clone()))
+        .await
+        .expect("record and message persist");
+}
+
+fn record_input() -> UserInput {
+    UserInput {
+        text: "look at @src/foo.rs".into(),
+        parts: vec![InputPart::File(InputFilePart {
+            path: "src/foo.rs".into(),
+            name: "foo.rs".into(),
+            digest: "sha256:00".into(),
+            bytes: 12,
+            media_type: "text/plain".into(),
+            truncated: false,
+        })],
+        source: Default::default(),
+        source_ref: None,
+    }
 }
 
 fn push_assistant(harness: &Arc<AgentHarness>, text: &str) {
@@ -177,6 +203,46 @@ async fn startup_replay_seeds_initial_snapshot_with_history() {
         blocks.iter().any(|b| matches!(
             b,
             theway_transport::feed::WireFeedBlock::Assistant { text, .. } if text == "hi there"
+        )),
+        "assistant history missing: {blocks:?}"
+    );
+}
+
+#[tokio::test]
+async fn startup_replay_renders_records_instead_of_materialized_text() {
+    let _serial = crate::test_env::ENV_LOCK.lock().unwrap();
+    let scratch = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+    let harness = test_harness();
+    record_round(&harness, "look at @src/foo.rs with file contents", &record_input()).await;
+    push_assistant(&harness, "reading it");
+    let mut host = TurnHost::new(daemon_config(&scratch, &repo_dir, harness, None));
+    let blocks = host.wire_snapshot().feed_blocks;
+
+    let user_blocks: Vec<&theway_transport::feed::WireFeedBlock> = blocks
+        .iter()
+        .filter(|block| matches!(block, theway_transport::feed::WireFeedBlock::User { .. }))
+        .collect();
+    assert_eq!(user_blocks.len(), 1, "one user block per round: {blocks:?}");
+    let theway_transport::feed::WireFeedBlock::User {
+        text,
+        timestamp,
+        attachments,
+        source,
+    } = user_blocks[0]
+    else {
+        panic!("expected a user block");
+    };
+    assert_eq!(text, "look at @src/foo.rs");
+    assert!(timestamp.is_some());
+    assert_eq!(attachments.len(), 1, "{attachments:?}");
+    assert_eq!(attachments[0].name, "foo.rs");
+    assert_eq!(attachments[0].detail.as_deref(), Some("src/foo.rs"));
+    assert_eq!(source.as_ref().map(|origin| origin.kind.as_str()), Some("user"));
+    assert!(
+        blocks.iter().any(|block| matches!(
+            block,
+            theway_transport::feed::WireFeedBlock::Assistant { text, .. } if text == "reading it"
         )),
         "assistant history missing: {blocks:?}"
     );

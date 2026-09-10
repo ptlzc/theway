@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::agent_session::{AgentSession, RetrySettings};
 use crate::orchestration::SessionRuntime;
+use theway_contract::user_input::UserInput;
 use theway_core::{AgentHarness, AgentRunError};
 use theway_llm_provider::{ImageContent, InputModality};
 
@@ -38,6 +39,9 @@ pub enum QueuedTurn {
         display: String,
         prompt: String,
         images: Vec<ImageContent>,
+        /// The canonical record of the round of input this job carries; `None` for a
+        /// host-injected prompt that produced no record.
+        input: Option<UserInput>,
         /// `true` when the prompt was already appended to the persisted
         /// transcript while the session waited for a model; the queued run
         /// must continue from state instead of appending a duplicate.
@@ -47,6 +51,9 @@ pub enum QueuedTurn {
         display: String,
         prompt: String,
         error_context: &'static str,
+        /// The canonical record of the round of input this job carries; `None` for a
+        /// host-injected prompt that produced no record.
+        input: Option<UserInput>,
     },
     PromptTemplate {
         display: String,
@@ -145,15 +152,31 @@ impl ReplKernel {
         self.harness.agent().state().model.is_some()
     }
 
-    pub fn prompt_turn(&self, prompt: String) -> TurnFut {
+    /// Run one agent-synthesised prompt together with the canonical record of the round of input
+    /// it came from. `input` is written immediately before the user message, so the session log
+    /// keeps `custom:user_input` describing the message that follows it; `None` is a prompt that
+    /// produced no record.
+    pub fn prompt_turn(&self, prompt: String, input: Option<UserInput>) -> TurnFut {
         let harness = self.harness.clone();
-        Box::pin(async move { harness.prompt(prompt).await.map(|_| None) })
+        Box::pin(async move {
+            harness
+                .prompt_with_input(prompt, Vec::new(), input)
+                .await
+                .map(|_| None)
+        })
     }
 
+    /// Run one user prompt together with the canonical record of the round of input it came
+    /// from. `input` is written immediately before the user message, so the session log keeps
+    /// `custom:user_input` describing the message that follows it.
+    ///
+    /// A text prompt keeps the `AgentSession` retry wrapper, which now also owns the record;
+    /// an image prompt calls the harness directly, as it did before records existed.
     pub fn user_prompt_turn(
         &self,
         prompt_text: String,
         loaded_images: Vec<ImageContent>,
+        input: Option<UserInput>,
     ) -> TurnFut {
         let harness = self.harness.clone();
         let retry = self.retry.clone();
@@ -161,14 +184,18 @@ impl ReplKernel {
         Box::pin(async move {
             if has_images {
                 harness
-                    .prompt_with_images(prompt_text, loaded_images)
+                    .prompt_with_input(prompt_text, loaded_images, input)
                     .await
                     .map(|_| None)
             } else {
-                AgentSession::new(harness, retry)
-                    .prompt(prompt_text)
-                    .await
-                    .map(|_| None)
+                let session = AgentSession::new(harness, retry);
+                match input {
+                    Some(input) => session
+                        .prompt_with_input(prompt_text, Vec::new(), Some(input))
+                        .await
+                        .map(|_| None),
+                    None => session.prompt(prompt_text).await.map(|_| None),
+                }
             }
         })
     }

@@ -130,6 +130,7 @@ impl ProcessRuntime {
             &startup,
             &storage,
             &cwd,
+            &paths.base,
             &session_id,
             &configured_api_keys,
             &feed_tx,
@@ -203,10 +204,13 @@ impl ProcessRuntime {
 ///
 /// The command-output sink forwards `CommandOutput` lines into the feed, so
 /// slash-command output reaches the session feed regardless of the caller.
+/// `base` is the resolved `DaemonPaths::base`, so the attachment library honours a
+/// CLI-overridden `--theway-dir` instead of falling back to the process environment.
 async fn start_process_services(
     startup: &StartupConfig,
     storage: &Arc<dyn RuntimeStorage>,
     cwd: &std::path::Path,
+    base: &std::path::Path,
     session_id: &str,
     configured_api_keys: &crate::stream_auth::ConfiguredApiKeys,
     feed_tx: &mpsc::UnboundedSender<(String, FeedUpdate)>,
@@ -227,7 +231,8 @@ async fn start_process_services(
     let services = DaemonServices::new()
         .with_command_output(command_output)
         .with_tgrep_enabled(startup.tgrep_enabled)
-        .with_configured_api_keys(configured_api_keys.clone());
+        .with_configured_api_keys(configured_api_keys.clone())
+        .with_attachments_base(base);
     if let Err(err) = services
         .dynamic_triggers
         .load_from_storage(storage.clone(), cwd.to_path_buf(), session_id.to_string())

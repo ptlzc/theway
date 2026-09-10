@@ -183,7 +183,7 @@ fn session_registry_get_mut_allows_updating_queue_and_busy() {
         display: "hello".into(),
         prompt: "hello".into(),
         images: Vec::new(),
-
+        input: None,
         persisted: false,});
 
     assert!(registry.get("sess-a").unwrap().busy);
@@ -499,13 +499,13 @@ async fn cancel_routes_to_parked_session() {
         display: "one".into(),
         prompt: "one".into(),
         images: Vec::new(),
-
+        input: None,
         persisted: false,});
     other_queue.push_back(crate::turn::kernel::QueuedTurn::UserPrompt {
         display: "two".into(),
         prompt: "two".into(),
         images: Vec::new(),
-
+        input: None,
         persisted: false,});
 
     let mut turn = TurnState::default();
@@ -566,7 +566,7 @@ async fn wire_snapshot_for_parked_session_returns_that_session() {
         display: "queued".into(),
         prompt: "queued".into(),
         images: Vec::new(),
-
+        input: None,
         persisted: false,});
     host.sessions.insert(parked);
 

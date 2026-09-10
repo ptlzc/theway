@@ -1,4 +1,44 @@
+/// The canonical record for a prompt a slash command synthesised.
+///
+/// A skill envelope (`attach_skill_prompt(text, Some(name))`) carries a human's own text plus
+/// the injected skill preamble, so it is recorded as a user-authored round with one injected
+/// part. Every other synthesised prompt (goal, trigger, file command, host-injected text) is
+/// recorded as host-authored (`InputSource::Host`), so its turn renders with a provenance
+/// marker instead of masquerading as a user message. The model-facing prompt the caller holds
+/// is never rewritten.
+fn command_prompt_record(prompt: &str) -> UserInput {
+    let Some((skill_name, text)) = theway_transport::commands::split_skill_prompt(prompt) else {
+        return UserInput {
+            text: prompt.to_string(),
+            parts: Vec::new(),
+            source: InputSource::Host,
+            source_ref: None,
+        };
+    };
+    let preamble = theway_transport::commands::skill_prompt_preamble(&skill_name);
+    let part = InputInjectedPart {
+        source: "skill".to_string(),
+        name: Some(skill_name),
+        text: preamble,
+    };
+    crate::attachments::PromptAdmission::with_injected(
+        UserInput {
+            text,
+            parts: Vec::new(),
+            source: InputSource::User,
+            source_ref: None,
+        },
+        part,
+    )
+}
+
 impl TurnHost {
+    /// Admission for one round of input against a session cwd: mentions resolve and attachment
+    /// bytes land in the process-wide content-addressed library.
+    fn prompt_admission(&self, cwd: PathBuf) -> crate::attachments::PromptAdmission {
+        crate::attachments::PromptAdmission::new(self.automation.services.attachments.clone(), cwd)
+    }
+
     async fn submit_web_text(
         &mut self,
         text: String,
@@ -10,7 +50,7 @@ impl TurnHost {
         if trimmed.is_empty() && images.is_empty() {
             return;
         }
-        let loaded_images = match load_web_prompt_images(&images) {
+        let loaded_images = match prompt_images(&images) {
             Ok(images) => images,
             Err(e) => {
                 self.error_line(format!("pasted image: {e}"));
@@ -31,33 +71,59 @@ impl TurnHost {
             return;
         }
 
+        // Admission parses the mentions once and stores every attachment byte before the
+        // record exists; the record then travels with the prompt into the feed, the queue,
+        // and the translation log.
+        let record = match self
+            .prompt_admission(self.runtime.cwd.clone())
+            .admit(&trimmed, &images, InputSource::User, None)
+            .await
+        {
+            Ok(record) => record,
+            Err(e) => {
+                self.error_line(format!("pasted image: {e}"));
+                return;
+            }
+        };
+
+        // Two purposes, one parse each: admission already produced the record's `File` parts and
+        // stored their bytes, and this expansion is the model's copy of the same files — the
+        // client no longer pre-expands, so the file body appears exactly once in the prompt.
         let expanded = if trimmed.is_empty() {
             String::new()
         } else {
             mentions::expand(&trimmed, &self.runtime.cwd).await.0
         };
         let prompt_text = commands::attach_skill_prompt(expanded, None);
-        let display = prompt_display(&trimmed, loaded_images.len());
+        let display = trimmed;
         if interrupt {
             self.request_abort(turn);
             self.session.queue.clear();
             self.system_line("interrupt: stopping current turn for new message");
             if turn.fut.is_some() {
-                self.queue_user_prompt(display, prompt_text, loaded_images).await;
+                self.queue_user_prompt_with_input(display, prompt_text, loaded_images, Some(record))
+                    .await;
             } else if self.session.kernel.has_model() {
-                self.projection.feed.push_user(display);
-                self.start_user_prompt_turn(prompt_text, loaded_images, turn);
+                push_user_record_blocks(&mut self.projection.feed, Some(&record), &display);
+                self.start_user_prompt_turn_with_input(
+                    prompt_text,
+                    loaded_images,
+                    Some(record),
+                    turn,
+                );
             } else {
-                self.projection.feed.push_user(display.clone());
-                self.queue_user_prompt(display, prompt_text, loaded_images).await;
+                push_user_record_blocks(&mut self.projection.feed, Some(&record), &display);
+                self.queue_user_prompt_with_input(display, prompt_text, loaded_images, Some(record))
+                    .await;
                 self.system_line("no model selected — queued until a model is set");
             }
         } else if !self.session.kernel.has_model() {
             // Do not start a turn that is guaranteed to fail inside the LLM
             // call. Keep the message queued; SetModel/Configure start it once
             // a model exists.
-            self.projection.feed.push_user(display.clone());
-            self.queue_user_prompt(display, prompt_text, loaded_images).await;
+            push_user_record_blocks(&mut self.projection.feed, Some(&record), &display);
+            self.queue_user_prompt_with_input(display, prompt_text, loaded_images, Some(record))
+                .await;
             self.system_line("no model selected — queued until a model is set");
         } else if turn.fut.is_some() {
             // Issue #102: a busy tool-calling turn must see the new user
@@ -65,10 +131,15 @@ impl TurnHost {
             // finishes. Inject into the core steering queue + interrupt the
             // in-flight LLM call (a no-op mid-tool, where the steering is
             // drained at the turn boundary anyway).
-            self.interleave_user_message(display, prompt_text, loaded_images);
+            self.interleave_user_message(display, prompt_text, loaded_images, record);
         } else {
-            self.projection.feed.push_user(display);
-            self.start_user_prompt_turn(prompt_text, loaded_images, turn);
+            push_user_record_blocks(&mut self.projection.feed, Some(&record), &display);
+            self.start_user_prompt_turn_with_input(
+                prompt_text,
+                loaded_images,
+                Some(record),
+                turn,
+            );
         }
     }
 
@@ -80,11 +151,21 @@ impl TurnHost {
         display: String,
         prompt_text: String,
         images: Vec<ImageContent>,
+        input: UserInput,
     ) {
-        self.projection.feed.push_user(display);
+        push_user_record_blocks(&mut self.projection.feed, Some(&input), &display);
         let message = interleaved_user_message(prompt_text, images);
-        self.session.kernel.harness().enqueue_steering(message);
-        self.session.kernel.harness().interrupt();
+        // The record enters the steering queue ahead of the message: both are appended to the
+        // log in drain order, so the record describes the message that follows it. A record
+        // that cannot be written must not leave its message behind unrecorded.
+        let recorded = self.session.kernel.harness().enqueue_steering_input(&input);
+        if let Err(error) = recorded {
+            self.error_line(format!("steering record: {error}"));
+            return;
+        }
+        let harness = self.session.kernel.harness();
+        harness.enqueue_steering(message);
+        harness.interrupt();
         self.system_line("interleaved new message into the running turn");
     }
 
@@ -103,7 +184,7 @@ impl TurnHost {
         if trimmed.is_empty() && images.is_empty() {
             return;
         }
-        let loaded_images = match load_web_prompt_images(&images) {
+        let loaded_images = match prompt_images(&images) {
             Ok(images) => images,
             Err(e) => {
                 self.error_line(format!("pasted image: {e}"));
@@ -114,6 +195,26 @@ impl TurnHost {
             self.error_line(format!("send_message: no session runtime for {session_id}"));
             return;
         }
+        // An id that is neither the active session nor a parked runtime owns no cwd and no
+        // queue; keep the silent no-op the registry lookup produced.
+        let Some(cwd) = self
+            .sessions
+            .get(session_id)
+            .map(|session| session.cwd.clone())
+        else {
+            return;
+        };
+        let record = match self
+            .prompt_admission(cwd.clone())
+            .admit(&trimmed, &images, InputSource::User, None)
+            .await
+        {
+            Ok(record) => record,
+            Err(e) => {
+                self.error_line(format!("pasted image: {e}"));
+                return;
+            }
+        };
         // Slash commands addressed to a non-active session must run in that
         // session's own runtime/context (issue: `/collapse` typed after a
         // client-side `/resume` was being queued as a normal user prompt).
@@ -121,14 +222,21 @@ impl TurnHost {
             self.dispatch_web_slash_for_session(session_id, &trimmed).await;
             return;
         }
+        // The model's copy of the mentioned files is built here: the client submits the raw
+        // text, so this expansion (not the record) is what puts the file body in the prompt.
+        let expanded = if trimmed.is_empty() {
+            String::new()
+        } else {
+            mentions::expand(&trimmed, &cwd).await.0
+        };
         let Some(session) = self.sessions.get_mut(session_id) else {
             return;
         };
         if !loaded_images.is_empty() && !session.kernel.current_model_accepts_images() {
             return;
         }
-        let display = prompt_display(&trimmed, loaded_images.len());
-        let prompt_text = commands::attach_skill_prompt(trimmed, None);
+        let display = trimmed;
+        let prompt_text = commands::attach_skill_prompt(expanded, None);
         if interrupt {
             session.queue.clear();
         }
@@ -140,7 +248,11 @@ impl TurnHost {
             let persisted = match session
                 .kernel
                 .harness()
-                .record_user_prompt(prompt_text.clone(), loaded_images.clone())
+                .record_user_input_prompt(
+                    prompt_text.clone(),
+                    loaded_images.clone(),
+                    Some(record.clone()),
+                )
                 .await
             {
                 Ok(()) => true,
@@ -152,11 +264,12 @@ impl TurnHost {
                     false
                 }
             };
-            session.projection.feed.push_user(display.clone());
+            push_user_record_blocks(&mut session.projection.feed, Some(&record), &display);
             session.queue.push_back(QueuedTurn::UserPrompt {
                 display,
                 prompt: prompt_text,
                 images: loaded_images,
+                input: Some(record),
                 persisted,
             });
             session.projection.feed.push_plain_untimed(
@@ -168,10 +281,21 @@ impl TurnHost {
         if !interrupt && session.busy {
             // Issue #102: interleave into the running turn instead of waiting
             // for it to finish.
-            session.projection.feed.push_user(display);
+            push_user_record_blocks(&mut session.projection.feed, Some(&record), &display);
             let message = interleaved_user_message(prompt_text, loaded_images);
-            session.kernel.harness().enqueue_steering(message);
-            session.kernel.harness().interrupt();
+            // Record before message: the steering queue drains into the log in order, and a
+            // record that cannot be written must not leave its message behind unrecorded.
+            let recorded = session.kernel.harness().enqueue_steering_input(&record);
+            if let Err(error) = recorded {
+                session
+                    .projection
+                    .feed
+                    .push_error(format!("steering record: {error}"), None, false);
+                return;
+            }
+            let harness = session.kernel.harness();
+            harness.enqueue_steering(message);
+            harness.interrupt();
             session
                 .projection
                 .feed
@@ -180,7 +304,11 @@ impl TurnHost {
             let persisted = match session
                 .kernel
                 .harness()
-                .record_user_prompt(prompt_text.clone(), loaded_images.clone())
+                .record_user_input_prompt(
+                    prompt_text.clone(),
+                    loaded_images.clone(),
+                    Some(record.clone()),
+                )
                 .await
             {
                 Ok(()) => true,
@@ -196,6 +324,7 @@ impl TurnHost {
                 display,
                 prompt: prompt_text,
                 images: loaded_images,
+                input: Some(record),
                 persisted,
             });
         }
@@ -267,14 +396,17 @@ impl TurnHost {
                 prompt,
                 error_context,
             } => {
+                let record = command_prompt_record(&prompt);
+                let display = input.to_string();
                 if turn.fut.is_some() {
                     self.enqueue_turn(QueuedTurn::AgentPrompt {
-                        display: input.to_string(),
+                        display,
                         prompt,
                         error_context,
+                        input: Some(record),
                     });
                 } else {
-                    self.start_prompt_turn(prompt, error_context, turn);
+                    self.start_prompt_turn(prompt, error_context, Some(record), turn);
                 }
             }
             CommandOutcome::RunPromptTemplate { name, vars } => {
@@ -465,10 +597,12 @@ impl TurnHost {
                 prompt,
                 error_context,
             } => {
+                let record = command_prompt_record(&prompt);
                 session.queue.push_back(QueuedTurn::AgentPrompt {
                     display: input.to_string(),
                     prompt,
                     error_context,
+                    input: Some(record),
                 });
             }
             CommandOutcome::RunPromptTemplate { name, vars } => {

@@ -31,7 +31,7 @@ use theway_transport::wire::{WireCommand, WireDaemonConfig, WirePromptImage};
 
 use super::super::{
     DaemonConfig, RuntimeCapabilities, TurnHost, context_window_for, current_model_label,
-    load_web_prompt_images, model_catalog, prompt_display, slash_commands, user_facing_run_error,
+    model_catalog, prompt_images, slash_commands, user_facing_run_error,
     wire_control_plane_prompt_snapshot, wire_preview, wire_prompt_text,
 };
 
@@ -140,7 +140,7 @@ impl HostFixture {
             capabilities: RuntimeCapabilities::default(),
             thinking_summary: None,
             startup: crate::startup_config::StartupConfig::default(),
-            services: crate::orchestration::DaemonServices::new(),
+            services: crate::orchestration::DaemonServices::new().with_attachments_base(&base),
             observability: Default::default(),
         };
 
@@ -174,7 +174,7 @@ fn user_prompt_turn(display: &str, prompt: &str) -> QueuedTurn {
         display: display.to_string(),
         prompt: prompt.to_string(),
         images: Vec::new(),
-
+        input: None,
         persisted: false,}
 }
 
@@ -254,27 +254,6 @@ fn wire_preview_caps_at_120_chars() {
 }
 
 #[test]
-fn prompt_display_keeps_full_text_and_counts_images() {
-    assert_eq!(prompt_display("hi", 0), "hi");
-
-    let long = "y".repeat(100);
-    assert_eq!(prompt_display(&long, 0), long, "full text, no truncation");
-    let multiline = "line one\nline two\nline three";
-    assert_eq!(
-        prompt_display(multiline, 0),
-        multiline,
-        "multiline messages must reach the feed intact"
-    );
-
-    assert_eq!(prompt_display("hello", 2), "hello [2 image(s)]");
-    assert_eq!(
-        prompt_display(&long, 1),
-        format!("{long} [1 image(s)]"),
-        "the image suffix appends after the full text"
-    );
-}
-
-#[test]
 fn wire_prompt_text_caps_and_renders_strings() {
     assert_eq!(wire_prompt_text("short", 80), "short");
     assert_eq!(wire_prompt_text(&"z".repeat(200), 80).chars().count(), 81);
@@ -301,27 +280,27 @@ fn wire_control_plane_prompt_snapshot_caps_and_hashes_args() {
 }
 
 #[test]
-fn load_web_prompt_images_loads_png_and_rejects_bad_input() {
+fn prompt_images_loads_png_and_rejects_bad_input() {
     // Valid 8-byte PNG magic, base64-encoded, with a data URL prefix.
     let good = png_wire_image("data:image/png;base64,iVBORw0KGgo=", Some("pic.png"));
-    let loaded = load_web_prompt_images(&[good]).unwrap();
+    let loaded = prompt_images(&[good]).unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].mime_type, "image/png");
     assert_eq!(loaded[0].data, "iVBORw0KGgo=");
 
     // Unsupported image format.
     let bad_format = png_wire_image("aGVsbG8=", None);
-    assert!(load_web_prompt_images(&[bad_format]).is_err());
+    assert!(prompt_images(&[bad_format]).is_err());
 
     // Invalid base64.
     let bad_b64 = png_wire_image("not base64!!!", None);
-    assert!(load_web_prompt_images(&[bad_b64]).is_err());
+    assert!(prompt_images(&[bad_b64]).is_err());
 
     // Over the per-message image cap.
     let too_many: Vec<WirePromptImage> = (0..theway_transport::images::MAX_IMAGES_PER_MESSAGE + 1)
         .map(|_| png_wire_image("iVBORw0KGgo=", None))
         .collect();
-    let err = load_web_prompt_images(&too_many).unwrap_err().to_string();
+    let err = prompt_images(&too_many).unwrap_err();
     assert!(err.contains("exceeds per-message cap"), "{err}");
 }
 

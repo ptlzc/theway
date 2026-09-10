@@ -1,6 +1,9 @@
 //! Process-scoped daemon services and their explicit ownership.
 
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
+
+use theway_storage::attachments::LocalAttachmentStore;
 
 use crate::commands::CommandOutput;
 use crate::session_activation::SessionActivator;
@@ -33,6 +36,10 @@ pub struct DaemonServices {
     /// api_key`), keyed by provider. Consulted by the stream wrapper between
     /// the environment and `auth.json`; `Configure` updates it at runtime.
     pub(crate) configured_api_keys: ConfiguredApiKeys,
+    /// Content-addressed attachment library (`<base>/attachments/v1`) shared by
+    /// every session: once admission runs, a `UserInput` record names attachment
+    /// bytes only by the digest they were stored under here.
+    pub(crate) attachments: Arc<LocalAttachmentStore>,
 }
 
 impl Default for DaemonServices {
@@ -57,6 +64,10 @@ impl Default for DaemonServices {
             tgrep: TgrepServerRegistry::new(),
             subagent_settings: SubagentSettingsRegistry::new(),
             configured_api_keys: ConfiguredApiKeys::default(),
+            // `<base>/attachments/v1` from the contract layout; a caller holding
+            // the resolved `DaemonPaths::base` overlays it with
+            // `with_attachments_base`.
+            attachments: Arc::new(LocalAttachmentStore::from_base_dir()),
         }
     }
 }
@@ -77,6 +88,18 @@ impl DaemonServices {
     #[must_use]
     pub(crate) fn with_command_output(mut self, command_output: CommandOutput) -> Self {
         self.command_output = command_output;
+        self
+    }
+
+    /// Root the attachment library at `<base>/attachments/v1`, the layout
+    /// `theway_contract::config::attachments_dir` defines. Only a caller that holds
+    /// the resolved `DaemonPaths` can honour a CLI-overridden base dir, so startup
+    /// applies the base here instead of this module reading it from the environment.
+    #[must_use]
+    pub(crate) fn with_attachments_base(mut self, base: &Path) -> Self {
+        self.attachments = Arc::new(LocalAttachmentStore::new(
+            base.join("attachments").join("v1"),
+        ));
         self
     }
 

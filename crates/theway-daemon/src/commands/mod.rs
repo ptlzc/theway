@@ -48,7 +48,7 @@ pub use theway_transport::commands::console;
 #[allow(unused_imports)]
 pub use theway_transport::commands::{
     CommandOutcome, SlashCommand, WebRelayAction, attach_skill_prompt, cli_model_help_text, parse,
-    parse_model_spec,
+    parse_model_spec, split_skill_prompt,
 };
 
 /// One daemon instance's slash-command output destination.

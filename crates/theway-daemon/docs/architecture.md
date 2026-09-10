@@ -42,6 +42,22 @@ Session activation is the serialized atomic create-or-resume boundary for new cl
 
 Session switching invokes the current harness's extension gate before constructing a target runtime. An active turn is cancelled and driven through settlement before the old runtime sends `session_shutdown`; only then does `ReplKernel::replace_runtime` activate the reconstructed target and publish `session_switched`. The `/fork` command invokes the fork gate before `SessionRepository::fork` and publishes `session_forked` only after the new session metadata is readable. A rejected gate therefore leaves the current runtime and session repository unchanged.
 
+## User input admission and display projection
+
+[`attachments/mod.rs`](../src/attachments/mod.rs) owns admission for one round of input. [`attachments/files.rs`](../src/attachments/files.rs) turns mention text into `File` parts with the shared `theway_transport::mentions` parser and truncation window, and [`attachments/images.rs`](../src/attachments/images.rs) decodes and validates submitted images with the shared `theway_transport::images` checks. `PromptAdmission::admit` writes every byte into `DaemonServices.attachments` before it returns, so a persisted `UserInput` never names content that was not stored, and `PromptAdmission::with_injected` appends the skill, trigger, or extension part after the attachments.
+
+A `/skill` turn reaches admission as the `attach_skill_prompt(text, Some(name))` envelope. `PromptAdmission::admit` splits it with `theway_transport::commands::split_skill_prompt`, so the record's `text` is the user's own text and the envelope preamble from `skill_prompt_preamble` becomes the `Injected { source: "skill", name }` part, while the model-facing prompt the caller already holds is never rewritten.
+
+[`orchestration/startup/process_state.rs`](../src/orchestration/startup/process_state.rs)'s `start_process_services` receives the resolved `DaemonPaths::base` and passes it to `DaemonServices::with_attachments_base` in [`orchestration/services.rs`](../src/orchestration/services.rs), which roots `DaemonServices.attachments` at `<base>/attachments/v1` for the process lifetime, so a `--theway-dir` override moves the whole library with the rest of the base-directory layout.
+
+The active-session and `submit_web_text_for_session` intake paths carry the record together with the prompt, and the steering path queues it through `AgentHarness::enqueue_steering_input`. Core appends the record before the user message, and the display projection depends on that order.
+
+Command-synthesised prompts carry a record too. [`turn/daemon/input.rs`](../src/turn/daemon/input.rs)'s `command_prompt_record` records a `CommandOutcome::RunAgentPrompt` prompt built from a skill envelope as `InputSource::User` with the same injected part, and every other synthesised prompt — a goal command, a trigger-authoring command, a file command, or host-injected text — as `InputSource::Host`; [`turn/daemon/commands/triggers.rs`](../src/turn/daemon/commands/triggers.rs)'s `trigger_web_rule_now` records the `WireCommand::TriggerRuleNow { id }` turn as `InputSource::Trigger` with the rule id in `source_ref`.
+
+Trigger and cron injection builds its record through `trigger_record_message` in [`trigger_engine/execution/promotion.rs`](../src/trigger_engine/execution/promotion.rs): the model-facing message keeps the `[Trigger <trace_id>] ` prefix `ensure_trigger_prefix` enforces, while the record's `text` has that prefix stripped, `source` is `InputSource::Trigger`, and `source_ref` is the trace id. `apply_promotion` and the inject-and-run action in [`trigger_engine/execution/action.rs`](../src/trigger_engine/execution/action.rs) write that record immediately before the user message on both branches — the streaming branch hands record then message to `Agent::enqueue_follow_up`, and the idle branch appends record then message to the session transcript and the agent's in-memory state — so the two entries stay adjacent in the log.
+
+The live turn path emits its blocks through the shared `theway_transport::feed::user_input_blocks` mapping, [`feed_replay.rs`](../src/feed_replay.rs)'s `replay_transcript` rebuilds them from session entries, and the paging path in [`session_observability.rs`](../src/session_observability.rs) projects the same record: the user block carries the submitted text, the attachment chips, and the origin, and each injected part becomes a context row. Because a record describes the `Message::User` entry written immediately after it, replay and paging skip that message; paging resolves the paired set over the whole branch before cutting a page, so a page boundary cannot render a paired message as a record-less user bubble, while `total` and the cursor keep counting message entries.
+
 ## Storage ownership
 
 [`runtime_storage.rs`](../src/runtime_storage.rs) defines daemon application ports:
@@ -86,4 +102,6 @@ One observer instance is injected into the primary and resumed harnesses, `Subag
 - The daemon owns runtime semantics but no client presentation state.
 - Protocol conversion occurs in daemon adapters against transport-owned messages.
 - Host paths are resolved once and passed explicitly.
+- Attachment bytes are written before the record that names them is persisted, and every display surface projects that record rather than the materialized message.
+- Every recorded round is written immediately before the user message it describes, and a trigger round's record holds the body without the model-facing `[Trigger <id>] ` prefix.
 - Tool, trigger, hook, MCP, LSP, and telemetry failures report through their owning operation without corrupting the session runtime lifecycle.

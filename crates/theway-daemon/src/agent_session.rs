@@ -17,8 +17,11 @@ use std::sync::Arc;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
+use theway_contract::user_input::UserInput;
 use theway_core::{AgentHarness, AgentMessage, AgentRunError, LoopListener, SessionTreeEntry};
-use theway_llm_provider::{AssistantMessage as PiAssistantMessage, Message as PiMessage};
+use theway_llm_provider::{
+    AssistantMessage as PiAssistantMessage, ImageContent, Message as PiMessage,
+};
 
 #[derive(Clone, Debug)]
 pub struct RetrySettings {
@@ -89,6 +92,83 @@ impl AgentSession {
         loop {
             let r = if attempt == 0 {
                 self.harness.prompt(text.clone()).await
+            } else {
+                self.harness.continue_().await
+            };
+            let err = match r {
+                Ok(()) => match self.assistant_error_message(&self.last_assistant()) {
+                    Some(error_message) => AgentRunError::Other(error_message),
+                    None => return Ok(()),
+                },
+                Err(e) => e,
+            };
+            // Successful prompt() can still leave a synthesized error assistant message
+            // (provider stream encoded the error). Re-evaluate via retry policy.
+
+            if !self.settings.enabled {
+                return Err(err);
+            }
+
+            if !is_retryable_error(&err.to_string()) {
+                return Err(err);
+            }
+
+            if attempt >= self.settings.max_retries {
+                // Exhausted retries on the current model. If a fallback is configured and we
+                // haven't already used it, swap and restart from attempt=0.
+                if let Some((provider, model_id)) = &self.settings.fallback_model {
+                    if !fallback_used {
+                        fallback_used = true;
+                        if let Some(m) = theway_llm_provider::get_model(
+                            &theway_llm_provider::Provider::from(provider.as_str()),
+                            model_id,
+                        ) {
+                            self.rewind_failed_assistant().await?;
+                            if let Err(e) = self.harness.set_model(m).await {
+                                return Err(AgentRunError::Other(format!(
+                                    "fallback set_model failed: {e}"
+                                )));
+                            }
+                            attempt = 0;
+                            continue;
+                        }
+                    }
+                }
+                return Err(err);
+            }
+
+            attempt += 1;
+            let delay_ms = backoff_ms(
+                attempt,
+                self.settings.base_delay_ms,
+                self.settings.max_delay_ms,
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+
+            // Drop the failed assistant message from agent state so continue_() doesn't replay
+            // a context that ends in an error.
+            self.rewind_failed_assistant().await?;
+        }
+    }
+
+    /// Prompt with the canonical record of the round of input, with the same retry policy as
+    /// [`Self::prompt`]. The record and the user message are written on the first attempt
+    /// only: every later attempt continues the run the first attempt started, so a retry never
+    /// writes a second record for the same round of input.
+    pub async fn prompt_with_input(
+        &self,
+        text: impl Into<String>,
+        images: Vec<ImageContent>,
+        input: Option<UserInput>,
+    ) -> Result<(), AgentRunError> {
+        let text = text.into();
+        let mut attempt: u32 = 0;
+        let mut fallback_used = false;
+        loop {
+            let r = if attempt == 0 {
+                self.harness
+                    .prompt_with_input(text.clone(), images.clone(), input.clone())
+                    .await
             } else {
                 self.harness.continue_().await
             };

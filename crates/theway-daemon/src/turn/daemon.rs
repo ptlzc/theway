@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::Result;
 use async_trait::async_trait;
 use base64::Engine as _;
 use futures::StreamExt as _;
@@ -21,6 +21,7 @@ use futures::stream::FuturesUnordered;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, mpsc};
 
+use theway_contract::user_input::{InputInjectedPart, InputSource, UserInput};
 use theway_core::AgentMessage;
 use theway_core::SkillSource;
 use theway_core::multiagent::graph::types::DagEvent;
@@ -294,7 +295,6 @@ impl SessionRegistry {
         self.sessions.insert(id, runtime);
     }
 
-    #[cfg(test)]
     fn get(&self, id: &str) -> Option<&SessionRuntimeState> {
         self.sessions.get(id)
     }
@@ -579,14 +579,22 @@ fn wire_preview(text: &str) -> String {
     feed::truncate_chars(&bug_report::redact(text), 120)
 }
 
-fn prompt_display(text: &str, image_count: usize) -> String {
-    // The feed is the transcript: display the user message in full (issue
-    // #93). The TUI wraps multiline text and enforces its own scrollback
-    // cap, so a display-side truncation only hid content silently.
-    if image_count == 0 {
-        text.to_string()
-    } else {
-        format!("{text} [{image_count} image(s)]")
+/// Render one admitted round of user input into a live feed through the one projection replay
+/// also uses ([`theway_transport::feed::user_input_blocks`]): the user block carries the
+/// original text, one chip per attachment, and the origin, and each injected part becomes its
+/// own context row.
+///
+/// `fallback` keeps a prompt that produced no record — host-injected text — rendering as the
+/// plain user line it was before records existed. Live rounds are stamped when they render,
+/// the way `Feed::push_user` stamped them; replay takes the timestamp of the paired message.
+fn push_user_record_blocks(feed: &mut Feed, input: Option<&UserInput>, fallback: &str) {
+    let Some(input) = input else {
+        feed.push_user(fallback.to_string());
+        return;
+    };
+    let timestamp = Some(chrono::Utc::now().to_rfc3339());
+    for block in theway_transport::feed::user_input_blocks(input, timestamp) {
+        feed.append_blocks(&[block]);
     }
 }
 
@@ -636,34 +644,18 @@ fn wire_prompt_text(text: &str, cap: usize) -> String {
     feed::truncate_chars(&bug_report::redact(text), cap)
 }
 
-fn load_web_prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent>> {
-    if images.len() > theway_transport::images::MAX_IMAGES_PER_MESSAGE {
-        bail!(
-            "{} images exceeds per-message cap of {}",
-            images.len(),
-            theway_transport::images::MAX_IMAGES_PER_MESSAGE
-        );
-    }
-    let mut out = Vec::with_capacity(images.len());
-    for (idx, image) in images.iter().enumerate() {
-        let label = image
-            .name
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-            .map(|name| format!("clipboard image `{name}`"))
-            .unwrap_or_else(|| format!("clipboard image #{}", idx + 1));
-        let data = image
-            .data
-            .rsplit_once(',')
-            .map(|(_, data)| data)
-            .unwrap_or(image.data.as_str());
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(data)
-            .with_context(|| format!("decode {label}"))?;
-        let image = theway_transport::images::load_bytes(&label, &bytes)?;
+/// Model-facing image payloads for one submission.
+///
+/// [`crate::attachments::decode_prompt_images`] owns the decode and the format/size validation
+/// the admission path applies, so a submission admission accepted reaches the provider as the
+/// same base64 payload the transport encoder produces for those bytes. A rejection carries the
+/// same wording admission reports.
+fn prompt_images(images: &[WirePromptImage]) -> Result<Vec<ImageContent>, String> {
+    let mut out = Vec::new();
+    for (_, bytes, media_type) in crate::attachments::decode_prompt_images(images)? {
         out.push(ImageContent {
-            data: image.data,
-            mime_type: image.mime_type,
+            data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            mime_type: media_type,
         });
     }
     Ok(out)
@@ -729,4 +721,11 @@ mod daemon_final_coverage_tests {
 mod daemon_collapse_unload_tests {
     //! Collapse memory-unload tests live in `tests/turn/daemon/collapse_unload/`.
     tests_bridge_macro::tests_bridge!("turn/daemon/collapse_unload");
+}
+
+#[cfg(test)]
+mod daemon_input_records_tests {
+    //! Structured user-input tests (admission, records, live projection) live in
+    //! `tests/turn/daemon/records/`; separate bridge to keep the other suites untouched.
+    tests_bridge_macro::tests_bridge!("turn/daemon/records");
 }

@@ -24,7 +24,7 @@ use crate::trigger_engine::types::Trigger;
 use super::RunningTriggerHandle;
 use super::promotion::{
     PROMOTION_BODY_CAP_BYTES, apply_promotion, compute_sub_agent_outcome, ensure_trigger_prefix,
-    truncate_on_char_boundary,
+    trigger_record_message, truncate_on_char_boundary,
 };
 use super::types::{
     BeforeTriggerActionContext, BeforeTriggerActionHook, RunningTriggerState, TriggerAction,
@@ -179,27 +179,63 @@ pub(super) async fn run_trigger_action(
             },
         );
 
+        // Canonical record of the injected turn, built before the message so the two land
+        // back to back with the record first. A record that cannot be built is refluxed and
+        // dropped; the injection itself is an added canonical entry, not a gate on the turn.
+        let record_message = match trigger_record_message(&trace_id, &body) {
+            Ok(message) => Some(message),
+            Err(error) => {
+                emit_from_listeners(
+                    &listeners,
+                    TriggerEvent::PersistenceError {
+                        context: "trigger_inject_and_run".into(),
+                        message: format!("inject_and_run record build failed: {error}"),
+                    },
+                );
+                None
+            }
+        };
+
         let user_message = AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
             role: theway_llm_provider::UserRole::User,
             content: theway_llm_provider::UserContent::Text(body.clone()),
             timestamp: chrono::Utc::now().timestamp_millis(),
         }));
 
-        // Inject. Mirror `apply_promotion`'s two-branch persistence so the message lands in
-        // the jsonl exactly once and in the right order relative to any in-flight turn.
+        // Inject. Mirror `apply_promotion`'s two-branch persistence so the record and the
+        // message land in the jsonl exactly once and in the right order relative to any
+        // in-flight turn, with the record immediately before the message it describes.
         let queued_for_followup = parent_agent.is_streaming();
         if queued_for_followup {
+            if let Some(record) = record_message {
+                parent_agent.enqueue_follow_up(record);
+            }
             parent_agent.enqueue_follow_up(user_message);
-        } else if let Err(e) = parent_session.append_message(user_message.clone()).await {
-            emit_from_listeners(
-                &listeners,
-                TriggerEvent::PersistenceError {
-                    context: "trigger_inject_and_run".into(),
-                    message: format!("inject_and_run append failed: {:?}", e.code),
-                },
-            );
         } else {
-            parent_agent.state().messages.push(user_message);
+            if let Some(record) = record_message {
+                if let Err(e) = parent_session.append_message(record.clone()).await {
+                    emit_from_listeners(
+                        &listeners,
+                        TriggerEvent::PersistenceError {
+                            context: "trigger_inject_and_run".into(),
+                            message: format!("inject_and_run record append failed: {:?}", e.code),
+                        },
+                    );
+                } else {
+                    parent_agent.state().messages.push(record);
+                }
+            }
+            if let Err(e) = parent_session.append_message(user_message.clone()).await {
+                emit_from_listeners(
+                    &listeners,
+                    TriggerEvent::PersistenceError {
+                        context: "trigger_inject_and_run".into(),
+                        message: format!("inject_and_run append failed: {:?}", e.code),
+                    },
+                );
+            } else {
+                parent_agent.state().messages.push(user_message);
+            }
         }
 
         let result_data = serde_json::json!({

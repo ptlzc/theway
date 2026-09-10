@@ -27,6 +27,7 @@ extern crate self as theway_daemon;
 
 mod agent_session;
 pub mod agent_specs;
+mod attachments;
 mod bug_report;
 mod builtin_skills;
 mod commands;

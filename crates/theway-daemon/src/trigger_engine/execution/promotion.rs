@@ -8,9 +8,10 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use theway_contract::user_input::{InputSource, UserInput};
 use theway_core::agent::session::session::Session;
 use theway_core::types::AgentMessage;
-use theway_core::{Agent, AgentRunError, AgentState};
+use theway_core::{Agent, AgentHarness, AgentRunError, AgentState, SessionError};
 use theway_llm_provider::Message as PiMessage;
 
 use crate::trigger_engine::event::{TriggerEvent, TriggerListener};
@@ -187,6 +188,24 @@ pub(super) fn ensure_trigger_prefix(body: String, trace_id: &str) -> (String, bo
     } else {
         (format!("{expected}{body}"), true)
     }
+}
+
+/// Canonical record of one engine-injected trigger turn: `text` is `body` without the
+/// `[Trigger {trace_id}] ` prefix the model-facing message keeps, `source` is `Trigger`, and
+/// `source_ref` names the trace. The caller persists or queues the result immediately before
+/// the user message it describes.
+pub(super) fn trigger_record_message(
+    trace_id: &str,
+    body: &str,
+) -> Result<AgentMessage, SessionError> {
+    let prefix = format!("[Trigger {trace_id}] ");
+    let text = body.strip_prefix(&prefix).unwrap_or(body).to_string();
+    AgentHarness::user_input_record_message(&UserInput {
+        text,
+        parts: Vec::new(),
+        source: InputSource::Trigger,
+        source_ref: Some(trace_id.to_string()),
+    })
 }
 
 /// Truncation marker appended to bodies that overrun `cap_bytes`. Counted toward the cap
@@ -418,6 +437,23 @@ pub(super) async fn apply_promotion(
     let (final_body, truncated) = truncate_on_char_boundary(rendered, PROMOTION_BODY_CAP_BYTES);
     let redaction_status = if truncated { "truncated" } else { "clean" };
 
+    // Canonical record of the promoted turn, built before the message so the two are written
+    // back to back with the record first. A record that cannot be built is refluxed and
+    // dropped: the promotion itself is an added canonical entry, not a gate on the turn.
+    let record_message = match trigger_record_message(trace_id, &final_body) {
+        Ok(message) => Some(message),
+        Err(error) => {
+            emit_from_listeners(
+                listeners,
+                TriggerEvent::PersistenceError {
+                    context: "trigger_promotion".into(),
+                    message: format!("promotion record build failed: {error}"),
+                },
+            );
+            None
+        }
+    };
+
     let user_message = AgentMessage::Llm(PiMessage::User(theway_llm_provider::UserMessage {
         role: theway_llm_provider::UserRole::User,
         content: theway_llm_provider::UserContent::Text(final_body),
@@ -426,25 +462,30 @@ pub(super) async fn apply_promotion(
 
     // Single persistence path. The promoted message must land in the session JSONL exactly
     // once, with deterministic ordering relative to any in-flight assistant response. Two
-    // disjoint branches based on parent loop state:
+    // disjoint branches based on parent loop state, each writing the canonical record
+    // immediately before the message it describes:
     //
-    // - **Streaming**: parent has an active prompt. Hand the message to the loop's
-    //   follow-up queue. The loop drains it at the next turn boundary (after the in-flight
-    //   assistant response has emitted its `MessageEnd` and been persisted by the session
-    //   listener), pushes it into `state.messages`, and emits a `MessageEnd` whose session
-    //   listener writes the single canonical session entry. Order in JSONL: assistant
-    //   response → user_promoted, matching what the model actually saw. We do NOT call
-    //   `parent_session.append_message` here — that would double-persist and land in the
-    //   wrong order. Audit captures the queued state; `inserted_entry_id` is only known
-    //   after the loop drains, so it's `Null` here and correlated via `trace_id`.
+    // - **Streaming**: parent has an active prompt. Hand the record and then the message to
+    //   the loop's follow-up queue. The loop drains both in order at the next turn boundary
+    //   (after the in-flight assistant response has emitted its `MessageEnd` and been
+    //   persisted by the session listener), pushes them into `state.messages`, and emits a
+    //   `MessageEnd` per message whose session listener writes the single canonical session
+    //   entry. Order in JSONL: assistant response → user_input record → user_promoted,
+    //   matching what the model actually saw. We do NOT call `parent_session.append_message`
+    //   here — that would double-persist and land in the wrong order. Audit captures the
+    //   queued state; `inserted_entry_id` is only known after the loop drains, so it's `Null`
+    //   here and correlated via `trace_id`.
     //
     // - **Idle**: no active loop, no listener race. Synchronously
-    //   `parent_session.append_message` (single write) then push to `state.messages` so
-    //   the user's next `prompt()` / `continue_()` sees the promotion without an explicit
-    //   rehydrate. Loop isn't running, so no `MessageEnd` fires for this message → no
-    //   duplicate listener write.
+    //   `parent_session.append_message` the record, then the message, then push both to
+    //   `state.messages` in the same order, so the user's next `prompt()` / `continue_()`
+    //   sees the promotion without an explicit rehydrate. Loop isn't running, so no
+    //   `MessageEnd` fires for either message → no duplicate listener write.
     let queued_for_followup = parent_agent.is_streaming();
     let (audit_state, inserted_entry_id_value, inserted_entry_id_str) = if queued_for_followup {
+        if let Some(record) = record_message {
+            parent_agent.enqueue_follow_up(record);
+        }
         parent_agent.enqueue_follow_up(user_message);
         (
             "queued",
@@ -452,6 +493,19 @@ pub(super) async fn apply_promotion(
             String::new(), // event field is set; TUI / /triggers audit join by trace_id
         )
     } else {
+        if let Some(record) = record_message {
+            if let Err(e) = parent_session.append_message(record.clone()).await {
+                emit_from_listeners(
+                    listeners,
+                    TriggerEvent::PersistenceError {
+                        context: "trigger_promotion".into(),
+                        message: format!("promotion record append failed: {:?}", e.code),
+                    },
+                );
+            } else {
+                parent_agent.state().messages.push(record);
+            }
+        }
         let id = match parent_session.append_message(user_message.clone()).await {
             Ok(id) => id,
             Err(e) => {

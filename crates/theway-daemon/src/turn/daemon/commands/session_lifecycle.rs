@@ -72,7 +72,9 @@ impl TurnHost {
         // rebuild the feed from history (capped at `tui_max_feed_lines`).
         crate::feed_replay::replay_transcript(
             &mut self.projection.feed,
-            &self.session.kernel.harness().agent().state().messages,
+            &crate::feed_replay::message_entries(
+                &self.session.kernel.harness().agent().state().messages,
+            ),
             self.runtime.feed_history_limit,
         );
         self.system_line(format!(

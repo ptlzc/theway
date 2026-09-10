@@ -98,7 +98,7 @@ fn queued_turn_display_reports_each_variant() {
             display: "user".into(),
             prompt: "p".into(),
             images: Vec::<ImageContent>::new(),
-
+        input: None,
         persisted: false,}
         .display(),
         "user"
@@ -108,6 +108,7 @@ fn queued_turn_display_reports_each_variant() {
             display: "agent".into(),
             prompt: "p".into(),
             error_context: "ctx",
+            input: None,
         }
         .display(),
         "agent"
@@ -194,14 +195,15 @@ fn kernel_turn_builders_return_futures_without_starting_a_run() {
     let mut vars = serde_json::Map::new();
     vars.insert("k".to_string(), serde_json::json!("v"));
 
-    drop(kernel.prompt_turn("plain".into()));
-    drop(kernel.user_prompt_turn("text-only".into(), Vec::new()));
+    drop(kernel.prompt_turn("plain".into(), None));
+    drop(kernel.user_prompt_turn("text-only".into(), Vec::new(), None));
     drop(kernel.user_prompt_turn(
         "with-image".into(),
         vec![ImageContent {
             data: "aa".into(),
             mime_type: "image/png".into(),
         }],
+        None,
     ));
     drop(kernel.template_turn("tpl".into(), vars));
     drop(kernel.compaction_turn(Some("custom".into())));

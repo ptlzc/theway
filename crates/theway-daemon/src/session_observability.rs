@@ -15,7 +15,7 @@ use theway_transport::session_observability::{
 use theway_transport::transport::SessionOps;
 use theway_transport::wire::{WireSessionSnapshot, WireStatus};
 
-use crate::feed_replay::session_tree_entry_wire_blocks;
+use crate::feed_replay::{borrowed_wire_blocks, is_user_input_record, paired_user_inputs};
 use crate::runtime_storage::SessionRepository;
 
 pub(crate) struct DaemonSessionObservability {
@@ -123,9 +123,12 @@ impl SessionObservabilityOps for DaemonSessionObservability {
             .with_context(|| format!("no session matches id {}", request.session_id))?;
         let session = Session::from_store(store);
         let branch = session.branch(None).await?;
+        // `total` and the cursor count transcript messages: a `custom:user_input`
+        // record entry describes a message, it is not one.
         let messages: Vec<&SessionTreeEntry> = branch
             .iter()
             .filter(|entry| matches!(entry, SessionTreeEntry::Message { .. }))
+            .filter(|entry| !is_user_input_record(entry))
             .collect();
         let total = messages.len() as u64;
 
@@ -149,12 +152,10 @@ impl SessionObservabilityOps for DaemonSessionObservability {
 
         let start = before.saturating_sub(limit);
         let page = &messages[start..before];
-        let mut blocks = Vec::new();
-        for entry in page {
-            if let Some(entry_blocks) = session_tree_entry_wire_blocks(entry) {
-                blocks.extend(entry_blocks);
-            }
-        }
+        // The pairing spans the whole branch, so a page that starts after a record
+        // still renders the record's text and chips for the message it contains.
+        let paired = paired_user_inputs(&branch);
+        let blocks = borrowed_wire_blocks(page, &paired);
         Ok(SessionMessagePage {
             session_id: request.session_id.clone(),
             blocks,

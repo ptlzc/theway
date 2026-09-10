@@ -101,6 +101,12 @@ async fn dynamic_skill_slash_command_with_prompt_runs_skill_wrapped_turn() {
             assert!(prompt.contains("db9"));
             assert!(prompt.contains("create a table"));
             assert!(!prompt.contains("SECRET SKILL BODY"));
+            // The shortcut emits exactly the envelope admission splits back into the user's
+            // own text plus a `source: "skill"` injected part.
+            assert_eq!(
+                commands::split_skill_prompt(&prompt),
+                Some(("db9".to_string(), "create a table".to_string()))
+            );
         }
         other => panic!("expected RunAgentPrompt outcome, got {other:?}"),
     }

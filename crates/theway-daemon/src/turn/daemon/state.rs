@@ -18,7 +18,7 @@ impl TurnHost {
         );
         crate::feed_replay::replay_transcript(
             &mut feed_state.feed,
-            &runtime.harness.agent().state().messages,
+            &crate::feed_replay::message_entries(&runtime.harness.agent().state().messages),
             self.runtime.feed_history_limit,
         );
         let state = SessionRuntimeState::from_runtime(
@@ -446,7 +446,9 @@ impl TurnHost {
         // compact summary), so rebuild the feed from history.
         crate::feed_replay::replay_transcript(
             &mut self.projection.feed,
-            &self.session.kernel.harness().agent().state().messages,
+            &crate::feed_replay::message_entries(
+                &self.session.kernel.harness().agent().state().messages,
+            ),
             self.runtime.feed_history_limit,
         );
         self.system_line(note);
@@ -531,7 +533,9 @@ impl TurnHost {
         // rebuild the feed from history (capped at `tui_max_feed_lines`).
         crate::feed_replay::replay_transcript(
             &mut self.projection.feed,
-            &self.session.kernel.harness().agent().state().messages,
+            &crate::feed_replay::message_entries(
+                &self.session.kernel.harness().agent().state().messages,
+            ),
             self.runtime.feed_history_limit,
         );
         self.system_line(format!("activated session {}", self.session.id));

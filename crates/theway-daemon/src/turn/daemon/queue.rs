@@ -1,10 +1,20 @@
 impl TurnHost {
-    async fn queue_user_prompt(&mut self, display: String, prompt: String, images: Vec<ImageContent>) {
+    /// Queue an admitted round of input: the record and the user message are persisted now, so
+    /// a model-less session can run the turn later with `continue_` instead of appending a
+    /// duplicate. `persisted` is false only when that write failed, and the queued run then
+    /// appends both through the prompt path.
+    async fn queue_user_prompt_with_input(
+        &mut self,
+        display: String,
+        prompt: String,
+        images: Vec<ImageContent>,
+        input: Option<UserInput>,
+    ) {
         let persisted = match self
             .session
             .kernel
             .harness()
-            .record_user_prompt(prompt.clone(), images.clone())
+            .record_user_input_prompt(prompt.clone(), images.clone(), input.clone())
             .await
         {
             Ok(()) => true,
@@ -17,6 +27,7 @@ impl TurnHost {
             display,
             prompt,
             images,
+            input,
             persisted,
         });
     }
@@ -61,22 +72,24 @@ impl TurnHost {
                 display,
                 prompt,
                 images,
+                input,
                 persisted,
             } => {
-                self.projection.feed.push_user(display);
+                push_user_record_blocks(&mut self.projection.feed, input.as_ref(), &display);
                 if persisted {
                     self.start_continued_turn(turn);
                 } else {
-                    self.start_user_prompt_turn(prompt, images, turn);
+                    self.start_user_prompt_turn_with_input(prompt, images, input, turn);
                 }
             }
             QueuedTurn::AgentPrompt {
                 display,
                 prompt,
                 error_context,
+                input,
             } => {
-                self.projection.feed.push_user(display);
-                self.start_prompt_turn(prompt, error_context, turn);
+                push_user_record_blocks(&mut self.projection.feed, input.as_ref(), &display);
+                self.start_prompt_turn(prompt, error_context, input, turn);
             }
             QueuedTurn::PromptTemplate {
                 display,
@@ -159,22 +172,24 @@ impl TurnHost {
                 display,
                 prompt,
                 images,
+                input,
                 persisted,
             } => {
-                session.projection.feed.push_user(display);
+                push_user_record_blocks(&mut session.projection.feed, input.as_ref(), &display);
                 if persisted {
                     session.kernel.continue_turn()
                 } else {
-                    session.kernel.user_prompt_turn(prompt, images)
+                    session.kernel.user_prompt_turn(prompt, images, input)
                 }
             }
             QueuedTurn::AgentPrompt {
                 display,
                 prompt,
                 error_context: _,
+                input,
             } => {
-                session.projection.feed.push_user(display);
-                session.kernel.prompt_turn(prompt)
+                push_user_record_blocks(&mut session.projection.feed, input.as_ref(), &display);
+                session.kernel.prompt_turn(prompt, input)
             }
             QueuedTurn::PromptTemplate {
                 display,
@@ -203,21 +218,29 @@ impl TurnHost {
         &mut self,
         prompt: String,
         error_context: &'static str,
+        input: Option<UserInput>,
         turn: &mut TurnState,
     ) {
-        turn.fut = Some(self.session.kernel.prompt_turn(prompt));
+        turn.fut = Some(self.session.kernel.prompt_turn(prompt, input));
         turn.aborted = false;
         turn.prefix = error_context;
         self.session.busy = true;
     }
 
-    fn start_user_prompt_turn(
+    /// Start a user turn together with the canonical record of the round of input it came
+    /// from; the record is written immediately before the user message.
+    fn start_user_prompt_turn_with_input(
         &mut self,
         prompt_text: String,
         loaded_images: Vec<ImageContent>,
+        input: Option<UserInput>,
         turn: &mut TurnState,
     ) {
-        turn.fut = Some(self.session.kernel.user_prompt_turn(prompt_text, loaded_images));
+        turn.fut = Some(
+            self.session
+                .kernel
+                .user_prompt_turn(prompt_text, loaded_images, input),
+        );
         turn.aborted = false;
         turn.prefix = "";
         self.session.busy = true;

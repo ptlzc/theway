@@ -9,7 +9,8 @@
 use std::sync::Arc;
 
 use theway_core::{
-    AgentHarness, AgentHarnessOptions, AgentRunError, MemorySessionStorage, Session, SessionStorage,
+    AgentHarness, AgentHarnessOptions, AgentMessage, AgentRunError, MemorySessionStorage, Session,
+    SessionStorage,
 };
 use theway_llm_provider::{ImageContent, InputModality, ModelCost};
 use tokio::time::Duration;
@@ -67,7 +68,7 @@ fn kernel_with_input(input: Vec<InputModality>) -> (ReplKernel, Arc<AgentHarness
 async fn prompt_turn_polls_to_completion() {
     let (kernel, _harness) = kernel_with_input(Vec::new());
 
-    let fut = kernel.prompt_turn("hello".into());
+    let fut = kernel.prompt_turn("hello".into(), None);
     let result = tokio::time::timeout(Duration::from_secs(10), fut)
         .await
         .expect("faux prompt should finish quickly")
@@ -80,7 +81,7 @@ async fn prompt_turn_polls_to_completion() {
 async fn user_prompt_turn_text_only_polls_to_completion() {
     let (kernel, _harness) = kernel_with_input(Vec::new());
 
-    let fut = kernel.user_prompt_turn("hello text-only".into(), Vec::new());
+    let fut = kernel.user_prompt_turn("hello text-only".into(), Vec::new(), None);
     let result = tokio::time::timeout(Duration::from_secs(10), fut)
         .await
         .expect("faux prompt should finish quickly")
@@ -99,6 +100,7 @@ async fn user_prompt_turn_with_images_polls_to_completion() {
             data: "aa".into(),
             mime_type: "image/png".into(),
         }],
+        None,
     );
     let result = tokio::time::timeout(Duration::from_secs(10), fut)
         .await
@@ -106,6 +108,46 @@ async fn user_prompt_turn_with_images_polls_to_completion() {
         .expect("faux prompt should succeed");
 
     assert_eq!(result, None);
+}
+
+#[tokio::test]
+async fn user_prompt_turn_with_a_record_writes_the_record_then_the_message() {
+    let (kernel, harness) = kernel_with_input(Vec::new());
+    let record = UserInput::user("hello recorded");
+
+    let fut = kernel.user_prompt_turn("hello recorded".into(), Vec::new(), Some(record.clone()));
+    let result = tokio::time::timeout(Duration::from_secs(10), fut)
+        .await
+        .expect("faux prompt should finish quickly")
+        .expect("faux prompt should succeed");
+    assert_eq!(result, None);
+
+    let state = harness.agent().state();
+    let messages = &state.messages;
+    let record_index = messages
+        .iter()
+        .position(|message| {
+            matches!(message, AgentMessage::Custom(custom) if custom.role == UserInput::CUSTOM_ROLE)
+        })
+        .expect("the record reached the transcript");
+    let user_index = messages
+        .iter()
+        .position(|message| {
+            matches!(
+                message,
+                AgentMessage::Llm(theway_llm_provider::Message::User(_))
+            )
+        })
+        .expect("the user message reached the transcript");
+    assert!(
+        record_index < user_index,
+        "record {record_index} < message {user_index}"
+    );
+    let AgentMessage::Custom(custom) = &messages[record_index] else {
+        panic!("index {record_index} is not the record");
+    };
+    let stored: UserInput = serde_json::from_value(custom.payload.clone()).expect("record payload");
+    assert_eq!(stored, record);
 }
 
 #[tokio::test]
