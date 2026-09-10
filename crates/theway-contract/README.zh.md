@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`theway-contract` 是工作区的叶子契约 crate，存放需要跨越运行时、持久化与协议实现共享、但不能反向依赖这些实现的数据。它定义可序列化记录、存储 trait、自动化 sidecar 模型、会话标识以及 `~/.theway` 路径布局，不包含 agent 引擎、数据库后端或网络传输。
+`theway-contract` 是工作区的叶子契约 crate，存放需要跨越运行时、持久化与协议实现共享、但不能反向依赖这些实现的数据与宿主环境策略。它定义可序列化记录、存储 trait、自动化 sidecar 模型、会话标识、`~/.theway` 路径布局，以及执行本地命令的宿主 shell，不包含 agent 引擎、数据库后端或网络传输。
 
 ## 公开模块
 
@@ -16,6 +16,7 @@
 | [`extension`](src/extension/mod.rs) | 定义唯一、无版本的 runtime extension ABI：manifest、生命周期与 action envelope、持久化条目、信任记录、诊断及客户端中立 contribution。 |
 | [`user_input`](src/user_input.rs) | 定义一轮用户输入的 canonical 记录：提交原文、有序 part、来源，以及附件 digest 形态。 |
 | [`attachments`](src/attachments.rs) | 定义内容寻址的附件字节存储契约及其失败情形。 |
+| [`shell`](src/shell.rs) | 解析执行本地命令的宿主 shell：`THEWAY_SHELL` 覆盖、平台默认与平台回落。 |
 
 `theway-core` 负责在带类型的运行时会话条目和这些原始记录之间转换。`theway-storage` 实现持久化 trait；`theway-transport` 复用或重新导出适合位于该叶子层的客户端可见数据。
 
@@ -32,6 +33,12 @@
 [`attachments`](src/attachments.rs) 定义 `AttachmentStore` trait（`put` / `get` / `contains`）与 `AttachmentError`（`InvalidDigest`、`NotFound`、`DigestMismatch`、`Io`）。`put` 返回所写入字节的 digest，`get` 在返回字节前重新校验该 digest。[`config::attachments_dir`](src/config.rs) 从共享基础目录派生附件库根目录 `<base>/attachments/v1`。
 
 该记录是对会话日志的追加：它紧邻它所描述的用户消息之前写入，没有该记录的旧会话仅依据消息渲染。这些记录的 `camelCase` 字段名与 snake_case 枚举标签属于持久化格式行为。
+
+## 宿主 shell
+
+[`shell`](src/shell.rs) 持有本机命令的宿主 shell 策略：`shell::shell()` 返回 shell 程序，以及承载命令行的参数。daemon 的 `bash`、`exec`、hook 与 native 执行路径，以及本机 TUI 控制器的 `LocalToolOps`，都从这里解析 shell。
+
+解析从 `THEWAY_SHELL` 开始：它指定 shell 程序并覆盖一切平台默认；设置时，可选的 `THEWAY_SHELL_ARGS` 提供按空白切分的前缀参数，置于命令之前。未设置 `THEWAY_SHELL` 时，Windows 取 `PATH` 上第一个 `pwsh`，其次 `powershell`，再次 `cmd`，PowerShell 以 `-NoLogo -NoProfile -Command` 运行，`cmd` 以 `/C` 运行；三者都不存在时回落到 `%COMSPEC%`，再回落到 `cmd.exe`。Unix 上的宿主 shell 是 `sh -c`。
 
 ## 文档
 

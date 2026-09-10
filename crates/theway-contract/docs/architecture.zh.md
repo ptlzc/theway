@@ -50,6 +50,16 @@ JSON Schema derive 与 [`generate_extension_artifacts.rs`](../examples/generate_
 
 [`config.rs`](../src/config.rs) 依据与其他布局相同的基础目录规则派生 `attachments_dir()` = `<base>/attachments/v1`。trait 实现与对象布局属于 `theway-storage`；解析 mention 并在记录产生之前写入字节的准入属于 `theway-daemon`。
 
+## 宿主 shell 解析
+
+[`shell.rs`](../src/shell.rs) 选择执行本地命令行的宿主 shell：用哪个程序，以及哪些前缀参数承载命令字符串。`shell()` 返回 `&'static ShellSpec`，通过 `OnceLock` 在进程内只解析一次；`ShellSpec { program, args }` 提供 `command_args(&command)`（完整参数向量）与 `display()`（以空格连接的 program 与前缀参数）。daemon 的 `bash`、`exec`、hook 命令与 native 执行路径（`tools/bash.rs`、`tools/exec.rs`、`tools/exec_shell.rs`、`env/native.rs`）以及本机 TUI 控制器的 `LocalToolOps` 都在此处解析 shell。
+
+解析顺序中，非空 `THEWAY_SHELL` 优先于所有平台默认值。其前缀参数取自非空 `THEWAY_SHELL_ARGS`（按 ASCII 空白切分），未设置时按 program 的 file stem 大小写不敏感推导：`pwsh` 与 `powershell` 取 `-NoLogo -NoProfile -Command`，`cmd` 取 `/C`，其它程序取 `-c`。无覆盖时，Windows 宿主取 `PATH` 上第一个 `pwsh`，其次 `powershell`，再次 `cmd`，PowerShell 使用 `-NoLogo -NoProfile -Command`、`cmd` 使用 `/C`；三者都不在时回落非空 `%COMSPEC%`，最后回落 `cmd.exe`，两者都使用 `/C`。无覆盖时，Unix 宿主执行 `sh -c`。
+
+解析不可失败：环境变量未设置、为空或不可用时退化为平台默认值，而不是返回错误。候选可执行文件必须是存在的普通文件，空 `PATH` 条目会被跳过，Windows 探测先尝试裸名，再按变量列出的顺序尝试 `PATHEXT` 扩展名，并以 `.COM;.EXE;.BAT;.CMD` 作为 `PATHEXT` 未设置或为空时的默认值。
+
+该模块属于本 crate：daemon 的各执行路径与 `theway-tui` 在同一宿主上运行命令，而 `theway-tui` 不允许依赖 `theway-core`；`theway-contract` 是二者共同依赖的唯一 crate，而解析 shell 不为其引入任何工作区依赖。
+
 ## 不变量
 
 - 附件字节只以 `sha256:` digest 引用；记录不内嵌文件或图片内容。

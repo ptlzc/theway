@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`theway-contract` is the workspace leaf for data that must cross runtime, persistence, and protocol implementations without importing any of them. It defines serializable records, storage traits, automation sidecar models, session identifiers, and the `~/.theway` path layout; it contains no agent engine, database backend, or network transport.
+`theway-contract` is the workspace leaf for data and host-environment policy that must cross runtime, persistence, and protocol implementations without importing any of them. It defines serializable records, storage traits, automation sidecar models, session identifiers, the `~/.theway` path layout, and the host shell that executes local commands; it contains no agent engine, database backend, or network transport.
 
 ## Public modules
 
@@ -16,6 +16,7 @@ English | [中文](README.zh.md)
 | [`extension`](src/extension/mod.rs) | Define the single unversioned runtime-extension ABI: manifests, lifecycle/action envelopes, durable entries, trust records, diagnostics, and client-neutral contributions. |
 | [`user_input`](src/user_input.rs) | Define the canonical record of one round of user input: submitted text, ordered parts, origin, and the attachment digest form. |
 | [`attachments`](src/attachments.rs) | Define the content-addressed attachment byte-store contract and its failure cases. |
+| [`shell`](src/shell.rs) | Resolve the host shell that executes local commands: `THEWAY_SHELL` override, platform default, and platform fallback. |
 
 `theway-core` converts typed runtime session entries to these raw records. `theway-storage` implements the persistence traits, while `theway-transport` reuses or re-exports the client-visible data that belongs at this leaf.
 
@@ -32,6 +33,12 @@ The unversioned ABI keeps lifecycle envelopes, hook classes and actions, branch-
 [`attachments`](src/attachments.rs) defines the `AttachmentStore` trait (`put` / `get` / `contains`) and `AttachmentError` (`InvalidDigest`, `NotFound`, `DigestMismatch`, `Io`). `put` returns the digest of the bytes it stored, and `get` re-verifies the bytes against that digest before returning them. [`config::attachments_dir`](src/config.rs) derives the library root from the shared base dir as `<base>/attachments/v1`.
 
 The record is an append-only addition to the session log: it is appended immediately before the user message it describes, and an older session without one is read through its message alone. The `camelCase` field names and snake_case enum tags of these records are persisted-format behaviour.
+
+## Host shell
+
+[`shell`](src/shell.rs) owns the host-shell policy for commands that run on the local machine: `shell::shell()` returns the shell program and the arguments that carry a command line. The daemon `bash`, `exec`, hook, and native execution paths and the local TUI controller's `LocalToolOps` all resolve their shell here.
+
+Resolution starts with `THEWAY_SHELL`, which names the shell program and overrides every platform default; when it is set, the optional `THEWAY_SHELL_ARGS` supplies whitespace-split prefix arguments placed before the command. Without `THEWAY_SHELL`, Windows takes the first `pwsh` on `PATH`, then `powershell`, then `cmd`, running PowerShell with `-NoLogo -NoProfile -Command` and `cmd` with `/C`; when none of the three is present it falls back to `%COMSPEC%` and then to `cmd.exe`. On Unix the host shell is `sh -c`.
 
 ## Documentation
 

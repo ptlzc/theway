@@ -50,6 +50,16 @@ The record reaches a session as an `AgentMessage::Custom` entry whose role is `U
 
 [`config.rs`](../src/config.rs) derives `attachments_dir()` as `<base>/attachments/v1` under the same base-dir rule as the other layouts. The trait implementation and the object layout belong to `theway-storage`; admission, which resolves mentions and writes bytes before the record exists, belongs to `theway-daemon`.
 
+## Host shell resolution
+
+[`shell.rs`](../src/shell.rs) selects the host shell that runs a local command line: which program, and which prefix arguments carry the command string. `shell()` returns `&'static ShellSpec`, resolved once per process through a `OnceLock`; `ShellSpec { program, args }` exposes `command_args(&command)` for the full argument vector and `display()` for the space-joined program and prefix. The daemon `bash`, `exec`, hook-command, and native execution paths (`tools/bash.rs`, `tools/exec.rs`, `tools/exec_shell.rs`, `env/native.rs`) and the local TUI controller's `LocalToolOps` all resolve their shell here.
+
+Resolution order puts a non-empty `THEWAY_SHELL` ahead of every platform default. Its prefix arguments come from a non-empty `THEWAY_SHELL_ARGS`, split on ASCII whitespace, and otherwise from the program's file stem matched case-insensitively: `pwsh` and `powershell` take `-NoLogo -NoProfile -Command`, `cmd` takes `/C`, and any other program takes `-c`. Without an override, a Windows host takes the first `pwsh` on `PATH`, then `powershell`, then `cmd`, running PowerShell with `-NoLogo -NoProfile -Command` and `cmd` with `/C`; when none of the three is present it falls back to a non-empty `%COMSPEC%` and finally to `cmd.exe`, both with `/C`. Without an override, a Unix host runs `sh -c`.
+
+Resolution is infallible: an unset, empty, or unusable environment yields the platform fallback rather than an error. A candidate executable must be an existing regular file, empty `PATH` entries are skipped, and a Windows probe tries the bare name before the `PATHEXT` extensions in the order the variable lists them, using `.COM;.EXE;.BAT;.CMD` when `PATHEXT` is unset or empty.
+
+The module belongs to this crate because the daemon execution paths and `theway-tui` run commands on the same host while `theway-tui` may not depend on `theway-core`; `theway-contract` is the only crate both depend on, and resolving a shell adds no workspace dependency to it.
+
 ## Invariants
 
 - Attachment bytes are referenced by `sha256:` digest only; the record never embeds file or image content.

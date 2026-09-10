@@ -6,6 +6,7 @@ This file contains the complete crate-local modification rules for `theway-contr
 
 - Add a type here only when multiple runtime layers need the same engine-independent representation or persistence interface.
 - Keep runtime policy, database code, protocol conversion, and UI behavior out of this crate.
+- Host shell resolution ([`shell`](src/shell.rs)) is the crate's existing host-environment exception to the rule above: the daemon execution paths and the local TUI controller share this one policy, so neither selects a shell on its own.
 - Do not add workspace dependencies; `theway-contract` remains the dependency leaf for runtime data.
 
 ## Compatibility rules

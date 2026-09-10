@@ -1,9 +1,9 @@
 //! theway-contract — pure leaf contract crate for the theway agent runtime.
 //!
-//! Holds cross-crate persistence and data contracts only: no engine, no protocol,
-//! no runtime. Depended on by `theway-storage`, `theway-transport` and
-//! `theway-daemon`; it never depends on any workspace crate itself (issue #64:
-//! breaks the former storage→transport layering leak).
+//! Holds cross-crate persistence and data contracts plus the shared host-environment policy
+//! in [`shell`]: no engine, no protocol, no runtime. Depended on by `theway-storage`,
+//! `theway-transport` and `theway-daemon`; it never depends on any workspace crate itself
+//! (issue #64: breaks the former storage→transport layering leak).
 //!
 //! - [`triggers`] — session-scoped automation data models (cron jobs, dynamic
 //!   trigger rules) serialized into `.theway-session` sidecars. The public
@@ -25,6 +25,10 @@
 //! - [`user_input`] — the canonical record of one round of user input (original
 //!   text, ordered file/image/injected parts, origin) plus the `sha256:`
 //!   digest helpers that name attachments.
+//! - [`shell`] — host shell resolution for commands that run on the local
+//!   machine: which program executes a command line and which prefix arguments
+//!   carry it, shared by the daemon execution paths and the local TUI
+//!   controller.
 
 // Kernel code propagates errors instead of unwrapping; `clippy.toml` exempts `#[cfg(test)]`
 // modules and `#[test]` fns (`allow-unwrap-in-tests` / `allow-panic-in-tests`).
@@ -42,6 +46,7 @@ pub mod dag;
 pub mod extension;
 pub mod session;
 pub mod session_id;
+pub mod shell;
 pub mod subagent_settings;
 pub mod triggers;
 pub mod user_input;
