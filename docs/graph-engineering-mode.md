@@ -129,3 +129,7 @@ is treated as empty and replaced by the next save.
   pipe write end can hang the drain. The shell spawn path kills the tree via
   `taskkill /T` while the parent is still alive (the same class of issue as the
   pre-existing `runtime::env::native::exec_timeout` test failure on Windows).
+  Commands execute through the host shell resolved by
+  [`crates/theway-contract/src/shell.rs`](../crates/theway-contract/src/shell.rs):
+  `sh -c` on Unix; on Windows the first available `pwsh` → `powershell` → `cmd`,
+  overridable with `THEWAY_SHELL`.
