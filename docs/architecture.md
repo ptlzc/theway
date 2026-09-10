@@ -501,6 +501,10 @@ hidden by default; opt in with `[ui.panel] show_hooks = true` /
 
 Storage's dependency rule is the layering guarantee here: it depends on `theway-contract` and **never** on `theway-core` or `theway-transport`. `scripts/check-workspace-layering.py` enforces this boundary and that `theway-daemon` remains core's only direct workspace consumer.
 
+## Structured user input
+
+One round of user input crosses the layers as one canonical record: the daemon admits the submitted text and images through `PromptAdmission` — resolving `@path` mentions once and storing every byte in the content-addressed attachment library — and only then writes the `user_input` record immediately before the user message ([`crates/theway-contract`](../crates/theway-contract/README.md) owns the record shape, the `sha256:` digest form, and the `<base>/attachments/v1` path rule; [`crates/theway-storage`](../crates/theway-storage/README.md) owns the object layout, dedupe, and digest-verified reads; [`crates/theway-core`](../crates/theway-core/README.md) owns `prompt_with_input`). Display is a projection of that record — [`crates/theway-transport`](../crates/theway-transport/README.md) owns the user block's attachments/source, the `Context` row, and `replay_entries` — so the live feed, resume replay, and message paging render the same user block while the model request keeps its materialized `Message::User` unchanged. [`crates/theway-daemon`](../crates/theway-daemon/README.md) owns admission, the attachment service, and the projection call sites.
+
 ## Session storage layout
 
 Base dir `${THEWAY_DIR:-$HOME/.theway}`; sessions are scoped per project by
