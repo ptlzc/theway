@@ -14,12 +14,24 @@
 | [`dag`](src/dag.rs) | 定义持久化 DAG 运行与节点快照及其状态文件路径。 |
 | [`triggers`](src/triggers.rs) | 定义会话级动态 trigger 与 cron sidecar 记录。 |
 | [`extension`](src/extension/mod.rs) | 定义唯一、无版本的 runtime extension ABI：manifest、生命周期与 action envelope、持久化条目、信任记录、诊断及客户端中立 contribution。 |
+| [`user_input`](src/user_input.rs) | 定义一轮用户输入的 canonical 记录：提交原文、有序 part、来源，以及附件 digest 形态。 |
+| [`attachments`](src/attachments.rs) | 定义内容寻址的附件字节存储契约及其失败情形。 |
 
 `theway-core` 负责在带类型的运行时会话条目和这些原始记录之间转换。`theway-storage` 实现持久化 trait；`theway-transport` 复用或重新导出适合位于该叶子层的客户端可见数据。
 
 工作区插件开发 SDK 中签入的 TypeScript 声明和 JSON Schema 由 Rust extension 契约生成。使用 `cargo run -p theway-contract --example generate_extension_artifacts -- sdks/plugin/abi` 重新生成；extension 契约测试会在临时目录中重新生成并拒绝漂移。
 
 无版本 ABI 使生命周期 envelope、hook class 与 action、分支局部持久条目、诊断、信任记录、命令和客户端 contribution 保持引擎中立。这些记录没有敏感值、可执行 runtime 对象或 ABI 版本选择字段。
+
+## 结构化用户输入
+
+[`user_input`](src/user_input.rs) 是一轮输入的 canonical 记录：`UserInput { text, parts, source, source_ref }`。`text` 是用户提交的原文，`@path` token 保持用户输入的形态；`parts` 是有序的 `Vec<InputPart>`，记录附件与预注入内容；`source` 是 `InputSource`（`user` / `trigger` / `subagent` / `host`）；`source_ref` 标识非 `user` 来源。`UserInput::CUSTOM_ROLE`（`user_input`）是会话日志与显示投影共用的唯一 role 字符串。
+
+`InputPart` 为 `File { path, name, digest, bytes, media_type, truncated }`、`Image { name, digest, bytes, media_type }` 或 `Injected { source, name, text }`；`has_attachments` 报告是否存在 `File` 或 `Image` part。字节不进入记录：`digest_bytes` 生成全仓统一的附件标识 `sha256:<64 lowercase hex>`（`DIGEST_PREFIX`，由 `digest_is_valid` 校验），记录只携带该 digest。
+
+[`attachments`](src/attachments.rs) 定义 `AttachmentStore` trait（`put` / `get` / `contains`）与 `AttachmentError`（`InvalidDigest`、`NotFound`、`DigestMismatch`、`Io`）。`put` 返回所写入字节的 digest，`get` 在返回字节前重新校验该 digest。[`config::attachments_dir`](src/config.rs) 从共享基础目录派生附件库根目录 `<base>/attachments/v1`。
+
+该记录是对会话日志的追加：它紧邻它所描述的用户消息之前写入，没有该记录的旧会话仅依据消息渲染。这些记录的 `camelCase` 字段名与 snake_case 枚举标签属于持久化格式行为。
 
 ## 文档
 

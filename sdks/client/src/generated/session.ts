@@ -256,10 +256,46 @@ export interface FeedBlock {
     | { $case: "plain"; plain: PlainBlock }
     | { $case: "toolCall"; toolCall: ToolCallBlock }
     | { $case: "error"; error: ErrorBlock }
+    | { $case: "context"; context: ContextBlock }
     | undefined;
 }
 
 export interface UserBlock {
+  text: string;
+  /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
+  timestamp?:
+    | string
+    | undefined;
+  /** Attachment chips, in the order the user added them. */
+  attachments: FeedAttachment[];
+  /** Origin of the round; absent on transcripts written before records. */
+  source?: FeedSource | undefined;
+}
+
+/** One attachment chip under a user block. `detail` is display-only. */
+export interface FeedAttachment {
+  /** "file" | "image" */
+  kind: string;
+  name: string;
+  /** "src/foo.rs" | "image/png · 240 KiB" */
+  detail?: string | undefined;
+}
+
+/** Origin of one user round. */
+export interface FeedSource {
+  /** "user" | "trigger" | "subagent" | "host" */
+  kind: string;
+  /** Producer reference: trigger id / subagent job id. */
+  label?: string | undefined;
+}
+
+/**
+ * Content injected before the model saw the turn (skill preamble, trigger patch,
+ * extension note), rendered as its own row.
+ */
+export interface ContextBlock {
+  /** "<source>:<name>" or "<source>" */
+  label: string;
   text: string;
   /** RFC3339 / ISO-8601 with offset (UTC), null when absent. */
   timestamp?: string | undefined;
@@ -2834,6 +2870,9 @@ export const FeedBlock: MessageFns<FeedBlock> = {
       case "error":
         ErrorBlock.encode(message.kind.error, writer.uint32(66).fork()).join();
         break;
+      case "context":
+        ContextBlock.encode(message.kind.context, writer.uint32(74).fork()).join();
+        break;
     }
     return writer;
   },
@@ -2901,6 +2940,14 @@ export const FeedBlock: MessageFns<FeedBlock> = {
           message.kind = { $case: "error", error: ErrorBlock.decode(reader, reader.uint32()) };
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.kind = { $case: "context", context: ContextBlock.decode(reader, reader.uint32()) };
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2930,6 +2977,8 @@ export const FeedBlock: MessageFns<FeedBlock> = {
         ? { $case: "toolCall", toolCall: ToolCallBlock.fromJSON(object.tool_call) }
         : isSet(object.error)
         ? { $case: "error", error: ErrorBlock.fromJSON(object.error) }
+        : isSet(object.context)
+        ? { $case: "context", context: ContextBlock.fromJSON(object.context) }
         : undefined,
     };
   },
@@ -2950,6 +2999,8 @@ export const FeedBlock: MessageFns<FeedBlock> = {
       obj.toolCall = ToolCallBlock.toJSON(message.kind.toolCall);
     } else if (message.kind?.$case === "error") {
       obj.error = ErrorBlock.toJSON(message.kind.error);
+    } else if (message.kind?.$case === "context") {
+      obj.context = ContextBlock.toJSON(message.kind.context);
     }
     return obj;
   },
@@ -3002,13 +3053,19 @@ export const FeedBlock: MessageFns<FeedBlock> = {
         }
         break;
       }
+      case "context": {
+        if (object.kind?.context !== undefined && object.kind?.context !== null) {
+          message.kind = { $case: "context", context: ContextBlock.fromPartial(object.kind.context) };
+        }
+        break;
+      }
     }
     return message;
   },
 };
 
 function createBaseUserBlock(): UserBlock {
-  return { text: "", timestamp: undefined };
+  return { text: "", timestamp: undefined, attachments: [], source: undefined };
 }
 
 export const UserBlock: MessageFns<UserBlock> = {
@@ -3018,6 +3075,12 @@ export const UserBlock: MessageFns<UserBlock> = {
     }
     if (message.timestamp !== undefined) {
       writer.uint32(18).string(message.timestamp);
+    }
+    for (const v of message.attachments) {
+      FeedAttachment.encode(v!, writer.uint32(26).fork()).join();
+    }
+    if (message.source !== undefined) {
+      FeedSource.encode(message.source, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -3045,6 +3108,22 @@ export const UserBlock: MessageFns<UserBlock> = {
           message.timestamp = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.attachments.push(FeedAttachment.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.source = FeedSource.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3058,6 +3137,10 @@ export const UserBlock: MessageFns<UserBlock> = {
     return {
       text: isSet(object.text) ? globalThis.String(object.text) : "",
       timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+      attachments: globalThis.Array.isArray(object?.attachments)
+        ? object.attachments.map((e: any) => FeedAttachment.fromJSON(e))
+        : [],
+      source: isSet(object.source) ? FeedSource.fromJSON(object.source) : undefined,
     };
   },
 
@@ -3069,6 +3152,12 @@ export const UserBlock: MessageFns<UserBlock> = {
     if (message.timestamp !== undefined) {
       obj.timestamp = message.timestamp;
     }
+    if (message.attachments?.length) {
+      obj.attachments = message.attachments.map((e) => FeedAttachment.toJSON(e));
+    }
+    if (message.source !== undefined) {
+      obj.source = FeedSource.toJSON(message.source);
+    }
     return obj;
   },
 
@@ -3077,6 +3166,270 @@ export const UserBlock: MessageFns<UserBlock> = {
   },
   fromPartial<I extends Exact<DeepPartial<UserBlock>, I>>(object: I): UserBlock {
     const message = createBaseUserBlock();
+    message.text = object.text ?? "";
+    message.timestamp = object.timestamp ?? undefined;
+    message.attachments = object.attachments?.map((e) => FeedAttachment.fromPartial(e)) || [];
+    message.source = (object.source !== undefined && object.source !== null)
+      ? FeedSource.fromPartial(object.source)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFeedAttachment(): FeedAttachment {
+  return { kind: "", name: "", detail: undefined };
+}
+
+export const FeedAttachment: MessageFns<FeedAttachment> = {
+  encode(message: FeedAttachment, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.kind !== "") {
+      writer.uint32(10).string(message.kind);
+    }
+    if (message.name !== "") {
+      writer.uint32(18).string(message.name);
+    }
+    if (message.detail !== undefined) {
+      writer.uint32(26).string(message.detail);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FeedAttachment {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFeedAttachment();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.kind = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.detail = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FeedAttachment {
+    return {
+      kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      detail: isSet(object.detail) ? globalThis.String(object.detail) : undefined,
+    };
+  },
+
+  toJSON(message: FeedAttachment): unknown {
+    const obj: any = {};
+    if (message.kind !== "") {
+      obj.kind = message.kind;
+    }
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.detail !== undefined) {
+      obj.detail = message.detail;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FeedAttachment>, I>>(base?: I): FeedAttachment {
+    return FeedAttachment.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FeedAttachment>, I>>(object: I): FeedAttachment {
+    const message = createBaseFeedAttachment();
+    message.kind = object.kind ?? "";
+    message.name = object.name ?? "";
+    message.detail = object.detail ?? undefined;
+    return message;
+  },
+};
+
+function createBaseFeedSource(): FeedSource {
+  return { kind: "", label: undefined };
+}
+
+export const FeedSource: MessageFns<FeedSource> = {
+  encode(message: FeedSource, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.kind !== "") {
+      writer.uint32(10).string(message.kind);
+    }
+    if (message.label !== undefined) {
+      writer.uint32(18).string(message.label);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FeedSource {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFeedSource();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.kind = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.label = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FeedSource {
+    return {
+      kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
+      label: isSet(object.label) ? globalThis.String(object.label) : undefined,
+    };
+  },
+
+  toJSON(message: FeedSource): unknown {
+    const obj: any = {};
+    if (message.kind !== "") {
+      obj.kind = message.kind;
+    }
+    if (message.label !== undefined) {
+      obj.label = message.label;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FeedSource>, I>>(base?: I): FeedSource {
+    return FeedSource.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FeedSource>, I>>(object: I): FeedSource {
+    const message = createBaseFeedSource();
+    message.kind = object.kind ?? "";
+    message.label = object.label ?? undefined;
+    return message;
+  },
+};
+
+function createBaseContextBlock(): ContextBlock {
+  return { label: "", text: "", timestamp: undefined };
+}
+
+export const ContextBlock: MessageFns<ContextBlock> = {
+  encode(message: ContextBlock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.label !== "") {
+      writer.uint32(10).string(message.label);
+    }
+    if (message.text !== "") {
+      writer.uint32(18).string(message.text);
+    }
+    if (message.timestamp !== undefined) {
+      writer.uint32(26).string(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ContextBlock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseContextBlock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.label = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.text = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.timestamp = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ContextBlock {
+    return {
+      label: isSet(object.label) ? globalThis.String(object.label) : "",
+      text: isSet(object.text) ? globalThis.String(object.text) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : undefined,
+    };
+  },
+
+  toJSON(message: ContextBlock): unknown {
+    const obj: any = {};
+    if (message.label !== "") {
+      obj.label = message.label;
+    }
+    if (message.text !== "") {
+      obj.text = message.text;
+    }
+    if (message.timestamp !== undefined) {
+      obj.timestamp = message.timestamp;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ContextBlock>, I>>(base?: I): ContextBlock {
+    return ContextBlock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ContextBlock>, I>>(object: I): ContextBlock {
+    const message = createBaseContextBlock();
+    message.label = object.label ?? "";
     message.text = object.text ?? "";
     message.timestamp = object.timestamp ?? undefined;
     return message;

@@ -34,6 +34,11 @@ pub fn memory_dir() -> PathBuf {
     base_dir().join("memory")
 }
 
+/// Content-addressed attachment store root: `<base>/attachments/v1`.
+pub fn attachments_dir() -> PathBuf {
+    base_dir().join("attachments").join("v1")
+}
+
 /// Runtime-extension packages, trust policy, and redacted audit records live
 /// under one process-global directory.
 pub fn extensions_dir() -> PathBuf {
@@ -75,13 +80,17 @@ mod tests {
 
     #[test]
     fn path_layout_follows_theway_dir() {
-        // Sole test in this crate mutating the process environment; no other
-        // contract test reads `THEWAY_DIR`/`HOME`, so there is no cross-test race.
+        // Only process-environment mutation in this test binary; no other test
+        // here reads `THEWAY_DIR`/`HOME`, so there is no cross-test race.
         unsafe { std::env::set_var("THEWAY_DIR", "/tmp/theway-contract-base") };
         assert_eq!(base_dir(), PathBuf::from("/tmp/theway-contract-base"));
         assert_eq!(
             memory_dir(),
             PathBuf::from("/tmp/theway-contract-base/memory")
+        );
+        assert_eq!(
+            attachments_dir(),
+            PathBuf::from("/tmp/theway-contract-base/attachments/v1")
         );
         assert_eq!(
             extension_trust_path(),

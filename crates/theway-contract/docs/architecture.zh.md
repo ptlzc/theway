@@ -42,8 +42,17 @@ JSON Schema derive 与 [`generate_extension_artifacts.rs`](../examples/generate_
 
 [`triggers.rs`](../src/triggers.rs) 包含动态 trigger 规则和 cron job 的 sidecar 表示。轮询、调度、提升和投递位于 `theway-daemon`。
 
+## 用户输入与附件记录
+
+[`user_input.rs`](../src/user_input.rs) 负责一轮输入的 canonical 形态，以及各层命名附件字节所用的 `sha256:<64 lowercase hex>` 标识。记录只携带 digest，[`attachments.rs`](../src/attachments.rs) 声明这些 digest 所解析到的字节存储契约，因此具体存储布局与准入策略都不进入本 crate。
+
+记录以 role 为 `UserInput::CUSTOM_ROLE` 的 `AgentMessage::Custom` 条目进入会话，位置紧邻它所描述的用户消息之前。显示投影与模型请求都在下游派生；没有该条目的会话仅依据消息渲染，因此该记录是追加式的，绝不改写已存历史。
+
+[`config.rs`](../src/config.rs) 依据与其他布局相同的基础目录规则派生 `attachments_dir()` = `<base>/attachments/v1`。trait 实现与对象布局属于 `theway-storage`；解析 mention 并在记录产生之前写入字节的准入属于 `theway-daemon`。
+
 ## 不变量
 
+- 附件字节只以 `sha256:` digest 引用；记录不内嵌文件或图片内容。
 - 公开记录与具体存储库、传输库保持独立。
 - Serde 字段名、默认值和枚举编码属于持久化数据规则，变更必须有往返与兼容性测试。
 - 路径派生和会话标识校验由共享函数提供，不在消费 crate 中复制实现。

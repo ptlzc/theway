@@ -20,6 +20,11 @@
 //!   overrides and their `.pi` file path.
 //! - [`extension`] — engine-neutral runtime-extension manifests, permissions,
 //!   trust records, and ABI primitives.
+//! - [`attachments`] — the content-addressed attachment byte-store contract
+//!   (`put`/`get`/`contains`) shared by storage and the daemon.
+//! - [`user_input`] — the canonical record of one round of user input (original
+//!   text, ordered file/image/injected parts, origin) plus the `sha256:`
+//!   digest helpers that name attachments.
 
 // Kernel code propagates errors instead of unwrapping; `clippy.toml` exempts `#[cfg(test)]`
 // modules and `#[test]` fns (`allow-unwrap-in-tests` / `allow-panic-in-tests`).
@@ -31,6 +36,7 @@
 // library target still carries both denies above, so every non-test line stays gated.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::panic))]
 
+pub mod attachments;
 pub mod config;
 pub mod dag;
 pub mod extension;
@@ -38,3 +44,4 @@ pub mod session;
 pub mod session_id;
 pub mod subagent_settings;
 pub mod triggers;
+pub mod user_input;

@@ -161,12 +161,36 @@ message FeedBlock {
     PlainBlock plain = 6;
     ToolCallBlock tool_call = 7;
     ErrorBlock error = 8;
+    ContextBlock context = 9;
   }
 }
 
 message UserBlock {
   string text = 1;
   optional string timestamp = 2; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
+  repeated FeedAttachment attachments = 3; // Attachment chips, in the order the user added them.
+  optional FeedSource source = 4; // Origin of the round; absent on transcripts written before records.
+}
+
+// One attachment chip under a user block. `detail` is display-only.
+message FeedAttachment {
+  string kind = 1; // "file" | "image"
+  string name = 2;
+  optional string detail = 3; // "src/foo.rs" | "image/png · 240 KiB"
+}
+
+// Origin of one user round.
+message FeedSource {
+  string kind = 1; // "user" | "trigger" | "subagent" | "host"
+  optional string label = 2; // Producer reference: trigger id / subagent job id.
+}
+
+// Content injected before the model saw the turn (skill preamble, trigger patch,
+// extension note), rendered as its own row.
+message ContextBlock {
+  string label = 1; // "<source>:<name>" or "<source>"
+  string text = 2;
+  optional string timestamp = 3; // RFC3339 / ISO-8601 with offset (UTC), null when absent.
 }
 
 message AssistantBlock {

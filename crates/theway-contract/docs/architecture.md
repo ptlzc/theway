@@ -42,8 +42,17 @@ JSON Schema derives and the generator in [`generate_extension_artifacts.rs`](../
 
 [`triggers.rs`](../src/triggers.rs) contains the sidecar representation for dynamic trigger rules and cron jobs. Polling, scheduling, promotion, and delivery live in `theway-daemon`.
 
+## User input and attachment records
+
+[`user_input.rs`](../src/user_input.rs) owns the canonical shape of one round of input and the `sha256:<64 lowercase hex>` identifier that every layer uses to name attachment bytes. The record carries digests only, and [`attachments.rs`](../src/attachments.rs) declares the byte-store contract those digests resolve through, so neither the storage layout nor the admission policy enters this crate.
+
+The record reaches a session as an `AgentMessage::Custom` entry whose role is `UserInput::CUSTOM_ROLE`, immediately before the user message it describes. Display projection and the model request are derived downstream, and a session without that entry is read through its message alone; the record is append-only and never rewrites stored history.
+
+[`config.rs`](../src/config.rs) derives `attachments_dir()` as `<base>/attachments/v1` under the same base-dir rule as the other layouts. The trait implementation and the object layout belong to `theway-storage`; admission, which resolves mentions and writes bytes before the record exists, belongs to `theway-daemon`.
+
 ## Invariants
 
+- Attachment bytes are referenced by `sha256:` digest only; the record never embeds file or image content.
 - Public records remain independent of concrete storage and transport libraries.
 - Serde field names, defaults, and enum encodings are persisted data rules; changes require round-trip and compatibility tests.
 - Path derivation and session-id validation remain shared functions rather than copied implementations in consuming crates.
