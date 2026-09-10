@@ -29,15 +29,24 @@
 //! restores the connection (offline banner while down).
 //!
 //! `App`'s methods are split by domain across submodules (`app_turns`,
-//! `app_input`, `app_import`, `app_goal`), with the free rendering helpers in
+//! `app_input`, `app_goal`), with the free rendering helpers in
 //! `render_utils`; this file keeps the types, construction, the event-loop
-//! skeleton, and rendering.
+//! skeleton, and rendering. TUI-local state models live with their domain
+//! (`panel_state`, `graph_state`, `picker_state`, `mcp_banner`), as do the
+//! feed meters and the composer labels (`feed_metrics`, `feature_labels`);
+//! every name they exposed here is re-exported below.
 
 mod app_goal;
 mod app_input;
 mod app_turns;
 pub mod dag_band;
+mod feature_labels;
+mod feed_metrics;
+mod graph_state;
+mod mcp_banner;
 pub(crate) mod menu;
+mod panel_state;
+mod picker_state;
 mod pixel_loader;
 pub(crate) mod prompt_chrome;
 mod render_utils;
@@ -58,6 +67,36 @@ pub(crate) use slash_commands::collect_slash_commands;
 
 pub(crate) use menu::{MenuBandData, MenuCrumb, MenuKey, map_menu_key, render_menu_band};
 
+// Domain re-exports: every `crate::ui::…` path the pre-split module exposed
+// stays reachable under the same name. Helpers consumed only by their own
+// submodule are not re-exported. Picker helpers stay `crate::ui`-scoped —
+// their items are `pub(super)` in `picker_state`, so a wider re-export is
+// rejected (E0364).
+pub use panel_state::PanelStatus;
+
+pub(crate) use graph_state::{DagBandMode, GraphMenuLevel, GraphMenuState, GraphPosition};
+pub(crate) use mcp_banner::{MCP_ERROR_BANNER_MS, McpErrorBanner};
+pub(crate) use panel_state::{
+    PanelMenuLevel, PanelMenuState, SidePanelMode, SidePanelPosition, TRIGGER_PANEL_HEIGHT,
+    TRIGGER_PANEL_WIDTH,
+};
+pub(in crate::ui) use picker_state::{
+    FORK_POPUP_MAX, RESUME_POPUP_MAX, activity_time, fork_picker_entries, resume_picker_label,
+};
+pub(crate) use picker_state::{ForkPickerState, ResumePickerEntry, ResumePickerState};
+
+#[cfg(test)]
+pub(crate) use panel_state::{PANEL_MENU_POSITION, PANEL_MENU_ROOT, PANEL_MENU_TOGGLE};
+#[cfg(test)]
+pub(crate) use picker_state::ForkPickerEntry;
+#[cfg(test)]
+pub(in crate::ui) use picker_state::path_column;
+
+use feature_labels::feature_labels;
+use feed_metrics::{feed_text_bytes, feed_text_tokens};
+use panel_state::{
+    PanelDrag, SIDE_PANEL_MIN_WIDTH, TRIGGER_PANEL_RULE_LIMIT, resolve_side_panel_width,
+};
 pub use theway_transport::feed::FeedUpdate;
 
 use std::io::IsTerminal;
@@ -111,291 +150,7 @@ const COMPLETION_POPUP_MAX: usize = 8;
 /// Inline cascade choice rows (issue #72): the model selector band above the
 /// composer shows at most this many rows of the active column's choices.
 const CASCADE_CHOICE_ROWS: usize = 6;
-/// Fork-picker popup window size (issue #55): at most this many user-message
-/// rows render at once, mirroring the completion popup's fixed window; the
-/// window slides with the selection.
-const FORK_POPUP_MAX: usize = 8;
-/// Resume-picker popup window size (issue #56): at most this many session
-/// rows render at once; the window slides with the selection like the fork
-/// picker's.
-const RESUME_POPUP_MAX: usize = 8;
-const TRIGGER_PANEL_MIN_TOTAL_WIDTH: u16 = 100;
-/// Auto-mode width and the `show` menu option's width for the side panel
-/// (the Automation/trigger panel, issue #54).
-pub(crate) const TRIGGER_PANEL_WIDTH: u16 = 36;
-/// Fixed panel height for the top/bottom side-panel positions.
-pub(crate) const TRIGGER_PANEL_HEIGHT: u16 = 10;
-const TRIGGER_PANEL_RULE_LIMIT: usize = 5;
-const SIDE_PANEL_MIN_WIDTH: u16 = 24;
-/// `/side-panel` menu tree labels (issue #54): the root offers Toggle and
-/// Position; Toggle carries show/hide; Position carries the four sides.
-pub(crate) const PANEL_MENU_ROOT: [&str; 2] = ["Toggle", "Position"];
-pub(crate) const PANEL_MENU_TOGGLE: [&str; 2] = ["show", "hide"];
-pub(crate) const PANEL_MENU_POSITION: [&str; 4] = ["top", "bottom", "left", "right"];
 const CONTROL_PROMPT_TEXT_WIDTH: usize = 68;
-
-#[derive(Clone, Debug, Default)]
-pub struct PanelStatus {
-    pub mcp_servers: usize,
-    pub mcp_tools: usize,
-    pub mcp_server_names: Vec<String>,
-    pub mcp_tool_names: Vec<String>,
-    pub tool_names: Vec<String>,
-    /// Count of `McpNotificationHook` instances (RFC 1 §4.2.3) — server-pushed notification
-    /// adapters fanning MCP frames into the trigger runtime. Distinct from `hook_points`,
-    /// which lists `*Hook` trait registrations (e.g. `before_tool_call`).
-    pub mcp_notification_hooks: usize,
-    /// Real `AgentHarness` `*Hook` trait registrations active in this binary.
-    pub hook_points: Vec<String>,
-    /// Trigger-runtime pipeline features wired in this binary (dedup, cycle, etc.). Not
-    /// pluggable callbacks — labelled separately from `hook_points` so users can't mistake
-    /// them for extension points.
-    pub trigger_features: Vec<String>,
-}
-
-impl PanelStatus {
-    /// Build from a wire sidebar snapshot (client mode: the daemon assembles
-    /// the panel inventory; the TUI only renders it).
-    fn from_sidebar(sidebar: &theway_transport::wire::WireSidebarSnapshot) -> Self {
-        Self {
-            mcp_servers: sidebar.mcp.servers,
-            mcp_tools: sidebar.mcp.tools,
-            mcp_server_names: sidebar.mcp.server_names.clone(),
-            mcp_tool_names: sidebar.mcp.tool_names.clone(),
-            tool_names: sidebar.tools.names.clone(),
-            mcp_notification_hooks: sidebar.mcp.notification_hooks,
-            hook_points: sidebar.hooks.clone(),
-            trigger_features: sidebar.runtime.clone(),
-        }
-    }
-}
-
-/// Side-panel visibility mode (issue #54): `Auto` keeps the pre-existing
-/// content-driven rule (panel content + ≥100 columns → 36 wide); `Shown(w)`
-/// forces the panel at an explicit width; `Hidden` closes it. TUI-local
-/// state — persisted to `ui-state.toml` when changed through the
-/// `/side-panel` menu.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SidePanelMode {
-    Auto,
-    Shown(u16),
-    Hidden,
-}
-
-/// Live side-panel drag-resize state (issue #54): anchored on mouse-down at
-/// the panel's feed-facing edge (1-column grab strip — the left border for a
-/// right-positioned panel, the right border for a left-positioned one), the
-/// width tracks the pointer while the button is held. Dragging the width
-/// below [`SIDE_PANEL_MIN_WIDTH`] (or past the panel's outer edge) collapses
-/// the panel to `Hidden`. All geometry is captured at grab time so a drag
-/// keeps working while the panel is collapsed (its rect disappears from the
-/// next render).
-#[derive(Clone, Copy, Debug)]
-struct PanelDrag {
-    /// Column the drag anchored on (the grab strip).
-    start_col: u16,
-    /// Panel width at drag start.
-    start_width: u16,
-    /// `true` for a right-positioned panel (left-edge grab): dragging right
-    /// shrinks; `false` for left-positioned (right-edge grab): dragging
-    /// right grows.
-    grab_left_edge: bool,
-    /// The panel's outer edge column: dragging the grabbed edge to or past
-    /// it collapses the panel.
-    outer_edge: u16,
-}
-
-/// Side-panel placement (issue #54 `/side-panel › Position`): the panel
-/// renders on one of the four edges of the content area; the feed reclaims
-/// the remaining space. Persisted to `ui-state.toml`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum SidePanelPosition {
-    #[default]
-    Right,
-    Left,
-    Top,
-    Bottom,
-}
-
-impl SidePanelPosition {
-    pub(crate) fn label(&self) -> &'static str {
-        match self {
-            Self::Top => "top",
-            Self::Bottom => "bottom",
-            Self::Left => "left",
-            Self::Right => "right",
-        }
-    }
-}
-
-/// `/side-panel` menu level: the root offers Toggle/Position; each entry
-/// descends into its own choice list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PanelMenuLevel {
-    Root,
-    Toggle,
-    Position,
-}
-
-/// `/side-panel` menu state: `Some` = open, `level` = current submenu,
-/// `cursor` = highlighted row in that level's list
-/// ([`PANEL_MENU_ROOT`]/[`PANEL_MENU_TOGGLE`]/[`PANEL_MENU_POSITION`]).
-/// Moving the cursor in a leaf level live-previews the layout; Enter commits,
-/// Esc/← steps back (reverting the preview), Esc at the root closes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PanelMenuState {
-    pub(crate) level: PanelMenuLevel,
-    pub(crate) cursor: usize,
-}
-
-impl PanelMenuState {
-    pub(crate) fn items(&self) -> &'static [&'static str] {
-        match self.level {
-            PanelMenuLevel::Root => &PANEL_MENU_ROOT,
-            PanelMenuLevel::Toggle => &PANEL_MENU_TOGGLE,
-            PanelMenuLevel::Position => &PANEL_MENU_POSITION,
-        }
-    }
-}
-
-/// Where the DAG status band renders (issue #38 + `/graph` menu): above
-/// the composer inside the scrollable feed (`ComposerTop`, the original
-/// placement) or inside the side panel under the Skills section
-/// (`SidePanel`). Persisted to `ui-state.toml`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum GraphPosition {
-    #[default]
-    ComposerTop,
-    SidePanel,
-}
-
-impl GraphPosition {
-    pub(crate) fn label(&self) -> &'static str {
-        match self {
-            Self::ComposerTop => "composer top",
-            Self::SidePanel => "side-panel",
-        }
-    }
-}
-
-/// `/graph` menu level: the root offers `show`/`hide` (band visibility),
-/// `clear` (only while the session has graph runs), and `position`;
-/// Position carries the two band placements.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GraphMenuLevel {
-    Root,
-    Position,
-}
-
-/// Transient MCP failure banner (issue: MCP errors must surface): shown
-/// for [`MCP_ERROR_BANNER_MS`] after the first snapshot that carries
-/// per-server MCP errors, then cleared. The fingerprint dedupes repeated
-/// snapshot frames so the banner only appears when the error set changes.
-#[derive(Clone, Debug)]
-pub(crate) struct McpErrorBanner {
-    pub(crate) text: String,
-    pub(crate) until: tokio::time::Instant,
-}
-
-/// How long the startup MCP-error banner stays visible.
-pub(crate) const MCP_ERROR_BANNER_MS: u64 = 3_000;
-
-/// `/graph` menu state: `Some` = open, with the current level and cursor.
-/// The Position cursor live-previews the band placement; Enter commits,
-/// Esc/← steps back (reverting), Esc at the root cancels. `has_graphs` is
-/// snapshotted when the menu opens and decides whether `clear` is offered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GraphMenuState {
-    pub(crate) level: GraphMenuLevel,
-    pub(crate) cursor: usize,
-    pub(crate) has_graphs: bool,
-}
-
-impl GraphMenuState {
-    /// Root items always offer band visibility (`show`/`hide`); `clear` is
-    /// appended only when the session has graph runs, and `position` always
-    /// comes last.
-    pub(crate) fn items(&self) -> Vec<&'static str> {
-        match self.level {
-            GraphMenuLevel::Root => {
-                if self.has_graphs {
-                    vec!["show", "hide", "clear", "position"]
-                } else {
-                    vec!["show", "hide", "position"]
-                }
-            }
-            GraphMenuLevel::Position => vec!["composer top", "side-panel"],
-        }
-    }
-}
-
-/// One interactive fork-picker row (issue #55): the 1-based number matches
-/// the daemon's `/fork <n>` numbering (1 = most recent user message) and the
-/// preview mirrors the daemon's ≤60-char listing (newlines flattened for
-/// single-row rendering).
-#[derive(Clone, Debug)]
-pub(crate) struct ForkPickerEntry {
-    pub(crate) number: usize,
-    pub(crate) preview: String,
-}
-
-/// Interactive fork picker state (issue #55): `Some` = the `/fork` popup is
-/// open over the current session's User feed blocks (newest-first), with the
-/// highlighted row + the popup's first visible row. Keys are handled in
-/// `app_input::handle_fork_picker_key`; rendering in `render_fork_picker`.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct ForkPickerState {
-    pub(crate) entries: Vec<ForkPickerEntry>,
-    pub(crate) selected: usize,
-    pub(crate) scroll: usize,
-}
-
-/// One `/resume` popup row (issue #56): a daemon session sorted by last
-/// activity (oldest → newest, newest at the bottom). The row label renders
-/// short id + relative time + working-directory path + name + busy/graph
-/// marks, with `current` annotating the daemon's active session — see
-/// [`resume_picker_label`].
-#[derive(Clone, Debug)]
-pub(crate) struct ResumePickerEntry {
-    /// Full session id — used for client-side session selection (also accepts
-    /// unique prefixes, but the picker always sends the full id).
-    pub(crate) id: String,
-    pub(crate) id_short: String,
-    pub(crate) name: String,
-    /// Working directory the session runs in (the `cwd` of the session's
-    /// repo); rendered as a tail-truncated path column.
-    pub(crate) path: String,
-    /// Last activity time, RFC3339 when available.
-    pub(crate) last_activity_at_rfc3339: Option<String>,
-    pub(crate) busy: bool,
-    pub(crate) graph_count: u32,
-    pub(crate) active_graph_count: u32,
-    pub(crate) current: bool,
-}
-
-/// Interactive `/resume` picker state (issue #56): `Some` = the popup is
-/// open over the daemon's session list, pre-selected on the current
-/// session. Keys are handled in `app_input::handle_resume_picker_key`;
-/// rendering in `render_resume_picker`. TUI-local — the startup `--resume`
-/// terminal picker in `resume_picker.rs` is a separate mechanism.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct ResumePickerState {
-    pub(crate) entries: Vec<ResumePickerEntry>,
-    pub(crate) selected: usize,
-    pub(crate) scroll: usize,
-}
-
-/// DAG status band visibility (issue #76 `/graph` command). TUI-local state,
-/// not persisted: `Show` renders the DAG band while runs are live, `Hidden`
-/// suppresses it entirely (and the status bar shows `[n graph]` instead, see
-/// issue #78). `/graph show` / `/graph hidden` set it explicitly, bare
-/// `/graph` toggles, `/graph clear` clears the session's terminal runs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum DagBandMode {
-    #[default]
-    Show,
-    Hidden,
-}
 
 /// Issue #99: hard bound for any daemon RPC awaited from the client paths
 /// (event loop, startup, headless). A hung/errored daemon must degrade to an
@@ -751,288 +506,6 @@ include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/ui/app/headless.rs"
 ));
-
-fn headless_unprinted_start(base: usize, len: usize, printed: &mut usize) -> Option<usize> {
-    let end = base.saturating_add(len);
-    if end < *printed {
-        *printed = 0;
-    }
-    if end <= *printed {
-        return None;
-    }
-    let start = printed.saturating_sub(base).min(len);
-    *printed = end;
-    Some(start)
-}
-
-/// Pure side-panel width resolution (issue #54), split from
-/// [`App::side_panel_width`] for direct testing: `None` hides the panel.
-/// Every mode shares the ≥100-column gate
-/// ([`TRIGGER_PANEL_MIN_TOTAL_WIDTH`]). `Auto` keeps the pre-existing
-/// content-driven rule (content + wide enough → [`TRIGGER_PANEL_WIDTH`]);
-/// `Hidden` is always closed; `Shown(w)` forces the panel regardless of
-/// content, clamping the width to
-/// `[SIDE_PANEL_MIN_WIDTH, content_width - 40]` (40 columns stay reserved
-/// for the feed).
-fn resolve_side_panel_width(
-    mode: SidePanelMode,
-    has_content: bool,
-    content_width: u16,
-) -> Option<u16> {
-    if content_width < TRIGGER_PANEL_MIN_TOTAL_WIDTH {
-        return None;
-    }
-    match mode {
-        SidePanelMode::Hidden => None,
-        SidePanelMode::Auto => has_content.then_some(TRIGGER_PANEL_WIDTH),
-        SidePanelMode::Shown(w) => {
-            let max = content_width.saturating_sub(40);
-            if max < SIDE_PANEL_MIN_WIDTH {
-                None
-            } else {
-                Some(w.clamp(SIDE_PANEL_MIN_WIDTH, max))
-            }
-        }
-    }
-}
-
-/// Cumulative text bytes across the feed blocks — the monotonic counter the
-/// busy-band char/s meter samples each spinner tick (issue #38).
-fn feed_text_bytes(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
-    use theway_transport::feed::WireFeedBlock as Block;
-    blocks
-        .iter()
-        .map(|block| match block {
-            Block::User { text, .. }
-            | Block::Assistant { text, .. }
-            | Block::Thinking { text, .. }
-            | Block::Plain { text, .. } => text.len(),
-            Block::ToolCall { name, args, .. } => name.len() + args.len(),
-            Block::Error { message, .. } => message.len(),
-            Block::ToolResult { lines, .. } => lines.iter().map(String::len).sum(),
-        })
-        .sum()
-}
-
-/// Rough token estimate for a text slice (~4 chars per token for ASCII, ~1
-/// token per character for non-ASCII), matching `theway-core`'s estimator
-/// so the busy band's `tps` figure tracks real token accounting.
-fn estimate_token_chars(text: &str) -> usize {
-    let mut ascii = 0usize;
-    let mut non_ascii = 0usize;
-    for c in text.chars() {
-        if c.is_ascii() {
-            ascii += 1;
-        } else {
-            non_ascii += 1;
-        }
-    }
-    ascii.div_ceil(4) + non_ascii
-}
-
-/// Cumulative *estimated token* count across the feed blocks — the counter
-/// the busy-band token-per-second meter samples each spinner tick.
-fn feed_text_tokens(blocks: &[theway_transport::feed::WireFeedBlock]) -> usize {
-    use theway_transport::feed::WireFeedBlock as Block;
-    blocks
-        .iter()
-        .map(|block| match block {
-            Block::User { text, .. }
-            | Block::Assistant { text, .. }
-            | Block::Thinking { text, .. }
-            | Block::Plain { text, .. } => estimate_token_chars(text),
-            Block::ToolCall { name, args, .. } => {
-                estimate_token_chars(name) + estimate_token_chars(args)
-            }
-            Block::Error { message, .. } => estimate_token_chars(message),
-            Block::ToolResult { lines, .. } => lines.iter().map(|l| estimate_token_chars(l)).sum(),
-        })
-        .sum()
-}
-
-/// Composer feature labels (issue #39): the composer's top-right corner
-/// shows only the graph-engine feature — any `dag`-kind run activates
-/// `graph engine`; otherwise the list is empty and the chrome renders
-/// nothing. While active, the label also lists the model + thinking
-/// intensity each graph node and standalone subagent runs with, deduped by
-/// `(agent, model, thinking)`. Trigger-runtime features stay in the trigger
-/// panel's Runtime section.
-fn feature_labels(
-    dags: &[theway_transport::wire::WireDagRunSnapshot],
-    subagents: &[theway_transport::wire::WireAgentJobSnapshot],
-) -> Vec<String> {
-    if !dags.iter().any(|run| run.kind == "dag") {
-        return Vec::new();
-    }
-    let mut labels = vec!["graph engine".to_string()];
-    let mut push_runtime = |agent: &str, model: Option<&str>, thinking: Option<&str>| {
-        let Some(label) = agent_runtime_label(agent, model, thinking) else {
-            return;
-        };
-        if !labels.iter().any(|existing| existing == &label) {
-            labels.push(label);
-        }
-    };
-    // Graph nodes first (their DAG jobs also appear in `subagents` but are
-    // already represented here), then standalone subagent-tool jobs.
-    for run in dags.iter().filter(|run| run.kind == "dag") {
-        for node in &run.nodes {
-            push_runtime(&node.agent, node.model.as_deref(), node.thinking.as_deref());
-        }
-    }
-    for job in subagents.iter().filter(|job| job.source != "dag") {
-        push_runtime(&job.agent, job.model.as_deref(), job.thinking.as_deref());
-    }
-    labels
-}
-
-/// One `agent model · think level` feature-label fragment. The fragment is
-/// omitted when neither the model nor the thinking level is known; `think`
-/// renders only for an explicit non-off level, matching the composer info
-/// line.
-fn agent_runtime_label(agent: &str, model: Option<&str>, thinking: Option<&str>) -> Option<String> {
-    let model = model.map(str::trim).filter(|m| !m.is_empty());
-    let thinking = thinking
-        .map(str::trim)
-        .filter(|t| !t.is_empty() && *t != "off");
-    if model.is_none() && thinking.is_none() {
-        return None;
-    }
-    let mut label = agent.trim().to_string();
-    if let Some(model) = model {
-        label.push(' ');
-        label.push_str(model);
-    }
-    if let Some(thinking) = thinking {
-        label.push_str(" · think ");
-        label.push_str(thinking);
-    }
-    (!label.is_empty()).then_some(label)
-}
-
-/// Fork-picker rows from the current session's feed blocks (issue #55):
-/// User blocks newest-first with 1-based numbers matching the daemon's
-/// `/fork <n>` numbering (1 = most recent user message), each with a
-/// ≤60-char preview (`…` appended when truncated, newlines flattened for
-/// single-row rendering — the same shape the daemon's `/fork` listing
-/// prints).
-fn fork_picker_entries(blocks: &[theway_transport::feed::WireFeedBlock]) -> Vec<ForkPickerEntry> {
-    blocks
-        .iter()
-        .rev()
-        .filter_map(|block| match block {
-            theway_transport::feed::WireFeedBlock::User { text, .. } => {
-                let flat: String = text
-                    .chars()
-                    .map(|c| if c == '\n' { ' ' } else { c })
-                    .collect();
-                let mut preview = flat.chars().take(60).collect::<String>();
-                if flat.chars().count() > 60 {
-                    preview.push('…');
-                }
-                Some(preview)
-            }
-            _ => None,
-        })
-        .enumerate()
-        .map(|(i, preview)| ForkPickerEntry {
-            number: i + 1,
-            preview,
-        })
-        .collect()
-}
-
-/// Format a session's last-activity RFC3339 timestamp as a short relative
-/// duration (`now`, `5m`, `3h`, `2d`) for the `/resume` popup.
-fn format_relative_time(rfc3339: Option<&str>) -> Option<String> {
-    let rfc3339 = rfc3339?;
-    let dt = chrono::DateTime::parse_from_rfc3339(rfc3339).ok()?;
-    let now = chrono::Utc::now();
-    let seconds = (now - dt.with_timezone(&chrono::Utc)).num_seconds().max(0);
-    if seconds < 60 {
-        Some("now".to_string())
-    } else if seconds < 3600 {
-        Some(format!("{}m", seconds / 60))
-    } else if seconds < 86_400 {
-        Some(format!("{}h", seconds / 3600))
-    } else {
-        Some(format!("{}d", seconds / 86_400))
-    }
-}
-
-/// `/resume` popup row label (issue #56): aligned short id + `|` +
-/// relative last-activity time + `|` + tail-truncated working-directory
-/// path + session title, plus marks — `busy` when the session is mid-turn,
-/// `graphs N (M active)` when it has DAG runs, `current` on the daemon's
-/// active session. Marks join with `·`.
-fn resume_picker_label(entry: &ResumePickerEntry) -> String {
-    const ID_COL_WIDTH: usize = 9;
-    const TIME_COL_WIDTH: usize = 4;
-    const PATH_COL_WIDTH: usize = 20;
-    let id_col = format!("{:<ID_COL_WIDTH$}", entry.id_short);
-    let time = format_relative_time(entry.last_activity_at_rfc3339.as_deref())
-        .unwrap_or_else(|| "-".to_string());
-    let time_col = format!("{:<TIME_COL_WIDTH$}", time);
-    let path_col = path_column(&entry.path, PATH_COL_WIDTH);
-    let mut label = format!("{} | {} | {}", id_col, time_col, path_col);
-    if !entry.name.is_empty() {
-        label.push_str("  ");
-        label.push_str(&entry.name);
-    }
-    let mut marks = Vec::new();
-    if entry.busy {
-        marks.push("busy".to_string());
-    }
-    if entry.graph_count > 0 {
-        marks.push(if entry.active_graph_count > 0 {
-            format!(
-                "graphs {} ({} active)",
-                entry.graph_count, entry.active_graph_count
-            )
-        } else {
-            format!("graphs {}", entry.graph_count)
-        });
-    }
-    if entry.current {
-        marks.push("current".to_string());
-    }
-    if !marks.is_empty() {
-        label.push_str(" · ");
-        label.push_str(&marks.join(" · "));
-    }
-    label.trim_end().to_string()
-}
-
-/// Path column for the `/resume` picker: the full path when it fits
-/// `width`, otherwise `…` + the path's last `width - 1` chars so the tail
-/// (the repo directory) stays visible while the head is cut.
-fn path_column(path: &str, width: usize) -> String {
-    let chars = path.chars().count();
-    if chars <= width {
-        return format!("{path:<width$}");
-    }
-    let tail: String = path
-        .chars()
-        .rev()
-        .take(width - 1)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("…{tail}")
-}
-
-/// Last-activity sort key for the `/resume` picker: parsed RFC3339 as UTC,
-/// `None` when the timestamp is missing or unparseable — `None` sorts
-/// before any real time, so timestamp-less sessions land at the top
-/// (oldest). String comparison is avoided because RFC3339 fractional
-/// seconds are variable-width.
-fn activity_time(rfc3339: &Option<String>) -> Option<chrono::DateTime<chrono::Utc>> {
-    rfc3339
-        .as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|dt| dt.with_timezone(&chrono::Utc))
-}
 
 /// Cyclic cursor movement shared by every selection menu (`/resume`,
 /// `/fork`, the model picker, `/side-panel`, `/graph`): Down at the bottom

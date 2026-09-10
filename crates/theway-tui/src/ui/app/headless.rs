@@ -163,3 +163,20 @@ where
         }
     })
 }
+
+/// Slice of a snapshot's feed lines that print mode has not emitted yet:
+/// `printed` tracks the feed coordinates already flushed, so a snapshot that
+/// re-sends earlier lines (or a feed that reset to an empty base) only
+/// prints the tail that is new. `None` when nothing is left to print.
+fn headless_unprinted_start(base: usize, len: usize, printed: &mut usize) -> Option<usize> {
+    let end = base.saturating_add(len);
+    if end < *printed {
+        *printed = 0;
+    }
+    if end <= *printed {
+        return None;
+    }
+    let start = printed.saturating_sub(base).min(len);
+    *printed = end;
+    Some(start)
+}
