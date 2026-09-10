@@ -37,6 +37,8 @@ fn job() -> SubagentJob {
         truncated: false,
         messages: Vec::new(),
         messages_truncated: false,
+        turns: Vec::new(),
+        turns_truncated: false,
         control: None,
     }
 }

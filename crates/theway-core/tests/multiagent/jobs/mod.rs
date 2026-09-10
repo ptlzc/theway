@@ -41,6 +41,22 @@ fn job_tps_and_cps_return_none_for_zero_elapsed() {
 }
 
 #[test]
+fn job_new_starts_with_empty_turn_summaries() {
+    let job = SubagentJob::new(
+        "j1".into(),
+        "agent".into(),
+        "subagent".into(),
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(job.turn, 0);
+    assert!(job.turns.is_empty());
+    assert!(!job.turns_truncated);
+}
+
+#[test]
 fn list_returns_newest_first() {
     let registry = SubagentJobRegistry::new();
     let first = registry.register(SubagentJobInit {

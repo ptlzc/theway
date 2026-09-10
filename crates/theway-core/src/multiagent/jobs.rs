@@ -43,6 +43,9 @@ pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 /// from the newest end). Half the output cap — full messages carry tool
 /// results, so they eat bytes faster than the flat text tail.
 pub const MAX_MESSAGES_BYTES: usize = 512 * 1024;
+/// Cap on per-job turn summaries. Beyond it the oldest turn is dropped, matching the
+/// `messages` policy, and `turns_truncated` is set.
+pub const MAX_TURN_SUMMARIES: usize = 64;
 
 /// Live control handle for a running subagent (registered by the runner right
 /// after the job starts, cleared on finish). Lets an external caller (parent
@@ -61,6 +64,19 @@ impl std::fmt::Debug for SubagentControlHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("SubagentControlHandle")
     }
+}
+
+/// One LLM turn's cost and actions inside a job. Captured live so a node that burns its
+/// iteration budget can be diagnosed turn by turn instead of from aggregate counters.
+#[derive(Clone, Debug, Default)]
+pub struct JobTurnSummary {
+    /// 1-based turn index, the same counter as `SubagentJob::turn`.
+    pub index: u32,
+    /// `input + cache_read + cache_write` of this turn's assistant message.
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// Tool names in call order within the turn.
+    pub tools: Vec<String>,
 }
 
 /// One tracked subagent job.
@@ -104,6 +120,10 @@ pub struct SubagentJob {
     pub messages: Vec<serde_json::Value>,
     /// Set when the transcript exceeded MAX_MESSAGES_BYTES (oldest dropped).
     pub messages_truncated: bool,
+    /// Per-turn cost and actions (see [`JobTurnSummary`]); bounded by [`MAX_TURN_SUMMARIES`].
+    pub turns: Vec<JobTurnSummary>,
+    /// Set when older turn summaries were dropped.
+    pub turns_truncated: bool,
     /// Live control handle while the run is in flight (`None` for jobs that
     /// never registered one, or after finish).
     pub control: Option<SubagentControlHandle>,
@@ -142,6 +162,8 @@ impl SubagentJob {
             truncated: false,
             messages: Vec::new(),
             messages_truncated: false,
+            turns: Vec::new(),
+            turns_truncated: false,
             control: None,
         }
     }

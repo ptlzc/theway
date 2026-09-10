@@ -13,6 +13,8 @@ use super::*;
 mod test_utils;
 use test_utils::*;
 
+mod turns;
+
 // ── dag_inspect ──────────────────────────────────────────────────────────
 
 #[tokio::test]

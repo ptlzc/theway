@@ -9,7 +9,8 @@ use theway_llm_provider::UserContentBlock;
 use crate::{AgentMessage, LoopEvent};
 
 use super::jobs::{
-    SubagentJobEvent, SubagentJobRegistry, agent_message_to_json, append_message, append_output,
+    JobTurnSummary, MAX_TURN_SUMMARIES, SubagentJobEvent, SubagentJobRegistry,
+    agent_message_to_json, append_message, append_output,
 };
 
 /// Build a synchronous [`crate::agent::LoopSyncCallback`] that accumulates metrics + output
@@ -56,6 +57,12 @@ pub fn metrics_listener(
                 if let Some((input, output)) = usage_tokens {
                     job.input_tokens = job.input_tokens.saturating_add(input);
                     job.output_tokens = job.output_tokens.saturating_add(output);
+                    // Same usage, attributed to the turn it was spent in, so a run
+                    // killed by its iteration budget reads turn by turn.
+                    if let Some(turn) = job.turns.last_mut() {
+                        turn.input_tokens = turn.input_tokens.saturating_add(input);
+                        turn.output_tokens = turn.output_tokens.saturating_add(output);
+                    }
                 }
             });
             if let Some(job) = registry.job(&job_id) {
@@ -77,6 +84,10 @@ pub fn metrics_listener(
         } => {
             registry.update(&job_id, |job| {
                 job.tools_called = job.tools_called.saturating_add(1);
+                // Attribute the call to the turn that issued it.
+                if let Some(turn) = job.turns.last_mut() {
+                    turn.tools.push(tool_name.clone());
+                }
                 // Typed transcript entry (dag_inspect kind=transcript): the call
                 // site with its arguments, in emission order with tool results.
                 append_message(
@@ -117,6 +128,15 @@ pub fn metrics_listener(
         LoopEvent::TurnStart => {
             registry.update(&job_id, |job| {
                 job.turn = job.turn.saturating_add(1);
+                job.turns.push(JobTurnSummary {
+                    index: job.turn,
+                    ..JobTurnSummary::default()
+                });
+                // Bounded like `messages`: oldest turn dropped, truncation flagged.
+                if job.turns.len() > MAX_TURN_SUMMARIES {
+                    job.turns.remove(0);
+                    job.turns_truncated = true;
+                }
             });
         }
         _ => {}

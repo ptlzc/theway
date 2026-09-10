@@ -4,6 +4,8 @@
 use super::*;
 use crate::multiagent::jobs::SubagentJobRegistry;
 
+mod turns;
+
 #[test]
 fn cap_tool_result_keeps_short_text_unchanged() {
     assert_eq!(cap_tool_result("short"), "short");

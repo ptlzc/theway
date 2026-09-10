@@ -1,8 +1,11 @@
 //! `dag_inspect` — single-node detail: status, deps, attempts, error, and the
 //! subagent result output (tail-truncated) plus the live preview while running.
 //! `kind=transcript` renders the node's registry job transcript as a typed
-//! message stream (user / assistant / thinking / tool-call / tool-result).
+//! message stream (user / assistant / thinking / tool-call / tool-result)
+//! followed by the per-turn summary (token spend, tools per turn, first file
+//! write).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,7 +14,9 @@ use serde_json::{Value, json};
 use theway_core::multiagent::graph::engine::DagEngine;
 use theway_core::multiagent::graph::model::node_status_label;
 use theway_core::multiagent::graph::types::DagNode;
-use theway_core::multiagent::jobs::{SubagentJob, SubagentJobRegistry, SubagentJobStatus};
+use theway_core::multiagent::jobs::{
+    JobTurnSummary, SubagentJob, SubagentJobRegistry, SubagentJobStatus,
+};
 use theway_core::{AgentTool, AgentToolError, AgentToolResult, AgentToolUpdate, ToolExecutionMode};
 use theway_llm_provider::Tool;
 use tokio_util::sync::CancellationToken;
@@ -159,7 +164,97 @@ fn transcript_text(
         job.status
     ));
     parts.push(tail_truncate(&body, tail));
+    // Appended as its own part *after* the truncated body: `tail_truncate` keeps
+    // the tail of the transcript, so a summary embedded in `body` would be the
+    // first thing a long run drops — exactly the burnt nodes it exists for.
+    if let Some(turn_summary) = turn_summary_text(&job) {
+        parts.push(turn_summary);
+    }
     parts.join("\n")
+}
+
+/// Per-turn forensics for `kind=transcript`: turns recorded, tool calls made,
+/// the turn that first wrote a file, plus one row per turn and the aggregate
+/// tool counts. `None` when the job carries no turn summaries (jobs registered
+/// by an older binary, or restored runs whose counter never advanced).
+///
+/// `first file write` only recognises the `write` and `edit` tools (their
+/// labels live in `src/tools/write.rs` / `src/tools/edit.rs`). A turn that
+/// creates files through `bash` (redirects, heredocs, `git apply`) is invisible
+/// to this scan and reports `none`.
+fn turn_summary_text(job: &SubagentJob) -> Option<String> {
+    if job.turns.is_empty() {
+        return None;
+    }
+    let tool_calls: usize = job.turns.iter().map(|turn| turn.tools.len()).sum();
+    let first_write = job
+        .turns
+        .iter()
+        .filter(|turn| turn.tools.iter().any(|name| is_file_write_tool(name)))
+        .map(|turn| turn.index)
+        .min();
+    let first_write = match first_write {
+        Some(index) => format!("turn {index}"),
+        None => "none".to_string(),
+    };
+    let mut out = format!(
+        "  per-turn: {} turn(s) · {} tool call(s) · first file write: {first_write}",
+        job.turns.len(),
+        tool_calls
+    );
+    for turn in &job.turns {
+        let tools = if turn.tools.is_empty() {
+            "(no tool call)".to_string()
+        } else {
+            turn.tools.join(", ")
+        };
+        out.push_str(&format!(
+            "\n    t{:<5}in {:<7}out {:<7}{}",
+            turn.index,
+            tokens_short(turn.input_tokens),
+            tokens_short(turn.output_tokens),
+            tools
+        ));
+    }
+    out.push_str(&format!("\n  tools: {}", tool_count_line(&job.turns)));
+    if job.turns_truncated {
+        out.push_str("\n  (turns 已截断, 最旧的轮次已丢弃)");
+    }
+    Some(out)
+}
+
+/// `true` for the daemon's direct file-writing tools. `bash` can write files
+/// too, but a shell command cannot be classified as a write by name alone.
+fn is_file_write_tool(name: &str) -> bool {
+    name == "write" || name == "edit"
+}
+
+/// Aggregate tool counts as `read×6, bash×2`: most-called first, ties broken by
+/// name so the line is stable across renders.
+fn tool_count_line(turns: &[JobTurnSummary]) -> String {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for turn in turns {
+        for name in &turn.tools {
+            *counts.entry(name.as_str()).or_insert(0) += 1;
+        }
+    }
+    let mut rows: Vec<(&str, usize)> = counts.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    rows.iter()
+        .map(|(name, count)| format!("{name}×{count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Token count for display: the plain number below 1000, `x.yk` from 1000 up.
+/// Integer arithmetic only — no dependency, no float rounding drift.
+fn tokens_short(tokens: u64) -> String {
+    if tokens < 1000 {
+        return tokens.to_string();
+    }
+    // Round to the nearest 0.1k.
+    let tenths = tokens.saturating_add(50) / 100;
+    format!("{}.{}k", tenths / 10, tenths % 10)
 }
 
 /// Render registry transcript messages as `[role]`-prefixed sections. LLM
@@ -280,7 +375,7 @@ fn cap(text: &str, n: usize) -> String {
 static INSPECT_DEFINITION: Lazy<Tool> = Lazy::new(|| {
     Tool {
     name: "dag_inspect".into(),
-    description: "Inspect a single DAG node: status, deps, attempts, error, and the subagent result output (tail-truncated) plus the live preview while running. kind=\"transcript\" renders the node's typed message stream (user/assistant/thinking/tool-call/tool-result) instead of the summary.".into(),
+    description: "Inspect a single DAG node: status, deps, attempts, error, and the subagent result output (tail-truncated) plus the live preview while running. kind=\"transcript\" renders the node's typed message stream (user/assistant/thinking/tool-call/tool-result) plus a per-turn summary (token spend, tools per turn, first file write) instead of the summary.".into(),
     parameters: json!({
         "type": "object",
         "properties": {
