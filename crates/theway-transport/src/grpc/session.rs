@@ -8,7 +8,7 @@ impl SessionService for GrpcState {
     ) -> Result<Response<theway_grpc::SessionSnapshot>, Status> {
         let request = request.into_inner();
         let session_id = if request.session_id.is_empty() {
-            self.session_id.read().unwrap().clone()
+            self.current_session_id()
         } else {
             request.session_id.clone()
         };
@@ -158,7 +158,7 @@ impl SessionService for GrpcState {
             .list()
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-        let current_session_id = self.session_id.read().unwrap().clone();
+        let current_session_id = self.current_session_id();
         Ok(Response::new(ListSessionsResponse {
             sessions: sessions.iter().map(session_summary_wire).collect(),
             current_session_id,
@@ -265,7 +265,7 @@ impl SessionService for GrpcState {
         // Deleted the current session → fall back to the most recent remaining
         // session (or empty). There is no session-switch RPC; clients address
         // sessions explicitly by id.
-        if self.session_id.read().unwrap().clone() == full_id {
+        if self.current_session_id() == full_id {
             let remaining = self
                 .session_ops
                 .list()
@@ -275,7 +275,7 @@ impl SessionService for GrpcState {
                 .last()
                 .map(|s| s.session_id.clone())
                 .unwrap_or_default();
-            *self.session_id.write().unwrap() = fallback.clone();
+            self.set_current_session_id(fallback.clone());
             self.latest.lock().session_id = fallback.clone();
         }
         // Tell the event loop to drop the deleted session's runtime (and swap
@@ -344,7 +344,7 @@ impl SessionService for GrpcState {
             }
         };
         if let Some(summary) = &response.session {
-            *self.session_id.write().unwrap() = summary.session_id.clone();
+            self.set_current_session_id(summary.session_id.clone());
             let mut latest = self.latest.lock();
             latest.session_id = summary.session_id.clone();
             latest.cwd = summary.cwd.clone();

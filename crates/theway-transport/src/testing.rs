@@ -10,7 +10,7 @@
 //! behavior to round-trip the tool-operation RPC surfaces without a real FS.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::transport::{StorageOps, ToolExecStream, ToolOps};
 use crate::wire::{
@@ -48,20 +48,30 @@ struct FakeInner {
 }
 
 impl FakeSessionOps {
+    /// The fake's session map, recovered from a poisoned lock.
+    ///
+    /// Fixture state holds plain value maps with no invariant a panic can tear, so recovering the
+    /// guard keeps a fixture call that panicked on one thread from turning every later fixture
+    /// call in the same test into a `PoisonError` panic; the original panic stays the failure the
+    /// test reports. Library code does not get this treatment — there poison is never reached.
+    fn state(&self) -> MutexGuard<'_, FakeInner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Seed an existing session; returns its id.
     pub fn add_session(&self, id: &str) -> String {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         inner.sessions.push(summary(id));
         id.to_string()
     }
 
     /// Mark a session as having running graphs (blocks `delete`, ids reported back).
     pub fn set_running(&self, session_id: &str, run_ids: &[&str]) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         inner.running.insert(
             session_id.to_string(),
             run_ids.iter().map(|s| s.to_string()).collect(),
@@ -90,7 +100,7 @@ fn summary(id: &str) -> SessionSummary {
 #[async_trait]
 impl crate::transport::SessionOps for FakeSessionOps {
     async fn list(&self) -> Result<Vec<SessionSummary>> {
-        Ok(self.inner.lock().unwrap().sessions.clone())
+        Ok(self.state().sessions.clone())
     }
 
     async fn create(
@@ -98,7 +108,7 @@ impl crate::transport::SessionOps for FakeSessionOps {
         session_id: Option<&str>,
         metadata: &HashMap<String, String>,
     ) -> Result<String> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         let id = match session_id.map(str::trim).filter(|id| !id.is_empty()) {
             Some(id) => {
                 if inner.sessions.iter().any(|s| s.session_id == id) {
@@ -118,7 +128,7 @@ impl crate::transport::SessionOps for FakeSessionOps {
     }
 
     async fn update_metadata(&self, id: &str, metadata: &HashMap<String, String>) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         let Some(session) = inner.sessions.iter_mut().find(|s| s.session_id == id) else {
             anyhow::bail!("no session matches id {id}");
         };
@@ -131,7 +141,7 @@ impl crate::transport::SessionOps for FakeSessionOps {
         if name.is_empty() {
             anyhow::bail!("session name must not be empty");
         }
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         let Some(session) = inner.sessions.iter_mut().find(|s| s.session_id == id) else {
             anyhow::bail!("no session matches id {id}");
         };
@@ -140,7 +150,7 @@ impl crate::transport::SessionOps for FakeSessionOps {
     }
 
     async fn delete(&self, id: &str) -> Result<Vec<String>> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         let Some(pos) = inner.sessions.iter().position(|s| s.session_id == id) else {
             anyhow::bail!("no session matches id {id}");
         };
@@ -174,44 +184,43 @@ struct FakeStorageInner {
 }
 
 impl FakeStorageOps {
+    /// The fake's persistence maps, recovered from a poisoned lock.
+    ///
+    /// See [`FakeSessionOps::state`] for why the fake recovers instead of propagating.
+    fn state(&self) -> MutexGuard<'_, FakeStorageInner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Seed a stored DAG run snapshot for a session.
     pub fn put_dag_run(&self, session_id: &str, run_id: &str, snapshot: &str) {
-        self.inner.lock().unwrap().dag_runs.insert(
-            (session_id.to_string(), run_id.to_string()),
-            snapshot.to_string(),
-        );
+        let mut inner = self.state();
+        let key = (session_id.to_string(), run_id.to_string());
+        inner.dag_runs.insert(key, snapshot.to_string());
     }
 
     /// Seed stored trigger rules for a session.
     pub fn put_trigger_rules(&self, session_id: &str, rules: Vec<WireStoredTriggerRule>) {
-        self.inner
-            .lock()
-            .unwrap()
-            .trigger_rules
-            .insert(session_id.to_string(), rules);
+        let mut inner = self.state();
+        inner.trigger_rules.insert(session_id.to_string(), rules);
     }
 
     /// Seed stored cron jobs for a session.
     pub fn put_cron_jobs(&self, session_id: &str, jobs: Vec<WireStoredCronJob>) {
-        self.inner
-            .lock()
-            .unwrap()
-            .cron_jobs
-            .insert(session_id.to_string(), jobs);
+        let mut inner = self.state();
+        inner.cron_jobs.insert(session_id.to_string(), jobs);
     }
 }
 
 #[async_trait]
 impl StorageOps for FakeStorageOps {
     async fn save_dag_run(&self, request: &WireSaveDagRunRequest) -> Result<WireSaveDagRunResult> {
-        self.inner.lock().unwrap().dag_runs.insert(
-            (request.session_id.clone(), request.run_id.clone()),
-            request.snapshot.clone(),
-        );
+        let mut inner = self.state();
+        let key = (request.session_id.clone(), request.run_id.clone());
+        inner.dag_runs.insert(key, request.snapshot.clone());
         Ok(WireSaveDagRunResult { saved: true })
     }
 
@@ -219,7 +228,7 @@ impl StorageOps for FakeStorageOps {
         &self,
         request: &WireLoadDagRunsRequest,
     ) -> Result<WireLoadDagRunsResult> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let runs = match request.run_id.as_deref() {
             Some(run_id) => inner
                 .dag_runs
@@ -250,11 +259,9 @@ impl StorageOps for FakeStorageOps {
         request: &WireSaveTriggerRulesRequest,
     ) -> Result<WireSaveTriggerRulesResult> {
         let count = request.rules.len() as u32;
-        self.inner
-            .lock()
-            .unwrap()
-            .trigger_rules
-            .insert(request.session_id.clone(), request.rules.clone());
+        let mut inner = self.state();
+        let key = request.session_id.clone();
+        inner.trigger_rules.insert(key, request.rules.clone());
         Ok(WireSaveTriggerRulesResult { count })
     }
 
@@ -263,9 +270,7 @@ impl StorageOps for FakeStorageOps {
         request: &WireLoadTriggerRulesRequest,
     ) -> Result<WireLoadTriggerRulesResult> {
         let rules = self
-            .inner
-            .lock()
-            .unwrap()
+            .state()
             .trigger_rules
             .get(&request.session_id)
             .cloned()
@@ -278,11 +283,9 @@ impl StorageOps for FakeStorageOps {
         request: &WireSaveCronJobsRequest,
     ) -> Result<WireSaveCronJobsResult> {
         let count = request.jobs.len() as u32;
-        self.inner
-            .lock()
-            .unwrap()
-            .cron_jobs
-            .insert(request.session_id.clone(), request.jobs.clone());
+        let mut inner = self.state();
+        let key = request.session_id.clone();
+        inner.cron_jobs.insert(key, request.jobs.clone());
         Ok(WireSaveCronJobsResult { count })
     }
 
@@ -291,9 +294,7 @@ impl StorageOps for FakeStorageOps {
         request: &WireLoadCronJobsRequest,
     ) -> Result<WireLoadCronJobsResult> {
         let jobs = self
-            .inner
-            .lock()
-            .unwrap()
+            .state()
             .cron_jobs
             .get(&request.session_id)
             .cloned()
@@ -438,6 +439,20 @@ impl crate::CommandOps for ChannelCommandOps {
     }
 }
 
+/// Read side of a shared settings lock, recovered from a poisoned `RwLock`.
+///
+/// Same reasoning as [`FakeSessionOps::state`]: the guarded records are replaced wholesale by the
+/// event loop and never mutated across an invariant, so the fixture keeps serving after a panic
+/// elsewhere instead of failing every later call on the poison flag.
+fn read_lock<T>(lock: &std::sync::RwLock<T>) -> RwLockReadGuard<'_, T> {
+    lock.read().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Write side of [`read_lock`].
+fn write_lock<T>(lock: &std::sync::RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    lock.write().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Test `SettingsOps` backed by the same shared path/config views the real
 /// daemon composition uses.
 #[derive(Clone)]
@@ -464,7 +479,7 @@ impl SharedSettingsOps {
 #[async_trait]
 impl crate::SettingsOps for SharedSettingsOps {
     async fn get_config(&self) -> Result<crate::wire::WireDaemonConfig> {
-        Ok(self.daemon_config.read().unwrap().clone())
+        Ok(read_lock(&self.daemon_config).clone())
     }
 
     async fn set_config(&self, config: &crate::wire::WireDaemonConfig) -> Result<bool> {
@@ -481,11 +496,11 @@ impl crate::SettingsOps for SharedSettingsOps {
     }
 
     async fn get_path_context(&self) -> Result<crate::wire::WirePathContext> {
-        Ok(self.path_context.read().unwrap().clone())
+        Ok(read_lock(&self.path_context).clone())
     }
 
     async fn set_skill_dirs(&self, dirs: &[String]) -> Result<bool> {
-        self.path_context.write().unwrap().skills_dirs = dirs.to_vec();
+        write_lock(&self.path_context).skills_dirs = dirs.to_vec();
         Ok(self
             .commands
             .send(crate::wire::WireCommand::SetSkillDirs {

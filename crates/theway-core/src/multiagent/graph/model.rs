@@ -89,7 +89,11 @@ pub fn fmt_dur(ms: i64) -> String {
 
 // ── validation ───────────────────────────────────────────────────────────────
 
-static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+$").unwrap());
+// `ID_RE` compiles a string literal fixed in this file, never a node id, so the `.expect` is
+// unreachable short of a source edit — which the validation tests fail on immediately. `Regex`
+// has no infallible constructor, so there is no error channel to propagate through.
+static ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+$").expect("ID_RE is a literal"));
 
 pub fn validate_graph(nodes: &[DagNodeDef], known_agents: Option<&[String]>) -> Vec<String> {
     let mut errors: Vec<String> = Vec::new();

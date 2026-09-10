@@ -60,6 +60,9 @@ static REDACTORS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
             r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
         ),
     ];
+    // The patterns are literals in this module, so a failure to compile one is a build-time
+    // defect. Failing loudly is the safe direction: skipping a pattern would let credentials
+    // through the redaction this module exists to perform.
     raw.into_iter()
         .map(|(label, src)| (label, Regex::new(src).expect("regex must compile")))
         .collect()

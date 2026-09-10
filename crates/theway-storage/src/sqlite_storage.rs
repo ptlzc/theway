@@ -577,7 +577,11 @@ async fn read_meta(db: &Database) -> Result<JsonlSessionMetadata, SessionError> 
 #[async_trait]
 impl SessionReader for SqliteSessionStorage {
     async fn get_metadata_json(&self) -> Result<Value, SessionError> {
-        Ok(serde_json::to_value(&*self.metadata.lock()).unwrap())
+        // The header is already in memory; a `Serialize` failure is reported as corruption
+        // rather than panicking. The guard is dropped before this returns — nothing awaits
+        // while it is held.
+        let metadata = self.metadata.lock();
+        serde_json::to_value(&*metadata).map_err(json_err)
     }
 
     async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {

@@ -105,16 +105,16 @@ pub async fn resume(
     explicit_id: Option<&str>,
 ) -> Result<SqliteSessionStorage> {
     let files = repo.list().await?;
-    if files.is_empty() {
+    let Some(newest) = files.last() else {
         bail!("no sessions to resume in {}", repo.root().display());
-    }
+    };
     let chosen = if let Some(id) = explicit_id {
         find_session_path(repo, &files, id)
             .await?
             .with_context(|| format!("no session matches id {id}"))?
     } else {
         // SqliteSessionRepo::list() sorts ascending by name (UUIDv7), so the tail is newest.
-        files.last().cloned().unwrap()
+        newest.clone()
     };
     Ok(repo.open(&chosen).await?)
 }

@@ -36,22 +36,33 @@ use super::types::{DagNode, DagNodeDef, DagRun, DagStatus, Direction, NodeStatus
 //   A -.-> B                  dotted edge (same semantics)
 //   %% comment lines
 
-static DIRECTIVE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(graph|flowchart)\s+(TD|TB|LR)\b").unwrap());
-static EDGE_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*(?:-->|-\.->)\s*(.+)$").unwrap()
+// The regex statics below compile string literals fixed in this file, never parser input, so
+// each `.expect` is unreachable short of a source edit — which these patterns' unit tests fail
+// on immediately. `Regex` has no infallible constructor, so there is no error channel to
+// propagate through.
+
+static DIRECTIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(graph|flowchart)\s+(TD|TB|LR)\b").expect("DIRECTIVE_RE is a literal")
 });
-static NODE_ONLY_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*$").unwrap());
-static TARGET_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*$").unwrap());
+static EDGE_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*(?:-->|-\.->)\s*(.+)$")
+        .expect("EDGE_LINE_RE is a literal")
+});
+static NODE_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*$").expect("NODE_ONLY_RE is a literal")
+});
+static TARGET_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*([A-Za-z0-9_-]+)\s*(?:\[([^\]]*)\])?\s*$").expect("TARGET_RE is a literal")
+});
 /// Chain edge symbols — `A --> B --> C` is split on these before per-segment
 /// target parsing (mmdr handles chains natively; preprocess must see the
 /// same node set for its declared/consistency bookkeeping).
-static EDGE_SYM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-->|-\.->").unwrap());
+static EDGE_SYM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-->|-\.->").expect("EDGE_SYM_RE is a literal"));
 /// For malformed edge targets (e.g. stray commas) we still register the id
 /// prefix so downstream "missing task/agent" diagnostics fire, then error.
-static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([A-Za-z0-9_-]+)").unwrap());
+static ID_PREFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([A-Za-z0-9_-]+)").expect("ID_PREFIX_RE is a literal"));
 
 pub struct MermaidParseResult {
     pub direction: Direction,
@@ -439,7 +450,8 @@ const CLASS_DEFS: [(NodeStatus, &str, &str); 6] = [
 
 const LABEL_MAX: usize = 40;
 
-static NEWLINE_WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\n\s*").unwrap());
+static NEWLINE_WS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*\n\s*").expect("NEWLINE_WS_RE is a literal"));
 
 /// Escapes a label for a `"..."` mermaid label: backslashes/quotes escaped,
 /// newline runs collapsed to a single space.

@@ -48,7 +48,12 @@ impl Default for MemorySessionStorage {
 #[async_trait]
 impl SessionStorage for MemorySessionStorage {
     async fn get_metadata_json(&self) -> Result<Value, SessionError> {
-        Ok(serde_json::to_value(&self.metadata).unwrap())
+        // `SessionMetadata` is a plain struct of `String` fields, but its `Serialize` impl is
+        // still fallible in principle — report the failure instead of panicking on it.
+        serde_json::to_value(&self.metadata).map_err(|e| SessionError {
+            code: SessionErrorCode::StorageFailure,
+            message: format!("serialize session metadata: {e}"),
+        })
     }
 
     async fn get_leaf_id(&self) -> Result<Option<String>, SessionError> {

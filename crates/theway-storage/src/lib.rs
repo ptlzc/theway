@@ -8,6 +8,16 @@
 //! This crate depends only on leaf contracts, never on core or the transport
 //! stack.
 
+// Kernel code propagates errors instead of unwrapping; `clippy.toml` exempts `#[cfg(test)]`
+// modules and `#[test]` fns (`allow-unwrap-in-tests` / `allow-panic-in-tests`).
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::panic)]
+// The test build is exempt as a whole: rustc consumes a `#[cfg(test)]` written on a
+// `tests_bridge!` invocation before expanding it, so bridged mirror modules never carry the
+// attribute and clippy cannot recognise their fixture unwraps through `clippy.toml`. The plain
+// library target still carries both denies above, so every non-test line stays gated.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::panic))]
+
 //! Self-alias so bridged unit tests (tests_bridge) and lib code share one path
 //! shape (`theway_storage::…`), same pattern as theway-core / theway-daemon.
 extern crate self as theway_storage;

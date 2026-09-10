@@ -28,6 +28,13 @@ struct FakeToolInner {
 }
 
 impl FakeToolOps {
+    /// The fake's file / dir / memory maps, recovered from a poisoned lock.
+    ///
+    /// See [`FakeSessionOps::state`] for why the fake recovers instead of propagating.
+    fn state(&self) -> MutexGuard<'_, FakeToolInner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// New fake with a default exec script: one `ok\n` output chunk and a
     /// clean exit (code 0).
     pub fn new() -> Self {
@@ -47,40 +54,36 @@ impl FakeToolOps {
 
     /// Seed (or overwrite) a file in the fake FS.
     pub fn put_file(&self, path: &str, content: &str) {
-        self.inner
-            .lock()
-            .unwrap()
-            .files
-            .insert(path.to_string(), content.to_string());
+        let mut inner = self.state();
+        let key = path.to_string();
+        inner.files.insert(key, content.to_string());
     }
 
     /// Stored file content, if any.
     pub fn file_content(&self, path: &str) -> Option<String> {
-        self.inner.lock().unwrap().files.get(path).cloned()
+        self.state().files.get(path).cloned()
     }
 
     /// Seed a directory listing in the fake FS.
     pub fn seed_dir(&self, path: &str, entries: Vec<WireToolDirEntry>) {
-        self.inner
-            .lock()
-            .unwrap()
-            .dirs
-            .insert(path.to_string(), entries);
+        let mut inner = self.state();
+        let key = path.to_string();
+        inner.dirs.insert(key, entries);
     }
 
     /// Replace the exec frame script replayed by `exec_command`.
     pub fn set_exec_frames(&self, frames: Vec<WireToolExecFrame>) {
-        self.inner.lock().unwrap().exec_frames = frames;
+        self.state().exec_frames = frames;
     }
 
     /// The last exec request received.
     pub fn last_exec(&self) -> Option<WireToolExecRequest> {
-        self.inner.lock().unwrap().last_exec.clone()
+        self.state().last_exec.clone()
     }
 
     /// Every `skill_install` request received (preview and confirm).
     pub fn skill_installs(&self) -> Vec<WireToolSkillInstallRequest> {
-        self.inner.lock().unwrap().skill_installs.clone()
+        self.state().skill_installs.clone()
     }
 }
 
@@ -132,7 +135,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolReadRequest,
     ) -> Result<WireToolReadResult, ToolError> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let content = inner
             .files
             .get(&request.path)
@@ -166,7 +169,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolWriteRequest,
     ) -> Result<WireToolWriteResult, ToolError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         inner
             .files
             .insert(request.path.clone(), request.content.clone());
@@ -179,7 +182,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolEditRequest,
     ) -> Result<WireToolEditResult, ToolError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         if request.old_string.is_empty() {
             return Err(ToolError::InvalidArgument(
                 "old_string must not be empty".into(),
@@ -252,7 +255,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolExecRequest,
     ) -> Result<ToolExecStream, ToolError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         inner.last_exec = Some(request.clone());
         let mut frames = inner.exec_frames.clone();
         // The stream contract ends with an exit frame; guarantee one.
@@ -270,7 +273,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolListDirRequest,
     ) -> Result<WireToolListDirResult, ToolError> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let entries = inner
             .dirs
             .get(&request.path)
@@ -294,7 +297,7 @@ impl ToolOps for FakeToolOps {
                 "unknown output_mode: {mode}"
             )));
         }
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let mut paths: Vec<&String> = inner.files.keys().collect();
         paths.sort();
         let max = request.max_results.map(|m| m as usize);
@@ -346,7 +349,7 @@ impl ToolOps for FakeToolOps {
     }
 
     async fn find(&self, request: &WireToolFindRequest) -> Result<WireToolFindResult, ToolError> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let mut paths: Vec<&String> = inner.files.keys().collect();
         paths.sort();
         let mut matched = Vec::new();
@@ -377,7 +380,7 @@ impl ToolOps for FakeToolOps {
                 "memory name must not be empty".into(),
             ));
         }
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         inner.memory.insert(
             request.name.clone(),
             (
@@ -396,7 +399,7 @@ impl ToolOps for FakeToolOps {
         &self,
         _request: &WireToolMemoryListRequest,
     ) -> Result<WireToolMemoryListResult, ToolError> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let mut names: Vec<&String> = inner.memory.keys().collect();
         names.sort();
         let entries = names
@@ -418,7 +421,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolMemoryReadRequest,
     ) -> Result<WireToolMemoryReadResult, ToolError> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.state();
         let (content, _, _) = inner
             .memory
             .get(&request.name)
@@ -433,7 +436,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolMemoryForgetRequest,
     ) -> Result<WireToolMemoryForgetResult, ToolError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         Ok(WireToolMemoryForgetResult {
             removed: inner.memory.remove(&request.name).is_some(),
         })
@@ -443,7 +446,7 @@ impl ToolOps for FakeToolOps {
         &self,
         request: &WireToolSkillInstallRequest,
     ) -> Result<WireToolSkillInstallResult, ToolError> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.state();
         inner.skill_installs.push(request.clone());
         let (name, size, content_hash) = match &request.source {
             WireToolSkillSource::Url(url) => {

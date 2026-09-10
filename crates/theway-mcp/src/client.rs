@@ -101,8 +101,7 @@ impl McpClient {
                             Ok(v) => v,
                             Err(_) => continue,
                         };
-                        let id = value.get("id").and_then(|v| v.as_u64());
-                        if id.is_none() {
+                        let Some(id) = value.get("id").and_then(|v| v.as_u64()) else {
                             // Server-pushed notification (no `id` per JSON-RPC). Route it to
                             // the notification channel so the consumer (typically
                             // `McpNotificationHook` in `crates/harness`) can normalize
@@ -120,8 +119,7 @@ impl McpClient {
                                 .unwrap_or(serde_json::Value::Null);
                             let _ = pump_notify_tx.send(McpServerNotification { method, params });
                             continue;
-                        }
-                        let id = id.unwrap();
+                        };
                         let tx = pump_inflight.lock().remove(&id);
                         if let Some(tx) = tx {
                             if let Some(err) = value.get("error") {

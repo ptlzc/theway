@@ -292,7 +292,7 @@ impl StorageService for GrpcState {
             .list()
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-        let current_session_id = self.session_id.read().unwrap().clone();
+        let current_session_id = self.current_session_id();
         Ok(Response::new(ListSessionsResponse {
             sessions: sessions
                 .iter()
@@ -397,7 +397,7 @@ impl StorageService for GrpcState {
                 running.join(", ")
             )));
         }
-        if self.session_id.read().unwrap().clone() == full_id {
+        if self.current_session_id() == full_id {
             let remaining = self
                 .session_ops
                 .list()
@@ -407,7 +407,7 @@ impl StorageService for GrpcState {
                 .last()
                 .map(|s| s.session_id.clone())
                 .unwrap_or_default();
-            *self.session_id.write().unwrap() = fallback.clone();
+            self.set_current_session_id(fallback.clone());
             self.latest.lock().session_id = fallback.clone();
         }
         Ok(Response::new(DeleteSessionResponse {

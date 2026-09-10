@@ -94,13 +94,13 @@ pub fn convert_messages(msgs: &[Message]) -> Vec<Value> {
                 });
                 // Gemini groups consecutive functionResponses into one user content.
                 if let Some(last) = out.last_mut() {
-                    if last["role"] == "user"
-                        && last["parts"]
-                            .as_array()
-                            .is_some_and(|p| p.iter().any(|x| x.get("functionResponse").is_some()))
-                    {
-                        last["parts"].as_array_mut().unwrap().push(part);
-                        continue;
+                    if last["role"] == "user" {
+                        if let Some(parts) = last["parts"].as_array_mut() {
+                            if parts.iter().any(|x| x.get("functionResponse").is_some()) {
+                                parts.push(part);
+                                continue;
+                            }
+                        }
                     }
                 }
                 out.push(json!({ "role": "user", "parts": [part] }));

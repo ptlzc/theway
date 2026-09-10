@@ -22,6 +22,18 @@
 //!   re-export them) so storage and daemon can share them without depending on
 //!   the transport stack.
 
+// Lint gate: nothing in this crate may panic on the data it serves. A malformed or absent
+// payload is a protocol failure — it is returned as `Status`/`anyhow::Error`, never as a panic.
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::panic)]
+// The test-harness build is exempt. The mirrored suites under `tests/` are pulled into that build
+// by `tests_bridge!`, and rustc consumes a `#[cfg(test)]` written on a macro invocation *before*
+// expanding it: the expanded `mod tests` never carries the attribute, so clippy cannot recognise
+// those modules through `clippy.toml`'s `allow-unwrap-in-tests` / `allow-panic-in-tests` and would
+// report their fixture unwraps as library code. The plain library target still carries both denies
+// above, so every non-test line stays gated — `testing.rs` included, which is not `#[cfg(test)]`.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::panic))]
+
 // ── protocol zone: wire model + transport implementations ──
 pub mod client;
 pub mod external_protocol_ops;

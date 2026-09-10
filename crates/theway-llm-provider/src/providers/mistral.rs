@@ -261,7 +261,9 @@ async fn run(
         }
         if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
             for tc in tcs {
-                if tool_content_index.is_none() {
+                // First tool call of the message allocates the content block; later ones reuse
+                // it, so every `ToolCallDelta` below carries the index of that block.
+                let content_index = *tool_content_index.get_or_insert_with(|| {
                     let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     let name = tc
                         .pointer("/function/name")
@@ -274,17 +276,17 @@ async fn run(
                         arguments: Map::new(),
                         thought_signature: None,
                     }));
-                    tool_content_index = Some(i);
                     sender.push(AssistantMessageEvent::ToolCallStart {
                         content_index: i,
                         partial: partial.clone(),
                     });
-                }
+                    i
+                });
                 if let Some(args) = tc.pointer("/function/arguments").and_then(|v| v.as_str()) {
                     if !args.is_empty() {
                         tool_args.push_str(args);
                         sender.push(AssistantMessageEvent::ToolCallDelta {
-                            content_index: tool_content_index.unwrap(),
+                            content_index,
                             delta: args.to_string(),
                             partial: partial.clone(),
                         });

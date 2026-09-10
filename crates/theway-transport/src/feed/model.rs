@@ -527,12 +527,9 @@ impl Feed {
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, block)| matches!(block, Block::Thinking { .. }))
-            .map(|(index, block)| {
-                let Block::Thinking { text, .. } = block else {
-                    unreachable!("matched block must be Thinking");
-                };
-                (index, text.clone())
+            .find_map(|(index, block)| match block {
+                Block::Thinking { text, .. } => Some((index, text.clone())),
+                _ => None,
             })
     }
 

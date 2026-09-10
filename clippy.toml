@@ -1,0 +1,6 @@
+# Restriction lints (`unwrap_used`, `expect_used`, `panic`) are enforced on library code via
+# crate-level `#![deny(...)]`. Test code constructs fixtures with short-lived, immediately
+# provable unwraps, so the restriction lints exempt `#[cfg(test)]` modules and `#[test]` fns.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

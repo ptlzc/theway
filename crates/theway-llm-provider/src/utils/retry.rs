@@ -58,19 +58,14 @@ pub async fn send_with_retry(
 
     let mut attempt: u32 = 0;
     loop {
-        let attempt_req = match template.try_clone() {
-            Some(r) => r,
-            None => {
-                return Err(RetrySendError::Reqwest(
-                    // try_clone failed mid-loop — shouldn't happen since we proved it cloneable
-                    // above, but be defensive.
-                    reqwest::Client::new()
-                        .get("http://_")
-                        .build()
-                        .err()
-                        .unwrap(),
-                ));
-            }
+        // `try_clone` succeeded on the original request above, so `template` is replayable and
+        // this branch is unreachable while the body type stays clonable. A body that stops being
+        // cloneable mid-loop cannot be retried: degrade to the same single-shot send as the
+        // streaming-body path above instead of fabricating a transport error.
+        let Some(attempt_req) = template.try_clone() else {
+            return abort::send_or_abort(template, options.abort.as_ref())
+                .await
+                .map_err(retry_send_error);
         };
         let result = abort::send_or_abort(attempt_req, options.abort.as_ref()).await;
         match result {

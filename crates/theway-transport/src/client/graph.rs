@@ -184,9 +184,10 @@ impl GrpcClient {
             .await
             .map_err(|e| anyhow::anyhow!("get_session_graph_node: {e}"))?
             .into_inner();
-        Ok(response
-            .node
-            .expect("get_session_graph_node returned no node"))
+        let Some(node) = response.node else {
+            anyhow::bail!("get_session_graph_node returned no node {node_id}");
+        };
+        Ok(node)
     }
 
     /// List all messages attached to a session graph node (first page).

@@ -126,7 +126,7 @@ impl CommandService for GrpcState {
         request: Request<SendMessageRequest>,
     ) -> Result<Response<CommandResult>, Status> {
         let request = request.into_inner();
-        let current = self.session_id.read().unwrap().clone();
+        let current = self.current_session_id();
         let session_id = request
             .session_id
             .clone()
@@ -248,10 +248,31 @@ impl SettingsService for GrpcState {
 }
 
 impl GrpcState {
+    /// The owning session id, read without tripping on a poisoned lock.
+    ///
+    /// The guarded value is a `String` that is only ever replaced wholesale, so a panic in
+    /// another thread cannot leave it torn. Recovering the guard keeps `GetSnapshot`,
+    /// `GraphCheckpoint` and the session-resource RPCs serving the last written id instead of
+    /// failing every later call on a poisoned lock.
+    fn current_session_id(&self) -> String {
+        self.session_id
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Write side of [`Self::current_session_id`], with the same poison recovery.
+    fn set_current_session_id(&self, id: String) {
+        *self
+            .session_id
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = id;
+    }
+
     async fn resolve_session_id(&self, requested: &str) -> Result<String, Status> {
         let requested = requested.trim().to_string();
         if requested.is_empty() {
-            return Ok(self.session_id.read().unwrap().clone());
+            return Ok(self.current_session_id());
         }
         let sessions = self
             .session_ops
@@ -269,7 +290,7 @@ impl GrpcState {
 
     fn ensure_graph_run_in_session(&self, session_id: &str, run_id: &str) -> Result<(), Status> {
         let session_id = if session_id.trim().is_empty() {
-            self.session_id.read().unwrap().clone()
+            self.current_session_id()
         } else {
             session_id.to_string()
         };
@@ -409,7 +430,7 @@ impl GraphEngineService for GrpcState {
         let session_id = request
             .session_id
             .clone()
-            .unwrap_or_else(|| self.session_id.read().unwrap().clone());
+            .unwrap_or_else(|| self.current_session_id());
 
         let checkpoints = self
             .graph_ops
@@ -475,7 +496,7 @@ impl GraphEngineService for GrpcState {
         let request = request.into_inner();
         let session_id = match request.session_id.as_deref() {
             Some(id) if !id.trim().is_empty() => id.to_string(),
-            _ => self.session_id.read().unwrap().clone(),
+            _ => self.current_session_id(),
         };
         let removed = self
             .graph_ops

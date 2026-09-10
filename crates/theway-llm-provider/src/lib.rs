@@ -1,6 +1,16 @@
 //! theway-llm-provider — Rust port of `@earendil-works/theway-llm-provider`. 1:1 file mapping with the TypeScript source at
 //! `packages/ai/src/`. The barrel re-exports the public surface.
 
+// Kernel code propagates errors instead of unwrapping; `clippy.toml` exempts `#[cfg(test)]`
+// modules and `#[test]` fns (`allow-unwrap-in-tests` / `allow-panic-in-tests`).
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::panic)]
+// The test build is exempt as a whole: rustc consumes a `#[cfg(test)]` written on a
+// `tests_bridge!` invocation before expanding it, so bridged mirror modules never carry the
+// attribute and clippy cannot recognise their fixture unwraps through `clippy.toml`. The plain
+// library target still carries both denies above, so every non-test line stays gated.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::panic))]
+
 pub mod api_registry;
 #[cfg(feature = "amazon-bedrock")]
 pub mod bedrock_anthropic;
